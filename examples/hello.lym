@@ -1,0 +1,21 @@
+#!edition 0.1
+
+#[
+    Lymra port of the original concept sample.
+    Licensed under Apache 2.0.
+]#
+
+constant string author = "Cresmar Mat-an"
+
+function echo(string message) returns string
+    return message
+
+function main()
+    print("Hello, {author}")
+    print(echo("Sample 1"))
+
+    # A loop counter lives in a register, so it allocates nothing.
+    variable i64 counter = 1
+    while counter < 1_000_000
+        counter = counter + 1
+    print("{counter}")

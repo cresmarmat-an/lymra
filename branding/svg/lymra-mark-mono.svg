@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="64 64 384 384" role="img" aria-labelledby="title">
+<title id="title">Lymra</title>
+<path d="M132 96H182A6 6 0 0 1 188 102V324H410A6 6 0 0 1 416 330V380A36 36 0 0 1 380 416H132A36 36 0 0 1 96 380V132A36 36 0 0 1 132 96Z" fill="currentColor"/>
+<path d="M206 248H410A6 6 0 0 1 416 254V306A6 6 0 0 1 410 312H206A6 6 0 0 1 200 306V254A6 6 0 0 1 206 248Z" fill="currentColor"/>
+<path d="M206 172H410A6 6 0 0 1 416 178V230A6 6 0 0 1 410 236H206A6 6 0 0 1 200 230V178A6 6 0 0 1 206 172Z" fill="currentColor"/>
+<path d="M206 96H380A36 36 0 0 1 416 132V154A6 6 0 0 1 410 160H206A6 6 0 0 1 200 154V102A6 6 0 0 1 206 96Z" fill="currentColor"/>
+</svg>
