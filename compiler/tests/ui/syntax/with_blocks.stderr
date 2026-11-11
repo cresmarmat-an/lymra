@@ -1,0 +1,18 @@
+error[L0307]: a `with` block has to follow a call directly
+ --> tests/ui/syntax/with_blocks.lym:2:39
+  |
+2 |     constant total = 1 + sum(numbers) with n
+  |                                       ^^^^ no call ends right before this `with`
+  |
+help: give the block to a call, as in `filter(numbers) with n`
+
+error[L0307]: a `with` block has to follow a call directly
+ --> tests/ui/syntax/with_blocks.lym:4:13
+  |
+4 |     numbers with n
+  |             ^^^^ no call ends right before this `with`
+  |
+help: give the block to a call, as in `filter(numbers) with n`
+
+found 2 errors in tests/ui/syntax/with_blocks.lym
+run `lymra explain L0307` to read why a rule exists and how to fix it

@@ -1,0 +1,4 @@
+function main()
+    print('hello')
+    print('say "hi"')
+    constant apostrophe = don't

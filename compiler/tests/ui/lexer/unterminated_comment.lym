@@ -1,0 +1,7 @@
+function main()
+    go()
+
+#[ This comment is never closed.
+
+function hidden()
+    go()

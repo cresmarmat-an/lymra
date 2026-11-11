@@ -1,0 +1,9 @@
+function main()
+    if ready && armed || !safe
+        launch()
+    if a === b
+        same()
+    if a !== b
+        different()
+    if x&&y
+        both()

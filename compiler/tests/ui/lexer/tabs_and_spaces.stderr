@@ -1,0 +1,22 @@
+error[L0102]: this line is indented with tabs, but the file indents with spaces
+ --> tests/ui/lexer/tabs_and_spaces.lym:3:1
+  |
+2 |     print("spaces first")
+  | ---- the file starts indenting with spaces here
+3 |     print("then a tab")
+  | ^^^^ tabs here
+  |
+help: indent this line with spaces
+  |
+3 |     print("then a tab")
+
+error[L0102]: this line is indented with both tabs and spaces
+ --> tests/ui/lexer/tabs_and_spaces.lym:4:1
+  |
+4 |       print("both on one line")
+  | ^^^^^^ tabs and spaces together
+  |
+help: indent with tabs only or with spaces only, the same way in the whole file
+
+found 2 errors in tests/ui/lexer/tabs_and_spaces.lym
+run `lymra explain L0102` to read why a rule exists and how to fix it

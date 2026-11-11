@@ -1,0 +1,23 @@
+use Math.geometry
+use math.myItem
+
+constant MAX_SIZE = 10
+
+type frog_pond
+    unsigned32 FrogCount
+
+choice shape_kind
+    small_dot
+    BigCircle(float64 Radius)
+
+function CountFrogs(frog_pond thePond, integer64 _) returns unsigned32
+    variable HTTPCount = 0
+    constant _ = thePond
+    for EachFrog in thePond.frogs
+        HTTPCount = HTTPCount + 1
+    match kind
+        case BigCircle(R)
+            go()
+    constant kept = filter(numbers) with N
+        N > 0
+    return HTTPCount

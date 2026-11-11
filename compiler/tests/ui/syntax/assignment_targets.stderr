@@ -1,0 +1,42 @@
+error[L0308]: cannot assign to this expression
+ --> tests/ui/syntax/assignment_targets.lym:2:5
+  |
+2 |     area(2, 3) = 6
+  |     ^^^^^^^^^^ not a name, a field or an element
+  |
+help: assign to `name`, `item.field` or `items[i]`; to compare two values, write `==`
+
+error[L0308]: cannot assign to this expression
+ --> tests/ui/syntax/assignment_targets.lym:3:5
+  |
+3 |     1 = total
+  |     ^ not a name, a field or an element
+  |
+help: assign to `name`, `item.field` or `items[i]`; to compare two values, write `==`
+
+error[L0308]: cannot assign to this expression
+ --> tests/ui/syntax/assignment_targets.lym:4:5
+  |
+4 |     a + b = c
+  |     ^^^^^ not a name, a field or an element
+  |
+help: assign to `name`, `item.field` or `items[i]`; to compare two values, write `==`
+
+error[L0308]: `variable` has to mark a binding the call may change
+ --> tests/ui/syntax/assignment_targets.lym:5:23
+  |
+5 |     add_item(variable 5, 7)
+  |                       ^ not a name, a field or an element
+  |
+help: pass a binding, as in `add_item(variable numbers, 7)`, or remove `variable`
+
+error[L0308]: `variable` has to mark a binding the call may change
+ --> tests/ui/syntax/assignment_targets.lym:6:23
+  |
+6 |     add_item(variable make_list(), 7)
+  |                       ^^^^^^^^^^^ not a name, a field or an element
+  |
+help: pass a binding, as in `add_item(variable numbers, 7)`, or remove `variable`
+
+found 5 errors in tests/ui/syntax/assignment_targets.lym
+run `lymra explain L0308` to read why a rule exists and how to fix it

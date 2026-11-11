@@ -1,0 +1,16 @@
+type Pair
+    integer64 first
+    integer64 second
+
+choice Shape
+    Dot()
+    Circle(float64 radius,)
+
+function add(a, integer64 b) returns integer64
+    return a + b
+
+function main()
+    constant empty = ()
+    constant pair = Pair(first = 1, second = 2,)
+    constant list[] numbers = list()
+    constant fine = add(1, 2)

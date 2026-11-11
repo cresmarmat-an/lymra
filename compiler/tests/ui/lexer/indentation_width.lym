@@ -1,0 +1,6 @@
+function main()
+    print("the first indented line sets the width")
+      print("six spaces")
+    if ready
+       go()
+    print("back to four")

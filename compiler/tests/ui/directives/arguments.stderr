@@ -1,0 +1,76 @@
+error[L0106]: `#!edition` needs a version
+ --> tests/ui/directives/arguments.lym:1:1
+  |
+1 | #!edition
+  | ^^^^^^^^^ no version given
+  |
+help: name the edition this file is written for
+  |
+1 | #!edition 0.1
+
+error[L0106]: edition `2.0` is not supported
+ --> tests/ui/directives/arguments.lym:2:1
+  |
+2 | #!edition 2.0
+  | ^^^^^^^^^^^^^ this compiler implements edition 0.1
+  |
+help: use edition 0.1
+  |
+2 | #!edition 0.1
+
+error[L0106]: `fast` is not an optimization mode
+ --> tests/ui/directives/arguments.lym:3:1
+  |
+3 | #!optimize fast
+  | ^^^^^^^^^^^^^^^ the modes are `speed`, `size` and `debug`
+  |
+help: write `#!optimize speed`, `#!optimize size` or `#!optimize debug`
+
+error[L0106]: `sped` is not an optimization mode
+ --> tests/ui/directives/arguments.lym:4:1
+  |
+4 | #!optimize sped
+  | ^^^^^^^^^^^^^^^ the modes are `speed`, `size` and `debug`
+  |
+help: did you mean `speed`?
+  |
+4 | #!optimize speed
+
+error[L0106]: `#!optimize` takes exactly one mode
+ --> tests/ui/directives/arguments.lym:5:1
+  |
+5 | #!optimize
+  | ^^^^^^^^^^ expected one word after `#!optimize`
+  |
+help: write `#!optimize speed`, `#!optimize size` or `#!optimize debug`
+
+error[L0106]: `#!optimize` takes exactly one mode
+ --> tests/ui/directives/arguments.lym:6:1
+  |
+6 | #!optimize speed size
+  | ^^^^^^^^^^^^^^^^^^^^^ expected one word after `#!optimize`
+  |
+help: write `#!optimize speed`, `#!optimize size` or `#!optimize debug`
+
+error[L0106]: `#!prove` can only prove `bounds`
+ --> tests/ui/directives/arguments.lym:7:1
+  |
+7 | #!prove everything
+  | ^^^^^^^^^^^^^^^^^^ expected `#!prove bounds`
+  |
+help: write `#!prove bounds`
+  |
+7 | #!prove bounds
+
+error[L0106]: `#!prove` is given twice
+ --> tests/ui/directives/arguments.lym:9:1
+  |
+8 | #!prove bounds  # a comment after a directive is fine
+  | -------------- first use
+9 | #!prove bounds
+  | ^^^^^^^^^^^^^^ second use
+  |
+help: remove one of them
+
+found 8 errors in tests/ui/directives/arguments.lym
+run `lymra explain L0106` to read why a rule exists and how to fix it

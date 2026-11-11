@@ -1,0 +1,20 @@
+import math.geometry
+
+pub struct Frog
+    string name
+
+enum Shape
+    Dot
+
+const limit = 10
+pub fn helper()
+    return
+
+fn main() -> integer64
+    let total = 0
+    var count = 1
+    if total == 0 then
+        count = 2
+    elif total == 1:
+        count = 3
+    return count

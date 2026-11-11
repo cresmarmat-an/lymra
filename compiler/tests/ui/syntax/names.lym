@@ -1,0 +1,8 @@
+function type()
+    go()
+
+function main()
+    variable if = 1
+    constant integer64 return = 2
+    for while in items
+        go()

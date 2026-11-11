@@ -1,0 +1,7 @@
+#!edition 0.1
+
+function main()
+    #!optimize speed
+    go()
+
+#!prove bounds

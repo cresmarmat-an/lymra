@@ -1,0 +1,6 @@
+function main()
+    string name = "Kero"
+    list[integer32] numbers = list()
+    geometry.Shape shape = load()
+    varible count = 0
+    name = "assignment is fine"

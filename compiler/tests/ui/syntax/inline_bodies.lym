@@ -1,0 +1,4 @@
+function main()
+    if ready go()
+    while true go()
+    for item in items print(item)

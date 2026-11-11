@@ -1,0 +1,7 @@
+type Frog
+    name: string
+    unsigned8 age
+
+function grow(frog: Frog, years: unsigned8) returns Frog
+    variable total: integer64 = 0
+    return frog

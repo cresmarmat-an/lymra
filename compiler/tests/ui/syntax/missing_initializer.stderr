@@ -1,0 +1,34 @@
+error[L0204]: `total` is declared without a value
+ --> tests/ui/syntax/missing_initializer.lym:2:5
+  |
+2 |     variable integer64 total
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^ a declaration has to give its binding a value
+  |
+help: write `= <value>` after `total`; Lymra has no uninitialized bindings
+
+error[L0204]: `count` is declared without a value
+ --> tests/ui/syntax/missing_initializer.lym:3:5
+  |
+3 |     variable count
+  |     ^^^^^^^^^^^^^^ a declaration has to give its binding a value
+  |
+help: write `= <value>` after `count`; Lymra has no uninitialized bindings
+
+error[L0204]: `numbers` is declared without a value
+ --> tests/ui/syntax/missing_initializer.lym:4:5
+  |
+4 |     constant list[integer32] numbers
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ a declaration has to give its binding a value
+  |
+help: write `= <value>` after `numbers`; Lymra has no uninitialized bindings
+
+error[L0301]: expected `=`, found number `10`
+ --> tests/ui/syntax/missing_initializer.lym:5:30
+  |
+5 |     variable integer64 limit 10
+  |                              ^^ expected `=`
+  |
+help: give the binding its value with `= <value>`
+
+found 4 errors in tests/ui/syntax/missing_initializer.lym
+run `lymra explain L0204` to read why a rule exists and how to fix it

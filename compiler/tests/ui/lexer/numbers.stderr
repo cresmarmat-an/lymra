@@ -1,0 +1,120 @@
+error[L0114]: a decimal number cannot start with `0`
+ --> tests/ui/lexer/numbers.lym:2:29
+  |
+2 |     constant leading_zero = 007
+  |                             ^^^
+  |
+help: remove the leading zeros; they do not make the number octal
+  |
+2 |     constant leading_zero = 7
+
+error[L0114]: a float needs a decimal point
+ --> tests/ui/lexer/numbers.lym:3:25
+  |
+3 |     constant no_point = 1e9
+  |                         ^^^
+  |
+help: write the digits after the point, even when they are zero
+  |
+3 |     constant no_point = 1.0e9
+
+error[L0114]: a number cannot carry a type suffix
+ --> tests/ui/lexer/numbers.lym:4:23
+  |
+4 |     constant suffix = 42u8
+  |                       ^^^^
+  |
+help: write the type in the declaration, for example `constant unsigned8 value = 42`
+  |
+4 |     constant suffix = 42
+
+error[L0114]: misplaced `_` in a number
+ --> tests/ui/lexer/numbers.lym:5:34
+  |
+5 |     constant double_underscore = 1__000
+  |                                  ^^^^^^
+  |
+help: use a single `_` between digits, as in `1_000_000`
+  |
+5 |     constant double_underscore = 1000
+
+error[L0114]: misplaced `_` in a number
+ --> tests/ui/lexer/numbers.lym:6:36
+  |
+6 |     constant trailing_underscore = 100_
+  |                                    ^^^^
+  |
+help: use a single `_` between digits, as in `1_000_000`
+  |
+6 |     constant trailing_underscore = 100
+
+error[L0114]: the number prefix `0X` must be lowercase
+ --> tests/ui/lexer/numbers.lym:7:23
+  |
+7 |     constant prefix = 0XFF
+  |                       ^^^^
+  |
+help: write `0x`
+  |
+7 |     constant prefix = 0xFF
+
+error[L0114]: octal numbers are not part of Lymra
+ --> tests/ui/lexer/numbers.lym:8:22
+  |
+8 |     constant octal = 0o17
+  |                      ^^^^
+  |
+help: write the value in decimal, hexadecimal (`0x`) or binary (`0b`)
+
+error[L0114]: `0x` has no digits after it
+ --> tests/ui/lexer/numbers.lym:9:26
+  |
+9 |     constant no_digits = 0x
+  |                          ^^
+  |
+help: add hexadecimal digits after `0x`
+
+error[L0114]: `2` is not a binary digit
+  --> tests/ui/lexer/numbers.lym:10:26
+   |
+10 |     constant bad_digit = 0b102
+   |                          ^^^^^
+   |
+help: binary digits are 0 and 1
+
+error[L0114]: `12abc` is not a number
+  --> tests/ui/lexer/numbers.lym:11:24
+   |
+11 |     constant letters = 12abc
+   |                        ^^^^^
+   |
+help: a number cannot run straight into letters: remove `abc` or put a space or an operator before it
+
+error[L0114]: the exponent marker `E` must be lowercase
+  --> tests/ui/lexer/numbers.lym:12:25
+   |
+12 |     constant exponent = 1.5E3
+   |                         ^^^^^
+   |
+help: write `e`
+   |
+12 |     constant exponent = 1.5e3
+
+error[L0114]: this integer is too large for any integer type
+  --> tests/ui/lexer/numbers.lym:13:21
+   |
+13 |     constant huge = 18446744073709551616
+   |                     ^^^^^^^^^^^^^^^^^^^^
+   |
+help: the largest integer, an `unsigned64`, is 18446744073709551615
+
+error[L0114]: this float is too large for a `float64`
+  --> tests/ui/lexer/numbers.lym:14:27
+   |
+14 |     constant huge_float = 1.0e999
+   |                           ^^^^^^^
+   |
+help: the largest `float64` is about 1.8e308
+
+found 13 errors in tests/ui/lexer/numbers.lym
+run `lymra explain L0114` to read why a rule exists and how to fix it

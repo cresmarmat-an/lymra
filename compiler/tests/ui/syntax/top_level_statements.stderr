@@ -1,0 +1,28 @@
+error[L0302]: this statement is outside a function
+ --> tests/ui/syntax/top_level_statements.lym:1:1
+  |
+1 | print("this runs when?")
+  | ^^^^^^^^^^^^^^^^^^^^^^^^ only declarations can be at the top level of a file
+  |
+help: move it into a function; a program starts in `function main()`
+
+error[L0302]: this statement is outside a function
+ --> tests/ui/syntax/top_level_statements.lym:5:1
+  |
+5 | if limit > 5
+  | ^^^^^^^^^^^^ only declarations can be at the top level of a file
+  |
+help: move it into a function; a program starts in `function main()`
+
+error[L0205]: a `variable` cannot be declared outside a function
+ --> tests/ui/syntax/top_level_statements.lym:8:1
+  |
+8 | variable counter = 0
+  | ^^^^^^^^ changeable state at the top level of a file
+  |
+help: make it a `constant` if it never changes, or declare it inside the function that uses it
+  |
+8 | constant counter = 0
+
+found 3 errors in tests/ui/syntax/top_level_statements.lym
+run `lymra explain L0302` to read why a rule exists and how to fix it

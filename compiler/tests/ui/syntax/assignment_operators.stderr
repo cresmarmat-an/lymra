@@ -1,0 +1,52 @@
+error[L0305]: `+=` is not a Lymra operator
+ --> tests/ui/syntax/assignment_operators.lym:3:11
+  |
+3 |     count += 1
+  |           ^^ assignment is always written with a plain `=`
+  |
+help: spell the operation out
+  |
+3 |     count = count + 1
+
+error[L0305]: `-=` is not a Lymra operator
+ --> tests/ui/syntax/assignment_operators.lym:4:11
+  |
+4 |     count -= 2 * 3
+  |           ^^ assignment is always written with a plain `=`
+  |
+help: spell the operation out
+  |
+4 |     count = count - (2 * 3)
+
+error[L0305]: `*=` is not a Lymra operator
+ --> tests/ui/syntax/assignment_operators.lym:5:11
+  |
+5 |     count *= count + 1
+  |           ^^ assignment is always written with a plain `=`
+  |
+help: spell the operation out
+  |
+5 |     count = count * (count + 1)
+
+error[L0305]: `++` is not a Lymra operator
+ --> tests/ui/syntax/assignment_operators.lym:6:10
+  |
+6 |     count++
+  |          ^^ assignment is always written with a plain `=`
+  |
+help: spell the operation out
+  |
+6 |     count = count + 1
+
+error[L0305]: `--` is not a Lymra operator
+ --> tests/ui/syntax/assignment_operators.lym:7:10
+  |
+7 |     count--
+  |          ^^ assignment is always written with a plain `=`
+  |
+help: spell the operation out
+  |
+7 |     count = count - 1
+
+found 5 errors in tests/ui/syntax/assignment_operators.lym
+run `lymra explain L0305` to read why a rule exists and how to fix it

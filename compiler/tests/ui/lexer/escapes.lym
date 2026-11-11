@@ -1,0 +1,5 @@
+function main()
+    constant path = "C:\Users\kero"
+    constant brace = "\{literal\}"
+    constant quote = "it\'s"
+    constant fine = "tab\there, quote \", backslash \\, newline\n"

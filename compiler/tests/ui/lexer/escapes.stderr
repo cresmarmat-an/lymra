@@ -1,0 +1,52 @@
+error[L0112]: unknown escape `\U`
+ --> tests/ui/lexer/escapes.lym:2:24
+  |
+2 |     constant path = "C:\Users\kero"
+  |                        ^^ not an escape Lymra knows
+  |
+help: write `\\` for a backslash; the escapes are `\n` `\t` `\r` `\0` `\\` `\"`
+  |
+2 |     constant path = "C:\\Users\kero"
+
+error[L0112]: unknown escape `\k`
+ --> tests/ui/lexer/escapes.lym:2:30
+  |
+2 |     constant path = "C:\Users\kero"
+  |                              ^^ not an escape Lymra knows
+  |
+help: write `\\` for a backslash; the escapes are `\n` `\t` `\r` `\0` `\\` `\"`
+  |
+2 |     constant path = "C:\Users\\kero"
+
+error[L0112]: unknown escape `\{`
+ --> tests/ui/lexer/escapes.lym:3:23
+  |
+3 |     constant brace = "\{literal\}"
+  |                       ^^ not an escape Lymra knows
+  |
+help: write `{{` for a literal brace
+  |
+3 |     constant brace = "{{literal\}"
+
+error[L0112]: unknown escape `\}`
+ --> tests/ui/lexer/escapes.lym:3:32
+  |
+3 |     constant brace = "\{literal\}"
+  |                                ^^ not an escape Lymra knows
+  |
+help: write `}}` for a literal brace
+  |
+3 |     constant brace = "\{literal}}"
+
+error[L0112]: unknown escape `\'`
+ --> tests/ui/lexer/escapes.lym:4:25
+  |
+4 |     constant quote = "it\'s"
+  |                         ^^ not an escape Lymra knows
+  |
+help: a single quote needs no backslash
+  |
+4 |     constant quote = "it's"
+
+found 5 errors in tests/ui/lexer/escapes.lym
+run `lymra explain L0112` to read why a rule exists and how to fix it

@@ -1,0 +1,20 @@
+error[L0305]: `//` does not start a comment in Lymra
+ --> tests/ui/lexer/foreign_comments.lym:2:20
+  |
+2 |     constant a = 1 // a C-style comment
+  |                    ^^ the rest of this line was skipped as if it were a comment
+  |
+help: start the comment with `#`
+  |
+2 |     constant a = 1 # a C-style comment
+
+error[L0305]: `/*` does not start a comment in Lymra
+ --> tests/ui/lexer/foreign_comments.lym:3:5
+  |
+3 |     /* a C-style
+  |     ^^ this comment was skipped
+  |
+help: write a multiline comment as `#[ ... ]#`
+
+found 2 errors in tests/ui/lexer/foreign_comments.lym
+run `lymra explain L0305` to read why a rule exists and how to fix it

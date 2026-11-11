@@ -1,0 +1,62 @@
+error[L0305]: `&&` is not a Lymra operator
+ --> tests/ui/lexer/foreign_operators.lym:2:14
+  |
+2 |     if ready && armed || !safe
+  |              ^^ Lymra spells this `and`
+  |
+help: write `and`
+  |
+2 |     if ready and armed || !safe
+
+error[L0305]: `||` is not a Lymra operator
+ --> tests/ui/lexer/foreign_operators.lym:2:23
+  |
+2 |     if ready && armed || !safe
+  |                       ^^ Lymra spells this `or`
+  |
+help: write `or`
+  |
+2 |     if ready && armed or !safe
+
+error[L0305]: `!` is not a Lymra operator
+ --> tests/ui/lexer/foreign_operators.lym:2:26
+  |
+2 |     if ready && armed || !safe
+  |                          ^ Lymra spells this `not`
+  |
+help: write `not`
+  |
+2 |     if ready && armed || not safe
+
+error[L0305]: `===` is not a Lymra operator
+ --> tests/ui/lexer/foreign_operators.lym:4:10
+  |
+4 |     if a === b
+  |          ^^^ Lymra spells this `==`
+  |
+help: write `==`
+  |
+4 |     if a == b
+
+error[L0305]: `!==` is not a Lymra operator
+ --> tests/ui/lexer/foreign_operators.lym:6:10
+  |
+6 |     if a !== b
+  |          ^^^ Lymra spells this `!=`
+  |
+help: write `!=`
+  |
+6 |     if a != b
+
+error[L0305]: `&&` is not a Lymra operator
+ --> tests/ui/lexer/foreign_operators.lym:8:9
+  |
+8 |     if x&&y
+  |         ^^ Lymra spells this `and`
+  |
+help: write `and`
+  |
+8 |     if x and y
+
+found 6 errors in tests/ui/lexer/foreign_operators.lym
+run `lymra explain L0305` to read why a rule exists and how to fix it

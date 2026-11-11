@@ -1,0 +1,40 @@
+error[L0305]: `;` does not end a statement in Lymra
+ --> tests/ui/syntax/semicolons.lym:2:19
+  |
+2 |     constant a = 1;
+  |                   ^ a statement ends at the end of its line
+  |
+help: remove `;`
+  |
+2 |     constant a = 1
+
+error[L0305]: `;` does not end a statement in Lymra
+ --> tests/ui/syntax/semicolons.lym:3:19
+  |
+3 |     constant b = 2; constant c = 3
+  |                   ^ a statement ends at the end of its line
+  |
+help: put each statement on its own line, without `;`
+
+error[L0305]: `;` does not end a statement in Lymra
+ --> tests/ui/syntax/semicolons.lym:4:9
+  |
+4 |     go();
+  |         ^ a statement ends at the end of its line
+  |
+help: remove `;`
+  |
+4 |     go()
+
+error[L0305]: `;` does not end a statement in Lymra
+ --> tests/ui/syntax/semicolons.lym:5:11
+  |
+5 |     return;
+  |           ^ a statement ends at the end of its line
+  |
+help: remove `;`
+  |
+5 |     return
+
+found 4 errors in tests/ui/syntax/semicolons.lym
+run `lymra explain L0305` to read why a rule exists and how to fix it

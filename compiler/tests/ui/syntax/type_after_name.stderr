@@ -1,0 +1,42 @@
+error[L0305]: the type goes before the name in Lymra
+ --> tests/ui/syntax/type_after_name.lym:2:5
+  |
+2 |     name: string
+  |     ^^^^^^^^^^^^ written as `name: type` here
+  |
+help: write the type first, without `:`
+  |
+2 |     string name
+
+error[L0305]: the type goes before the name in Lymra
+ --> tests/ui/syntax/type_after_name.lym:5:15
+  |
+5 | function grow(frog: Frog, years: unsigned8) returns Frog
+  |               ^^^^^^^^^^ written as `name: type` here
+  |
+help: write the type first, without `:`
+  |
+5 | function grow(Frog frog, years: unsigned8) returns Frog
+
+error[L0305]: the type goes before the name in Lymra
+ --> tests/ui/syntax/type_after_name.lym:5:27
+  |
+5 | function grow(frog: Frog, years: unsigned8) returns Frog
+  |                           ^^^^^^^^^^^^^^^^ written as `name: type` here
+  |
+help: write the type first, without `:`
+  |
+5 | function grow(frog: Frog, unsigned8 years) returns Frog
+
+error[L0305]: the type goes before the name in Lymra
+ --> tests/ui/syntax/type_after_name.lym:6:14
+  |
+6 |     variable total: integer64 = 0
+  |              ^^^^^^^^^^^^^^^^ written as `name: type` here
+  |
+help: write the type first, without `:`
+  |
+6 |     variable integer64 total = 0
+
+found 4 errors in tests/ui/syntax/type_after_name.lym
+run `lymra explain L0305` to read why a rule exists and how to fix it

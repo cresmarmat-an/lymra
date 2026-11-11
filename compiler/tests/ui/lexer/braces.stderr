@@ -1,0 +1,22 @@
+error[L0305]: `{` does not open a block in Lymra
+ --> tests/ui/lexer/braces.lym:1:17
+  |
+1 | function main() {
+  |                 ^ blocks are defined by indentation
+  |
+help: remove the braces and indent the lines of the block
+  |
+1 | function main()
+
+error[L0305]: `{` does not open a block in Lymra
+ --> tests/ui/lexer/braces.lym:2:14
+  |
+2 |     if ready {
+  |              ^ blocks are defined by indentation
+  |
+help: remove the braces and indent the lines of the block
+  |
+2 |     if ready
+
+found 2 errors in tests/ui/lexer/braces.lym
+run `lymra explain L0305` to read why a rule exists and how to fix it

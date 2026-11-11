@@ -1,0 +1,10 @@
+error[L0305]: `}` does not close a block in Lymra
+ --> tests/ui/lexer/stray_closing_brace.lym:3:1
+  |
+3 | }
+  | ^ blocks are defined by indentation
+  |
+help: remove the braces and indent the lines of the block
+
+found 1 error in tests/ui/lexer/stray_closing_brace.lym
+run `lymra explain L0305` to read why a rule exists and how to fix it

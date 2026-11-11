@@ -1,0 +1,56 @@
+error[L0301]: a variant without fields is written without parentheses
+ --> tests/ui/syntax/lists.lym:6:8
+  |
+6 |     Dot()
+  |        ^^ nothing between `(` and `)`
+  |
+help: remove the parentheses
+  |
+6 |     Dot
+
+error[L0301]: a list cannot end with a comma
+ --> tests/ui/syntax/lists.lym:7:26
+  |
+7 |     Circle(float64 radius,)
+  |                          ^ nothing follows this comma
+  |
+help: remove the comma
+  |
+7 |     Circle(float64 radius)
+
+error[L0301]: parameter `a` has no type
+ --> tests/ui/syntax/lists.lym:9:14
+  |
+9 | function add(a, integer64 b) returns integer64
+  |              ^ a type has to come before this name
+  |
+help: write the type first, for example `integer64 a`
+
+error[L0301]: empty parentheses
+  --> tests/ui/syntax/lists.lym:13:22
+   |
+13 |     constant empty = ()
+   |                      ^^ no expression between `(` and `)`
+   |
+help: write a value inside the parentheses, or remove them
+
+error[L0301]: a list cannot end with a comma
+  --> tests/ui/syntax/lists.lym:14:47
+   |
+14 |     constant pair = Pair(first = 1, second = 2,)
+   |                                               ^ nothing follows this comma
+   |
+help: remove the comma
+   |
+14 |     constant pair = Pair(first = 1, second = 2)
+
+error[L0301]: empty type argument list
+  --> tests/ui/syntax/lists.lym:15:18
+   |
+15 |     constant list[] numbers = list()
+   |                  ^^ no type between `[` and `]`
+   |
+help: write what the type holds, as in `list[integer32]`
+
+found 6 errors in tests/ui/syntax/lists.lym
+run `lymra explain L0301` to read why a rule exists and how to fix it

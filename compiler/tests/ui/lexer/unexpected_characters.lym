@@ -1,0 +1,6 @@
+function main()
+    constant price = $100
+    constant café = "open"
+    constant gap = 1
+    constant hidden​ = 2
+    constant ok = "any text is fine here: $ é ✓"

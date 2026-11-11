@@ -1,0 +1,7 @@
+function main()
+    constant total = 1 + sum(numbers) with n
+        n * 2
+    numbers with n
+        n * 2
+    constant evens = filter(numbers) with n
+        n % 2 == 0

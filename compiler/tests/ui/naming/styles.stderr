@@ -1,0 +1,142 @@
+error[L0103]: module name `Math` should be written `math`
+ --> tests/ui/naming/styles.lym:1:5
+  |
+1 | use Math.geometry
+  |     ^^^^ module names are snake_case
+  |
+help: rename it here and everywhere it is used
+  |
+1 | use math.geometry
+
+error[L0103]: imported name `myItem` should be written `my_item`
+ --> tests/ui/naming/styles.lym:2:10
+  |
+2 | use math.myItem
+  |          ^^^^^^ imported names are snake_case
+  |
+help: rename it here and everywhere it is used
+  |
+2 | use math.my_item
+
+error[L0103]: constant name `MAX_SIZE` should be written `max_size`
+ --> tests/ui/naming/styles.lym:4:10
+  |
+4 | constant MAX_SIZE = 10
+  |          ^^^^^^^^ constant names are snake_case
+  |
+help: rename it here and everywhere it is used
+  |
+4 | constant max_size = 10
+
+error[L0103]: type name `frog_pond` should be written `FrogPond`
+ --> tests/ui/naming/styles.lym:6:6
+  |
+6 | type frog_pond
+  |      ^^^^^^^^^ type names are PascalCase
+  |
+help: rename it here and everywhere it is used
+  |
+6 | type FrogPond
+
+error[L0103]: field name `FrogCount` should be written `frog_count`
+ --> tests/ui/naming/styles.lym:7:16
+  |
+7 |     unsigned32 FrogCount
+  |                ^^^^^^^^^ field names are snake_case
+  |
+help: rename it here and everywhere it is used
+  |
+7 |     unsigned32 frog_count
+
+error[L0103]: choice name `shape_kind` should be written `ShapeKind`
+ --> tests/ui/naming/styles.lym:9:8
+  |
+9 | choice shape_kind
+  |        ^^^^^^^^^^ choice names are PascalCase
+  |
+help: rename it here and everywhere it is used
+  |
+9 | choice ShapeKind
+
+error[L0103]: variant name `small_dot` should be written `SmallDot`
+  --> tests/ui/naming/styles.lym:10:5
+   |
+10 |     small_dot
+   |     ^^^^^^^^^ variant names are PascalCase
+   |
+help: rename it here and everywhere it is used
+   |
+10 |     SmallDot
+
+error[L0103]: field name `Radius` should be written `radius`
+  --> tests/ui/naming/styles.lym:11:23
+   |
+11 |     BigCircle(float64 Radius)
+   |                       ^^^^^^ field names are snake_case
+   |
+help: rename it here and everywhere it is used
+   |
+11 |     BigCircle(float64 radius)
+
+error[L0103]: function name `CountFrogs` should be written `count_frogs`
+  --> tests/ui/naming/styles.lym:13:10
+   |
+13 | function CountFrogs(frog_pond thePond, integer64 _) returns unsigned32
+   |          ^^^^^^^^^^ function names are snake_case
+   |
+help: rename it here and everywhere it is used
+   |
+13 | function count_frogs(frog_pond thePond, integer64 _) returns unsigned32
+
+error[L0103]: parameter name `thePond` should be written `the_pond`
+  --> tests/ui/naming/styles.lym:13:31
+   |
+13 | function CountFrogs(frog_pond thePond, integer64 _) returns unsigned32
+   |                               ^^^^^^^ parameter names are snake_case
+   |
+help: rename it here and everywhere it is used
+   |
+13 | function CountFrogs(frog_pond the_pond, integer64 _) returns unsigned32
+
+error[L0103]: variable name `HTTPCount` should be written `http_count`
+  --> tests/ui/naming/styles.lym:14:14
+   |
+14 |     variable HTTPCount = 0
+   |              ^^^^^^^^^ variable names are snake_case
+   |
+help: rename it here and everywhere it is used
+   |
+14 |     variable http_count = 0
+
+error[L0103]: loop variable name `EachFrog` should be written `each_frog`
+  --> tests/ui/naming/styles.lym:16:9
+   |
+16 |     for EachFrog in thePond.frogs
+   |         ^^^^^^^^ loop variable names are snake_case
+   |
+help: rename it here and everywhere it is used
+   |
+16 |     for each_frog in thePond.frogs
+
+error[L0103]: binding name `R` should be written `r`
+  --> tests/ui/naming/styles.lym:19:24
+   |
+19 |         case BigCircle(R)
+   |                        ^ binding names are snake_case
+   |
+help: rename it here and everywhere it is used
+   |
+19 |         case BigCircle(r)
+
+error[L0103]: block parameter name `N` should be written `n`
+  --> tests/ui/naming/styles.lym:21:42
+   |
+21 |     constant kept = filter(numbers) with N
+   |                                          ^ block parameter names are snake_case
+   |
+help: rename it here and everywhere it is used
+   |
+21 |     constant kept = filter(numbers) with n
+
+found 14 errors in tests/ui/naming/styles.lym
+run `lymra explain L0103` to read why a rule exists and how to fix it

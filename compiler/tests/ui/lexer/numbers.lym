@@ -1,0 +1,16 @@
+function main()
+    constant leading_zero = 007
+    constant no_point = 1e9
+    constant suffix = 42u8
+    constant double_underscore = 1__000
+    constant trailing_underscore = 100_
+    constant prefix = 0XFF
+    constant octal = 0o17
+    constant no_digits = 0x
+    constant bad_digit = 0b102
+    constant letters = 12abc
+    constant exponent = 1.5E3
+    constant huge = 18446744073709551616
+    constant huge_float = 1.0e999
+    constant fine = 1_000 + 0xFF + 0b1010 + 2
+    constant fine_float = 3.14 + 1.0e-9

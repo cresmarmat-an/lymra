@@ -1,0 +1,71 @@
+module
+  directive edition 0.1
+  directive optimize speed
+  directive prove bounds
+  use math.geometry
+  use math.geometry.area
+  public constant string greeting = (text "Hi")
+  constant limit = 1000000
+  constant mask = (+ 255 10)
+  constant tiny = 1e-9
+  type Item
+    field string sku
+    field unsigned32 quantity
+  public type Order
+    field unsigned64 id
+    field string customer
+    field list[Item] items
+    field array[float32, 4] weights
+  public choice Shape
+    variant Circle(float64 radius)
+    variant Rect(float64 width, float64 height)
+    variant Dot
+  public function area_of(Shape shape) returns float64
+    match shape
+      case Circle(radius)
+        return (* (* 3.14159 radius) radius)
+      case Rect(width, height)
+        return (* width height)
+      case Dot
+        return 0.0
+  function add_item(variable list[integer32] items, integer32 value)
+    expression (call push (variable items) value)
+  function grade(integer64 score) returns string
+    if (> score 90)
+      return (text "A")
+    else if (> score 80)
+      return (text "B")
+    else
+      return (text "C")
+  function main()
+    variable string name = (text "Cresmar")
+    variable count = 0
+    constant copy_of_name = name
+    constant frog = (call Frog name=(text "Kero") age=3)
+    constant list[packed Shape] shapes = (call list)
+    constant geometry.Shape imported = (call (. geometry unit))
+    variable list[integer32] numbers = (call list)
+    expression (call add_item (variable numbers) 7)
+    assign (index numbers 0) = (% (* (- (index numbers 0)) (+ 2 3)) 4)
+    assign (. frog name) = (text "Keroppi")
+    while (and (< count 10) (not (or (== count 5) false)))
+      assign count = (+ count 1)
+      if (== count 3)
+        continue
+      if (>= count 8)
+        break
+    for item in numbers
+      expression (call print (text item))
+    for i in (call range 0 (call length numbers))
+      expression (call print (text i ": " (index numbers i)))
+    constant evens = (call filter numbers) with n
+      expression (== (% n 2) 0)
+    expression (call sort (variable numbers)) with a, b
+      expression (< a b)
+    expression (call repeat 3) with
+      expression (call print (text "again"))
+    assert (>= (call length numbers) 1)
+    expression (call print (text "Hello, " name "! {braces} and a \"quote\""))
+    expression (call print (text "area: " (call (. geometry area) 2.0 3.0) ", grade: " (call grade 95)))
+    expression (call print (text "a call can span lines") name)
+    return

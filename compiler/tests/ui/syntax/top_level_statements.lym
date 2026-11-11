@@ -1,0 +1,8 @@
+print("this runs when?")
+
+constant limit = 10
+
+if limit > 5
+    print("big")
+
+variable counter = 0

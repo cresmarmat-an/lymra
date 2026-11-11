@@ -1,0 +1,26 @@
+error[L0301]: expected a declaration after `public`, found keyword `use`
+ --> tests/ui/syntax/public.lym:1:8
+  |
+1 | public use math
+  |        ^^^ expected a declaration after `public`
+  |
+help: `public` goes before `function`, `type`, `choice` or `constant`; remove it here
+
+error[L0301]: expected a declaration after `public`, found keyword `variable`
+ --> tests/ui/syntax/public.lym:2:8
+  |
+2 | public variable count = 0
+  |        ^^^^^^^^ expected a declaration after `public`
+  |
+help: `public` goes before `function`, `type`, `choice` or `constant`; remove it here
+
+error[L0301]: expected a declaration after `public`, found the end of the line
+ --> tests/ui/syntax/public.lym:3:7
+  |
+3 | public
+  |       ^ expected a declaration after `public`
+  |
+help: `public` goes before `function`, `type`, `choice` or `constant`; remove it here
+
+found 3 errors in tests/ui/syntax/public.lym
+run `lymra explain L0301` to read why a rule exists and how to fix it

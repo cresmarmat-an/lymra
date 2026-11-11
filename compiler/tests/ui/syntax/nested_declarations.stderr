@@ -1,0 +1,26 @@
+error[L0302]: a `function` declaration cannot be inside a function
+ --> tests/ui/syntax/nested_declarations.lym:2:5
+  |
+2 |     function helper()
+  |     ^^^^^^^^ declared inside a function body
+  |
+help: move it to the top level of the file
+
+error[L0302]: a `type` declaration cannot be inside a function
+ --> tests/ui/syntax/nested_declarations.lym:4:5
+  |
+4 |     type Local
+  |     ^^^^ declared inside a function body
+  |
+help: move it to the top level of the file
+
+error[L0302]: a `use` declaration cannot be inside a function
+ --> tests/ui/syntax/nested_declarations.lym:6:5
+  |
+6 |     use math
+  |     ^^^ declared inside a function body
+  |
+help: move it to the top level of the file
+
+found 3 errors in tests/ui/syntax/nested_declarations.lym
+run `lymra explain L0302` to read why a rule exists and how to fix it

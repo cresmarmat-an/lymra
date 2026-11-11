@@ -1,0 +1,5 @@
+function main()
+    constant a = 1 // a C-style comment
+    /* a C-style
+       block comment */
+    constant b = 2

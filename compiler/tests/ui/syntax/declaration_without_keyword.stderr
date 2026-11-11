@@ -1,0 +1,42 @@
+error[L0203]: this declaration needs `variable` or `constant` in front
+ --> tests/ui/syntax/declaration_without_keyword.lym:2:5
+  |
+2 |     string name = "Kero"
+  |     ^^^^^^^^^^^ a declaration starts with a keyword
+  |
+help: write `constant` for a value that never changes, or `variable` for one that does
+  |
+2 |     constant string name = "Kero"
+
+error[L0203]: this declaration needs `variable` or `constant` in front
+ --> tests/ui/syntax/declaration_without_keyword.lym:3:5
+  |
+3 |     list[integer32] numbers = list()
+  |     ^^^^^^^^^^^^^^^^^^^^^^^ a declaration starts with a keyword
+  |
+help: write `constant` for a value that never changes, or `variable` for one that does
+  |
+3 |     constant list[integer32] numbers = list()
+
+error[L0203]: this declaration needs `variable` or `constant` in front
+ --> tests/ui/syntax/declaration_without_keyword.lym:4:5
+  |
+4 |     geometry.Shape shape = load()
+  |     ^^^^^^^^^^^^^^^^^^^^ a declaration starts with a keyword
+  |
+help: write `constant` for a value that never changes, or `variable` for one that does
+  |
+4 |     constant geometry.Shape shape = load()
+
+error[L0301]: `varible` is not a keyword
+ --> tests/ui/syntax/declaration_without_keyword.lym:5:5
+  |
+5 |     varible count = 0
+  |     ^^^^^^^ did you mean `variable`?
+  |
+help: write `variable`
+  |
+5 |     variable count = 0
+
+found 4 errors in tests/ui/syntax/declaration_without_keyword.lym
+run `lymra explain L0203` to read why a rule exists and how to fix it

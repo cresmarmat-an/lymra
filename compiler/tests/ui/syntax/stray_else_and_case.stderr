@@ -1,0 +1,26 @@
+error[L0301]: `else` without a matching `if`
+ --> tests/ui/syntax/stray_else_and_case.lym:3:5
+  |
+3 |     else
+  |     ^^^^ no `if` block ends right above this line
+  |
+help: put `else` right after the block of an `if`, indented like that `if`
+
+error[L0301]: `case` outside a `match`
+ --> tests/ui/syntax/stray_else_and_case.lym:5:5
+  |
+5 |     case Dot
+  |     ^^^^ a `case` belongs to the `match` one level above it
+  |
+help: write the cases inside a `match`, indented one level
+
+error[L0301]: expected `case`, found name `Dot`
+ --> tests/ui/syntax/stray_else_and_case.lym:8:9
+  |
+8 |         Dot
+  |         ^^^ expected `case`
+  |
+help: each line of a `match` is `case`, a variant name, and an indented block
+
+found 3 errors in tests/ui/syntax/stray_else_and_case.lym
+run `lymra explain L0301` to read why a rule exists and how to fix it

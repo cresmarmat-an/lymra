@@ -1,0 +1,42 @@
+error[L0301]: `fucntion` is not a keyword
+ --> tests/ui/syntax/misspelled_keywords.lym:1:1
+  |
+1 | fucntion main()
+  | ^^^^^^^^ did you mean `function`?
+  |
+help: write `function`
+  |
+1 | function main()
+
+error[L0301]: `tpye` is not a keyword
+ --> tests/ui/syntax/misspelled_keywords.lym:4:1
+  |
+4 | tpye Frog
+  | ^^^^ did you mean `type`?
+  |
+help: write `type`
+  |
+4 | type Frog
+
+error[L0301]: `whlie` is not a keyword
+ --> tests/ui/syntax/misspelled_keywords.lym:8:5
+  |
+8 |     whlie ready
+  |     ^^^^^ did you mean `while`?
+  |
+help: write `while`
+  |
+8 |     while ready
+
+error[L0301]: `retrun` is not a keyword
+  --> tests/ui/syntax/misspelled_keywords.lym:10:5
+   |
+10 |     retrun 1
+   |     ^^^^^^ did you mean `return`?
+   |
+help: write `return`
+   |
+10 |     return 1
+
+found 4 errors in tests/ui/syntax/misspelled_keywords.lym
+run `lymra explain L0301` to read why a rule exists and how to fix it

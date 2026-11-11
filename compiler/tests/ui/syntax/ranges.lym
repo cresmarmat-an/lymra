@@ -1,0 +1,7 @@
+function main()
+    for i in 0..10
+        print("{i}")
+    for i in start..length(items) - 1
+        print("{i}")
+    for i in range(0, 10)
+        print("{i}")

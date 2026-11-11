@@ -1,0 +1,9 @@
+function main()
+    if 0 <= index < length
+        print("in range")
+    constant same = a == b == c
+    if ready = true
+        go()
+    while count = 0
+        go()
+    constant fine = (a < b) == (c < d)

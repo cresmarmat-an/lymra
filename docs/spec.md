@@ -2,6 +2,8 @@
 
 Status: draft. Every rule here can change until a compiler implements it and a test proves it.
 
+The compiler in `compiler/` implements the syntax of this whole document. Its test suite parses every code sample here, so the spec and the parser cannot drift apart. Checking names, types and memory comes in later phases (see the roadmap in the README).
+
 ## 1. Goals
 
 Each goal has to be checkable. If a goal can't be measured, it's just a slogan.
@@ -20,7 +22,8 @@ Each goal has to be checkable. If a goal can't be measured, it's just a slogan.
 
 ### 2.1 Source files
 
-- Extension: `.lym`. Encoding: UTF-8.
+- Extension: `.lym`. Encoding: UTF-8. A file in any other encoding is error `L0115`. A byte order mark at the start is ignored.
+- Lines end with a line feed, or with a carriage return and a line feed.
 - One file is one module (Section 10).
 
 ### 2.2 Comments
@@ -34,6 +37,9 @@ Each goal has to be checkable. If a goal can't be measured, it's just a slogan.
 ]#
 ```
 
+- `#[` always opens a multiline comment. A single-line comment that begins with a bracket needs a space: `# [1] see below`. A comment that is never closed is error `L0109`.
+- A comment that opens and closes on one line can sit anywhere, including before code. A comment that spans lines has to end its line: code after its closing `]#` is error `L0110`, because nobody looks for code there.
+
 ### 2.3 Directives
 
 A line that starts with `#!` is a **directive**: an instruction to the compiler about the whole file. The general name for this feature is a *pragma*.
@@ -42,7 +48,9 @@ Rules:
 
 - Directives may appear only at the top of a file, before any declaration. A directive anywhere else is error `L0101`.
 - If line 1 starts with `#!/`, it is a Unix shebang and the compiler ignores it, so `#!/usr/bin/env lymra` works.
-- An unknown directive is an error, not a warning.
+- An unknown directive is error `L0105`, not a warning. A misspelled directive that was silently ignored would leave the file compiled differently from what its author believes.
+- A directive takes exactly one word from a fixed list and may be given once. Anything else is error `L0106`.
+- A comment may follow a directive on its line.
 
 Directives in 0.1:
 
@@ -52,57 +60,109 @@ Directives in 0.1:
 | `#!optimize speed` / `size` / `debug` | Overrides the build's optimization mode for this file only. |
 | `#!prove bounds` | The compiler must prove every index in this file is in range. If any runtime bounds check would remain, compilation fails with `L0104` and lists each one with the fact it could not prove. |
 
-`#!prove bounds` is the safe replacement for `#!nocheck`. Instead of switching checks off and trusting the programmer, it makes the compiler show that no check is needed. Hot loops get check-free code and keep their safety guarantee. The usual fix for an `L0104` is one `assert` before the loop, such as `assert len(xs) >= n`, which pays for one check instead of one per iteration.
+`#!prove bounds` is the safe replacement for `#!nocheck`. Instead of switching checks off and trusting the programmer, it makes the compiler show that no check is needed. Hot loops get check-free code and keep their safety guarantee. The usual fix for an `L0104` is one `assert` before the loop, such as `assert length(items) >= count`, which pays for one check instead of one per iteration.
 
 Rejected directives: `#!nocheck` and `#!nonstrict` would turn off safety, which contradicts Goal 1. `#!strict` would do nothing, because Lymra is always strict.
 
 ### 2.4 Indentation
 
-- Blocks are defined by indentation, like Python.
+- Blocks are defined by indentation, like Python. There are no braces and no `end` keyword.
 - A file uses either tabs or spaces for indentation, never both. Mixing them is error `L0102`.
-- With spaces, the indent width is set by the first indented line in the file and must stay the same everywhere in that file.
+- With spaces, the indent width is set by the first indented line in the file and must stay the same everywhere in that file. With tabs, one tab is one level.
+- A block is exactly one level deeper than the line that opens it. An amount of indentation that fits no level is error `L0107`.
+- A line that opens a block has to be followed by at least one indented line (`L0303`), and only such a line may be followed by deeper indentation (`L0304`). A function that does nothing yet holds a single `return`.
+- A statement ends at the end of its line. There is no `;`. Inside `( )` and `[ ]`, line breaks and indentation are ignored, which is how a long call continues over several lines:
+
+```lymra
+constant total = add(
+    first_price,
+    second_price
+)
+```
 
 ### 2.5 Keywords
 
-All keywords are whole English words.
+All keywords are whole English words: `variable`, not `var`; `function`, not `fn`; `external`, not `extern`.
 
 ```
 variable constant function returns return type choice packed use public
 if else while for in break continue match case and or not
-true false extern assert with
+true false external assert with
 ```
+
+The same rule holds for every name the language defines. The built-in types are `integer64` and `boolean`, not `i64` and `bool`, and the built-in functions are `length` and `print`, not `len`. A name that needs two words joins them with `_`, as in `wrapping_add`.
+
+Spellings from other languages are not accepted as alternatives (Goal 4). Each gets error `L0305`, which names the Lymra spelling, and the compiler then checks the rest of the line as if that spelling had been written.
 
 ### 2.6 Naming
 
 The compiler enforces naming style, so code reads the same in every project.
 
-- Values, functions, modules: `snake_case`.
-- Types: `PascalCase`.
-- A violation is error `L0103`, and the error message includes the corrected name.
+- Names use the letters `a-z` and `A-Z`, the digits `0-9` and `_`, and do not start with a digit. Two names that look the same are then always the same name. Text and comments may contain any character.
+- Values, functions, parameters, fields, modules: `snake_case`.
+- Types, choices, variants: `PascalCase`.
+- A violation is error `L0103`, and the error message includes the corrected name. Only declarations are checked.
+- The name `_` declares a binding that is deliberately never read. It is exempt from the style rule and from `L0202`.
 
 ### 2.7 Literals
 
 - Integers: `42`, `1_000_000`, `0xFF`, `0b1010`.
 - Floats: `3.14`, `1.0e-9`.
 - Text: `"Hello, {name}"`. Braces interpolate any expression. Write `{{` and `}}` for literal braces.
+- Booleans: `true` and `false`.
+
+Numbers (errors are `L0114`):
+
+- An underscore goes between two digits, one at a time.
+- A decimal integer does not start with `0`. In C a leading zero means octal, so `010` is 8 there. Lymra rejects it instead of picking a meaning. There are no octal literals.
+- A float has digits on both sides of the point: `1.0e9`, not `1e9`.
+- The prefixes `0x` and `0b` and the exponent marker `e` are lowercase.
+- A number has no type suffix. Its type comes from the declaration: `constant unsigned8 small = 42`.
+
+Text:
+
+- Text is written in double quotes and ends on the line where it starts (`L0111`).
+- The escapes are `\n`, `\t`, `\r`, `\0`, `\\` and `\"`. Any other backslash sequence is error `L0112`.
+- An interpolation holds one expression and cannot be empty (`L0113`). Text may appear inside an interpolation, up to 8 levels deep.
+
+### 2.8 Operators
+
+From the loosest binding to the tightest:
+
+| Operators | Meaning | Grouping |
+|---|---|---|
+| `or` | either | left |
+| `and` | both | left |
+| `not` | negation | prefix |
+| `==` `!=` `<` `<=` `>` `>=` | comparison | does not chain |
+| `+` `-` | addition, subtraction | left |
+| `*` `/` `%` | multiplication, division, remainder | left |
+| `-` | negation | prefix |
+| `f(x)` `items[i]` `item.field` | call, element, field | left |
+
+- `not` covers a whole comparison: `not a == b` means `not (a == b)`.
+- Comparisons do not chain. `a < b < c` is error `L0306`; write `a < b and b < c`. In C the chain compiles and compares the result of the first comparison with `c`, which is almost never what was meant.
+- Parentheses group. Expressions, types and blocks may nest 64 levels deep (`L0310`).
 
 ## 3. Bindings
 
 ```lymra
 variable string name = "Cresmar"   # mutable, type written
-variable count = 0                  # mutable, type inferred as i64
+variable count = 0                  # mutable, type inferred as integer64
 constant string greeting = "Hi"     # immutable, type written
 constant copy_of_name = name        # immutable, type inferred
 ```
 
 - `variable` declares a mutable binding.
 - `constant` declares an immutable binding. A top-level `constant` must be computable at compile time.
-- Every declaration starts with one of these two keywords.
+- Every declaration starts with one of these two keywords. A type and a name before `=` with no keyword is error `L0203`.
+- Only `constant` may be declared at the top level of a file. A top-level `variable` would be global mutable state, and is error `L0205`.
 - `name = expr` with no keyword always means assignment. Assigning to a name that hasn't been declared is error `L0201`, and the message suggests `variable` or `constant`.
-- Reading a binding before it is assigned is impossible: every declaration has an initializer.
+- An assignment is a statement, not an expression, and its left side is a binding, a field or an element (`L0308`). There is no `+=` and no `++`: write `count = count + 1`.
+- Reading a binding before it is assigned is impossible: every declaration has an initializer. Leaving it out is error `L0204`.
 - An unused binding is error `L0202`.
 
-**Why there's no keyword-less form (`string b = a`):** with generic types it gets ambiguous. In `list[i32] x = y`, the parser can't tell whether `list[i32]` is a type or an indexing expression until it has looked past the closing bracket. C and C++ have this exact problem. Starting every declaration with a keyword makes the grammar parseable with one token of lookahead.
+**Why there's no keyword-less form (`string b = a`):** with generic types it gets ambiguous. In `list[integer32] x = y`, the parser can't tell whether `list[integer32]` is a type or an indexing expression until it has looked past the closing bracket. C and C++ have this exact problem. Starting every declaration with a keyword makes the grammar parseable with one token of lookahead.
 
 ### 3.1 Copy semantics
 
@@ -116,13 +176,15 @@ The compiler doesn't have to copy bytes to give you this guarantee. If neither b
 
 | Type | Meaning |
 |---|---|
-| `i8 i16 i32 i64` | Signed integers |
-| `u8 u16 u32 u64` | Unsigned integers |
-| `f32 f64` | IEEE 754 floats |
-| `bool` | `true` or `false` |
+| `integer8` `integer16` `integer32` `integer64` | Signed integers |
+| `unsigned8` `unsigned16` `unsigned32` `unsigned64` | Unsigned integers |
+| `float32` `float64` | IEEE 754 floats |
+| `boolean` | `true` or `false` |
 | `string` | Immutable UTF-8 text |
 
-Integer literals default to `i64`. Float literals default to `f64`.
+Integer literals default to `integer64`. Float literals default to `float64`.
+
+The names are whole words (Section 2.5), and a number type always states its size in bits. There is no plain `integer` or `float`, because a second spelling of the same type would break Goal 4.
 
 ### 4.2 Integer overflow
 
@@ -134,7 +196,7 @@ Every type belongs to exactly one size class. The class decides where a value ca
 
 | Class | Size known | Examples |
 |---|---|---|
-| fixed | at compile time | `i64`, `bool`, `array[f32, 4]`, a type whose fields are all fixed |
+| fixed | at compile time | `integer64`, `boolean`, `array[float32, 4]`, a type whose fields are all fixed |
 | frozen | when the value is built, then never changes | `string`, a type with a `string` field |
 | growable | changes while the value lives | `list[T]`, `stack[T]` |
 
@@ -160,24 +222,24 @@ A value is stored as one contiguous block of bytes with no pointers inside it, h
 ```lymra
 type Item
     string sku
-    u32 quantity
+    unsigned32 quantity
 
 type Order
-    u64 id
+    unsigned64 id
     string customer
     list[Item] items
 ```
 
 One `Order` with two items is a single block on a data stack. Reading a `list[Order]` streams through memory in order, which is what CPU caches are built for. The cost: a list whose elements have different sizes can be iterated but not indexed by position (Section 7.5).
 
-Indexing starts at 0. Every index is bounds-checked. The compiler removes a check when it can prove the index is in range, for example `for i in range(0, len(xs))`.
+Indexing starts at 0. Every index is bounds-checked. The compiler removes a check when it can prove the index is in range, for example `for index in range(0, length(items))`.
 
 ### 4.6 Custom types
 
 ```lymra
 type Frog
     string name
-    u8 age
+    unsigned8 age
 ```
 
 - Fields are stored inline. A `Frog` with a `string` field holds the string data in the same place, not a pointer to it elsewhere.
@@ -189,11 +251,11 @@ A `choice` is a value that is exactly one of several variants. It is the only fo
 
 ```lymra
 choice Shape
-    Circle(f64 radius)
-    Rect(f64 width, f64 height)
+    Circle(float64 radius)
+    Rect(float64 width, float64 height)
     Dot
 
-function area(Shape shape) returns f64
+function area(Shape shape) returns float64
     match shape
         case Circle(radius)
             return 3.14159 * radius * radius
@@ -210,7 +272,7 @@ function area(Shape shape) returns f64
 ## 5. Functions
 
 ```lymra
-function area(f64 width, f64 height) returns f64
+function area(float64 width, float64 height) returns float64
     return width * height
 
 function main()
@@ -222,11 +284,11 @@ function main()
 - A parameter declared `variable` can be modified, and the change is visible to the caller. The caller has to mark the argument too, so the mutation is visible where the call is written:
 
 ```lymra
-function add_item(variable list[i32] items, i32 value)
-    push(items, value)
+function add_item(variable list[integer32] items, integer32 value)
+    push(variable items, value)
 
 function main()
-    variable list[i32] numbers = list()
+    variable list[integer32] numbers = list()
     add_item(variable numbers, 7)
 ```
 
@@ -249,11 +311,16 @@ while count < 10
 for item in items
     print("{item}")
 
-for i in range(0, 10)
-    print("{i}")
+for index in range(0, 10)
+    print("{index}")
 ```
 
-`break` and `continue` work in `while` and `for`.
+- A condition needs no parentheses, and nothing follows it on its line: no `:`, no `then`, no `{`.
+- `else if` continues a chain. There is no `elif`.
+- `break` and `continue` work in `while` and `for`.
+- `match` picks a block by the variant of a `choice` (Section 4.7).
+- `return` ends the function, with a value when the function `returns` one.
+- `assert condition` stops the program if the condition is false. The compiler also uses it as a fact when it removes bounds checks (Section 2.3).
 
 ## 7. Memory model
 
@@ -311,8 +378,8 @@ For graphs, trees, and anything else whose lifetime isn't tied to a scope, use `
 
 ```lymra
 variable pool[Frog] frogs = pool()
-constant handle = insert(frogs, Frog(name = "Kero", age = 3))
-remove(frogs, handle)
+constant handle = insert(variable frogs, Frog(name = "Kero", age = 3))
+remove(variable frogs, handle)
 get(frogs, handle)   # traps: the handle is stale
 ```
 
@@ -327,15 +394,19 @@ Without the generation check, a stale handle would silently read whatever value 
 A function can take a block of code as an argument. The block is a compile-time value: it is never stored, never escapes, and every call to it is inlined.
 
 ```lymra
-constant evens = filter(numbers) with n
-    n % 2 == 0
+constant evens = filter(numbers) with number
+    number % 2 == 0
 ```
+
+- `with` is followed by the block's parameters, separated by commas. A block that takes none is written `with` alone.
+- The value of the block is the value of its last line.
+- The block belongs to the call written right before `with`, and that call has to be the whole expression of its statement. `1 + sum(numbers) with number` is error `L0307`: a reader could not tell whether the block goes to `sum` or to the sum.
 
 This compiles to the same loop you would write by hand, and the result is built directly into `evens` (Section 5). There are no closure objects and no function pointers, so higher-order code costs nothing at runtime. The block can read the enclosing function's bindings because it can't outlive them.
 
 ### 7.8 Narrow links (planned for 0.2)
 
-A normal reference is a full 8-byte address. A `link[T, u32]` stores the same connection as a 4-byte offset from its own position to a target in the same list. It is checked like any other reference.
+A normal reference is a full 8-byte address. A `link[T, unsigned32]` stores the same connection as a 4-byte offset from its own position to a target in the same list. It is checked like any other reference.
 
 - A tree or graph built from links in a `list` takes half the memory of a pointer-based one.
 - Offsets don't depend on where the list sits in memory, so the whole structure can be written to a file in one write and read back in one read.
@@ -382,17 +453,30 @@ help: declare it first
 12 |     variable total = 0
 ```
 
-Each error code links to a page in `docs/errors/` that explains the rule and why it exists.
+Each error code has a page in [`docs/errors/`](errors/README.md) that explains the rule, why it exists, and how to fix the code. `lymra explain L0201` prints the same page.
+
+- Every error carries a fix. Where the compiler can write the corrected line, it shows it.
+- One mistake gets one error. After reporting, the compiler skips the broken statement and keeps checking the rest of the file, so one run shows every independent mistake.
+- The first two digits of a code group it by topic:
+
+| Codes | Topic |
+|---|---|
+| `L01xx` | Source text and layout: characters, comments, text, numbers, indentation, directives, naming |
+| `L02xx` | Bindings |
+| `L03xx` | Grammar |
+| `L04xx` to `L10xx` | The chapter of this document the rule comes from: `L07xx` is the memory model |
 
 ## 12. Open questions
 
 | ID | Question | Current lean |
 |---|---|---|
 | O1 | Recoverable error handling | Prototype both options in Section 8, then pick using real programs |
-| O2 | Generics syntax for user functions | `function first[T](view[T] xs) returns T` |
+| O2 | Generics syntax for user functions | `function first[Item](view[Item] items) returns Item` |
 | O3 | `match` on `packed` values: can a case bind a reference into the payload? | Yes, read-only |
-| O4 | Compiler implementation language | Undecided, see README |
 | O5 | Integer type defaults on 32-bit targets | Undecided |
+| O6 | Literal syntax for `array` and `list` values | `[1, 2, 3]` |
+| O7 | Bitwise operations | Functions with whole-word names such as `bit_and` and `shift_left`, not symbols |
+| O8 | Calling C: the syntax and rules of `external` declarations | `external function hypot(float64 x, float64 y) returns float64` |
 
 ## 13. Where speed comes from
 

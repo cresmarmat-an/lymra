@@ -1,0 +1,93 @@
+#!/usr/bin/env lymra
+#!edition 0.1
+#!optimize speed
+#!prove bounds
+
+#[
+    A tour of every construct in the 0.1 grammar.
+    #[ Comments nest. ]#
+]#
+
+use math.geometry
+use math.geometry.area
+
+public constant string greeting = "Hi"
+constant limit = 1_000_000
+constant mask = 0xFF + 0b1010
+constant tiny = 1.0e-9
+
+type Item
+    string sku
+    unsigned32 quantity
+
+public type Order
+    unsigned64 id
+    string customer
+    list[Item] items
+    array[float32, 4] weights
+
+public choice Shape
+    Circle(float64 radius)
+    Rect(float64 width, float64 height)
+    Dot
+
+public function area_of(Shape shape) returns float64
+    match shape
+        case Circle(radius)
+            return 3.14159 * radius * radius
+        case Rect(width, height)
+            return width * height
+        case Dot
+            return 0.0
+
+function add_item(variable list[integer32] items, integer32 value)
+    push(variable items, value)
+
+function grade(integer64 score) returns string
+    if score > 90
+        return "A"
+    else if score > 80
+        return "B"
+    else
+        return "C"
+
+function main()
+    variable string name = "Cresmar"
+    variable count = 0
+    constant copy_of_name = name
+    constant frog = Frog(name = "Kero", age = 3)
+    constant list[packed Shape] shapes = list()
+    constant geometry.Shape imported = geometry.unit()
+
+    variable list[integer32] numbers = list()
+    add_item(variable numbers, 7)
+    numbers[0] = -numbers[0] * (2 + 3) % 4
+    frog.name = "Keroppi"
+
+    while count < 10 and not (count == 5 or false)
+        count = count + 1
+        if count == 3
+            continue
+        if count >= 8
+            break
+
+    for item in numbers
+        print("{item}")
+    for i in range(0, length(numbers))
+        print("{i}: {numbers[i]}")
+
+    constant evens = filter(numbers) with n
+        n % 2 == 0
+    sort(variable numbers) with a, b
+        a < b
+    repeat(3) with
+        print("again")
+
+    assert length(numbers) >= 1
+    print("Hello, {name}! {{braces}} and a \"quote\"")
+    print("area: {geometry.area(2.0, 3.0)}, grade: {grade(95)}")
+    print(
+        "a call can span lines",
+        name
+    )
+    return

@@ -1,0 +1,4 @@
+function main()
+    print("a closing } brace")
+    print("score: {}")
+    print("{{fine}} and {score}")

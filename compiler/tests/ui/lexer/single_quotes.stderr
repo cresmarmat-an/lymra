@@ -1,0 +1,30 @@
+error[L0305]: text is written with double quotes
+ --> tests/ui/lexer/single_quotes.lym:2:11
+  |
+2 |     print('hello')
+  |           ^^^^^^^ single quotes are not Lymra syntax
+  |
+help: use double quotes
+  |
+2 |     print("hello")
+
+error[L0305]: text is written with double quotes
+ --> tests/ui/lexer/single_quotes.lym:3:11
+  |
+3 |     print('say "hi"')
+  |           ^^^^^^^^^^ single quotes are not Lymra syntax
+  |
+help: use double quotes, and write `\"` for a double quote inside the text
+
+error[L0108]: unexpected character `'`
+ --> tests/ui/lexer/single_quotes.lym:4:30
+  |
+4 |     constant apostrophe = don't
+  |                              ^ this character has no meaning here
+  |
+help: remove it
+  |
+4 |     constant apostrophe = dont
+
+found 3 errors in tests/ui/lexer/single_quotes.lym
+run `lymra explain L0305` to read why a rule exists and how to fix it

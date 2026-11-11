@@ -1,0 +1,5 @@
+function main() {
+    if ready {
+        go()
+    }
+}

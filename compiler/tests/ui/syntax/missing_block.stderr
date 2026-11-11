@@ -1,0 +1,34 @@
+error[L0303]: expected an indented block
+ --> tests/ui/syntax/missing_block.lym:1:1
+  |
+1 | function main()
+  | ^^^^^^^^^^^^^^^ the lines that belong to this have to follow it, indented one level
+  |
+help: indent the body one level deeper than this line
+
+error[L0303]: expected an indented block
+ --> tests/ui/syntax/missing_block.lym:6:5
+  |
+6 |     if ready
+  |     ^^^^^^^^ the lines that belong to this have to follow it, indented one level
+  |
+help: indent the body one level deeper than this line
+
+error[L0303]: expected an indented block
+ --> tests/ui/syntax/missing_block.lym:8:5
+  |
+8 |     match shape
+  |     ^^^^^^^^^^^ the lines that belong to this have to follow it, indented one level
+  |
+help: indent the body one level deeper than this line
+
+error[L0303]: expected an indented block
+ --> tests/ui/syntax/missing_block.lym:9:5
+  |
+9 |     while true
+  |     ^^^^^^^^^^ the lines that belong to this have to follow it, indented one level
+  |
+help: indent the body one level deeper than this line
+
+found 4 errors in tests/ui/syntax/missing_block.lym
+run `lymra explain L0303` to read why a rule exists and how to fix it

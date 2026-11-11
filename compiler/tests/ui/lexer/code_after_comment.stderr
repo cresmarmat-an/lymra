@@ -1,0 +1,11 @@
+error[L0110]: code follows a multiline comment on the same line
+ --> tests/ui/lexer/code_after_comment.lym:3:28
+  |
+3 |        spans two lines. ]# print("easy to miss")
+  |                            ^^^^^^^^^^^^^^^^^^^^^ this code is easy to miss
+  |                         -- the multiline comment ends here
+  |
+help: move the code to its own line
+
+found 1 error in tests/ui/lexer/code_after_comment.lym
+run `lymra explain L0110` to read why a rule exists and how to fix it

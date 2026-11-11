@@ -1,0 +1,26 @@
+error[L0301]: expected the end of the line, found name `go`
+ --> tests/ui/syntax/inline_bodies.lym:2:14
+  |
+2 |     if ready go()
+  |              ^^ expected the end of the line
+  |
+help: end the line here and put what belongs to it on the next lines, indented one level
+
+error[L0301]: expected the end of the line, found name `go`
+ --> tests/ui/syntax/inline_bodies.lym:3:16
+  |
+3 |     while true go()
+  |                ^^ expected the end of the line
+  |
+help: end the line here and put what belongs to it on the next lines, indented one level
+
+error[L0301]: expected the end of the line, found name `print`
+ --> tests/ui/syntax/inline_bodies.lym:4:23
+  |
+4 |     for item in items print(item)
+  |                       ^^^^^ expected the end of the line
+  |
+help: end the line here and put what belongs to it on the next lines, indented one level
+
+found 3 errors in tests/ui/syntax/inline_bodies.lym
+run `lymra explain L0301` to read why a rule exists and how to fix it

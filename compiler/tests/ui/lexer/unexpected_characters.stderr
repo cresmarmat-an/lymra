@@ -1,0 +1,40 @@
+error[L0108]: unexpected character `$`
+ --> tests/ui/lexer/unexpected_characters.lym:2:22
+  |
+2 |     constant price = $100
+  |                      ^ this character has no meaning here
+  |
+help: remove it
+  |
+2 |     constant price = 100
+
+error[L0108]: `café` contains a character that names cannot use
+ --> tests/ui/lexer/unexpected_characters.lym:3:14
+  |
+3 |     constant café = "open"
+  |              ^^^^ names use only a-z, A-Z, 0-9 and `_`
+  |
+help: rename it using those characters only
+
+error[L0108]: invisible character U+00A0 in the source
+ --> tests/ui/lexer/unexpected_characters.lym:4:19
+  |
+4 |     constant gap = 1
+  |                   ^ this is not a normal space
+  |
+help: replace it with a normal space
+  |
+4 |     constant gap = 1
+
+error[L0108]: invisible character U+200B in the source
+ --> tests/ui/lexer/unexpected_characters.lym:5:20
+  |
+5 |     constant hidden​ = 2
+  |                    ^ a zero-width character is hiding here
+  |
+help: remove it
+  |
+5 |     constant hidden = 2
+
+found 4 errors in tests/ui/lexer/unexpected_characters.lym
+run `lymra explain L0108` to read why a rule exists and how to fix it

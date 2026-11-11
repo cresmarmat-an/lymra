@@ -1,0 +1,26 @@
+error[L0309]: `external` declarations are not available in edition 0.1
+ --> tests/ui/syntax/unavailable.lym:1:1
+  |
+1 | external function hypot(float64 x, float64 y) returns float64
+  | ^^^^^^^^ reserved for a later edition
+  |
+help: remove it for now; the roadmap in the README says when it is planned
+
+error[L0309]: `external` declarations are not available in edition 0.1
+ --> tests/ui/syntax/unavailable.lym:3:1
+  |
+3 | extern function atan2(float64 y, float64 x) returns float64
+  | ^^^^^^ reserved for a later edition
+  |
+help: remove it for now; the roadmap in the README says when it is planned
+
+error[L0309]: generic functions are not available in edition 0.1
+ --> tests/ui/syntax/unavailable.lym:5:15
+  |
+5 | function first[Item](view[Item] items) returns Item
+  |               ^ reserved for a later edition
+  |
+help: remove it for now; the roadmap in the README says when it is planned
+
+found 3 errors in tests/ui/syntax/unavailable.lym
+run `lymra explain L0309` to read why a rule exists and how to fix it

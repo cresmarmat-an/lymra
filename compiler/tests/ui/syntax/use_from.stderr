@@ -1,0 +1,22 @@
+error[L0305]: `use ... from ...` is not Lymra syntax
+ --> tests/ui/syntax/use_from.lym:1:1
+  |
+1 | use geometry from math
+  | ^^^^^^^^^^^^^^^^^^^^^^ an import is one dotted path
+  |
+help: write the module path, then the item
+  |
+1 | use math.geometry
+
+error[L0305]: `use ... from ...` is not Lymra syntax
+ --> tests/ui/syntax/use_from.lym:2:1
+  |
+2 | use area from math.geometry
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ an import is one dotted path
+  |
+help: write the module path, then the item
+  |
+2 | use math.geometry.area
+
+found 2 errors in tests/ui/syntax/use_from.lym
+run `lymra explain L0305` to read why a rule exists and how to fix it

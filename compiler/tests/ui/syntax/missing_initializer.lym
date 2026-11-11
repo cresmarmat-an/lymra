@@ -1,0 +1,5 @@
+function main()
+    variable integer64 total
+    variable count
+    constant list[integer32] numbers
+    variable integer64 limit 10

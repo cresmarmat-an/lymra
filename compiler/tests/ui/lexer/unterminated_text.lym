@@ -1,0 +1,5 @@
+function main()
+    print("Hello, world)
+    print("Hello, {name")
+    print("value: {count)
+    print("fine")

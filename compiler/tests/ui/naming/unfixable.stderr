@@ -1,0 +1,18 @@
+error[L0103]: function name `Return` is not snake_case
+ --> tests/ui/naming/unfixable.lym:1:10
+  |
+1 | function Return()
+  |          ^^^^^^ function names are snake_case
+  |
+help: choose a snake_case name
+
+error[L0103]: function name `__` is not snake_case
+ --> tests/ui/naming/unfixable.lym:4:10
+  |
+4 | function __()
+  |          ^^ function names are snake_case
+  |
+help: choose a snake_case name
+
+found 2 errors in tests/ui/naming/unfixable.lym
+run `lymra explain L0103` to read why a rule exists and how to fix it

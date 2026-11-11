@@ -1,0 +1,28 @@
+error[L0111]: this text is never closed
+ --> tests/ui/lexer/unterminated_text.lym:2:11
+  |
+2 |     print("Hello, world)
+  |           ^ the text starts here and has to end on the same line
+  |
+help: add the closing `"`
+  |
+2 |     print("Hello, world)"
+
+error[L0111]: this interpolation is never closed
+ --> tests/ui/lexer/unterminated_text.lym:3:19
+  |
+3 |     print("Hello, {name")
+  |                   ^ `{` starts an interpolation here
+  |
+help: close it with `}`, or write `{{` if you want a literal brace
+
+error[L0111]: this interpolation is never closed
+ --> tests/ui/lexer/unterminated_text.lym:4:19
+  |
+4 |     print("value: {count)
+  |                   ^ `{` starts an interpolation here
+  |
+help: close it with `}`, or write `{{` if you want a literal brace
+
+found 3 errors in tests/ui/lexer/unterminated_text.lym
+run `lymra explain L0111` to read why a rule exists and how to fix it

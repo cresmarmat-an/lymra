@@ -1,0 +1,11 @@
+function main()
+    go()
+    else
+        stop()
+    case Dot
+        go()
+    match shape
+        Dot
+            go()
+        case Circle(radius)
+            go()

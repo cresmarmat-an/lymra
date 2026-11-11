@@ -1,0 +1,9 @@
+#!edition
+#!edition 2.0
+#!optimize fast
+#!optimize sped
+#!optimize
+#!optimize speed size
+#!prove everything
+#!prove bounds  # a comment after a directive is fine
+#!prove bounds

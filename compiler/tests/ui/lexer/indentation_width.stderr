@@ -1,0 +1,23 @@
+error[L0107]: this line is indented by 6 spaces, which is not a multiple of 4
+ --> tests/ui/lexer/indentation_width.lym:3:1
+  |
+2 |     print("the first indented line sets the width")
+  | ---- the first indented line sets the width to 4 spaces
+3 |       print("six spaces")
+  | ^^^^^^ 6 spaces
+  |
+help: use 4 or 8 spaces
+
+error[L0107]: this line is indented by 7 spaces, which is not a multiple of 4
+ --> tests/ui/lexer/indentation_width.lym:5:1
+  |
+2 |     print("the first indented line sets the width")
+  | ---- the first indented line sets the width to 4 spaces
+...
+5 |        go()
+  | ^^^^^^^ 7 spaces
+  |
+help: use 4 or 8 spaces
+
+found 2 errors in tests/ui/lexer/indentation_width.lym
+run `lymra explain L0107` to read why a rule exists and how to fix it

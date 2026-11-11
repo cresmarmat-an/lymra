@@ -1,0 +1,12 @@
+function main()
+    print("unclosed"
+    return 1
+
+function second()
+    constant total = (1 + 2
+    constant item = items[0
+    constant sum = add(1, 2
+    return sum
+
+function third(integer64 a, integer64 b
+    return a

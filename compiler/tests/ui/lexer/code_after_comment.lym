@@ -1,0 +1,6 @@
+function main()
+    #[ This comment
+       spans two lines. ]# print("easy to miss")
+    #[ on one line ]# print("fine")
+    print("also fine") #[ trailing
+    comment ]#

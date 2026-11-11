@@ -1,0 +1,42 @@
+error[L0306]: comparisons cannot be chained
+ --> tests/ui/syntax/comparisons.lym:2:8
+  |
+2 |     if 0 <= index < length
+  |        ^^^^^^^^^^^^^^^^^^^ this compares the result of a comparison with another value
+  |
+help: compare each pair and join them with `and`
+  |
+2 |     if 0 <= index and index < length
+
+error[L0306]: comparisons cannot be chained
+ --> tests/ui/syntax/comparisons.lym:4:21
+  |
+4 |     constant same = a == b == c
+  |                     ^^^^^^^^^^^ this compares the result of a comparison with another value
+  |
+help: compare each pair and join them with `and`
+  |
+4 |     constant same = a == b and b == c
+
+error[L0301]: `=` assigns a value; it does not compare
+ --> tests/ui/syntax/comparisons.lym:5:14
+  |
+5 |     if ready = true
+  |              ^ a condition needs a comparison here
+  |
+help: write `==` to compare
+  |
+5 |     if ready == true
+
+error[L0301]: `=` assigns a value; it does not compare
+ --> tests/ui/syntax/comparisons.lym:7:17
+  |
+7 |     while count = 0
+  |                 ^ a condition needs a comparison here
+  |
+help: write `==` to compare
+  |
+7 |     while count == 0
+
+found 4 errors in tests/ui/syntax/comparisons.lym
+run `lymra explain L0306` to read why a rule exists and how to fix it

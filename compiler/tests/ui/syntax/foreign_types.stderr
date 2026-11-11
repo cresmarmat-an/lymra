@@ -1,0 +1,130 @@
+error[L0305]: `str` is not a Lymra type
+ --> tests/ui/syntax/foreign_types.lym:2:5
+  |
+2 |     str name
+  |     ^^^ Lymra spells this `string`
+  |
+help: write `string`
+  |
+2 |     string name
+
+error[L0305]: `u8` is not a Lymra type
+ --> tests/ui/syntax/foreign_types.lym:3:5
+  |
+3 |     u8 age
+  |     ^^ Lymra spells this `unsigned8`
+  |
+help: write `unsigned8`
+  |
+3 |     unsigned8 age
+
+error[L0305]: `bool` is not a Lymra type
+ --> tests/ui/syntax/foreign_types.lym:4:5
+  |
+4 |     bool hungry
+  |     ^^^^ Lymra spells this `boolean`
+  |
+help: write `boolean`
+  |
+4 |     boolean hungry
+
+error[L0305]: `f64` is not a Lymra type
+ --> tests/ui/syntax/foreign_types.lym:6:15
+  |
+6 | function area(f64 width, double height) returns f64
+  |               ^^^ Lymra spells this `float64`
+  |
+help: write `float64`
+  |
+6 | function area(float64 width, double height) returns f64
+
+error[L0305]: `double` is not a Lymra type
+ --> tests/ui/syntax/foreign_types.lym:6:26
+  |
+6 | function area(f64 width, double height) returns f64
+  |                          ^^^^^^ Lymra spells this `float64`
+  |
+help: write `float64`
+  |
+6 | function area(f64 width, float64 height) returns f64
+
+error[L0305]: `f64` is not a Lymra type
+ --> tests/ui/syntax/foreign_types.lym:6:49
+  |
+6 | function area(f64 width, double height) returns f64
+  |                                                 ^^^ Lymra spells this `float64`
+  |
+help: write `float64`
+  |
+6 | function area(f64 width, double height) returns float64
+
+error[L0305]: `i32` is not a Lymra type
+ --> tests/ui/syntax/foreign_types.lym:7:19
+  |
+7 |     constant list[i32] sizes = list()
+  |                   ^^^ Lymra spells this `integer32`
+  |
+help: write `integer32`
+  |
+7 |     constant list[integer32] sizes = list()
+
+error[L0305]: `byte` is not a Lymra type
+ --> tests/ui/syntax/foreign_types.lym:8:20
+  |
+8 |     constant array[byte, 4] bytes = load()
+  |                    ^^^^ Lymra spells this `unsigned8`
+  |
+help: write `unsigned8`
+  |
+8 |     constant array[unsigned8, 4] bytes = load()
+
+error[L0305]: `int` is not a Lymra type
+ --> tests/ui/syntax/foreign_types.lym:9:14
+  |
+9 |     variable int count = 0
+  |              ^^^ a Lymra number type states its size
+  |
+help: write `integer64`, or another size such as `integer32`
+  |
+9 |     variable integer64 count = 0
+
+error[L0305]: `float` is not a Lymra type
+  --> tests/ui/syntax/foreign_types.lym:10:14
+   |
+10 |     variable float ratio = 1.5
+   |              ^^^^^ a Lymra number type states its size
+   |
+help: write `float64`, or another size such as `float32`
+   |
+10 |     variable float64 ratio = 1.5
+
+error[L0305]: `uint` is not a Lymra type
+  --> tests/ui/syntax/foreign_types.lym:11:14
+   |
+11 |     variable uint total = 0
+   |              ^^^^ a Lymra number type states its size
+   |
+help: write `unsigned64`, or another size such as `unsigned32`
+   |
+11 |     variable unsigned64 total = 0
+
+error[L0305]: `int` is not a Lymra type
+  --> tests/ui/syntax/foreign_types.lym:14:18
+   |
+14 | function unnamed(int)
+   |                  ^^^ a Lymra number type states its size
+   |
+help: write `integer64`, or another size such as `integer32`
+   |
+14 | function unnamed(integer64)
+
+error[L0301]: expected a parameter name, found `)`
+  --> tests/ui/syntax/foreign_types.lym:14:21
+   |
+14 | function unnamed(int)
+   |                     ^ expected a parameter name
+   |
+help: write a parameter name here
+
+found 13 errors in tests/ui/syntax/foreign_types.lym
+run `lymra explain L0305` to read why a rule exists and how to fix it

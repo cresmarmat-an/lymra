@@ -1,0 +1,22 @@
+error[L0113]: `}` without a matching `{` in text
+ --> tests/ui/lexer/text_braces.lym:2:22
+  |
+2 |     print("a closing } brace")
+  |                      ^ a single `}` closes an interpolation, and none is open
+  |
+help: write `}}` for a literal brace
+  |
+2 |     print("a closing }} brace")
+
+error[L0113]: empty interpolation
+ --> tests/ui/lexer/text_braces.lym:3:19
+  |
+3 |     print("score: {}")
+  |                   ^^ nothing between `{` and `}`
+  |
+help: put an expression between the braces, or double them for literal braces
+  |
+3 |     print("score: {{}}")
+
+found 2 errors in tests/ui/lexer/text_braces.lym
+run `lymra explain L0113` to read why a rule exists and how to fix it

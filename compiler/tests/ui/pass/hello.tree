@@ -1,0 +1,12 @@
+module
+  directive edition 0.1
+  constant string author = (text "Cresmar Mat-an")
+  function echo(string message) returns string
+    return message
+  function main()
+    expression (call print (text "Hello, " author))
+    expression (call print (call echo (text "Sample 1")))
+    variable integer64 counter = 1
+    while (< counter 1000000)
+      assign counter = (+ counter 1)
+    expression (call print (text counter))

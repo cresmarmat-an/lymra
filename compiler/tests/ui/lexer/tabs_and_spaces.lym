@@ -1,0 +1,5 @@
+function main()
+    print("spaces first")
+	print("then a tab")
+  	print("both on one line")
+    print("spaces again")

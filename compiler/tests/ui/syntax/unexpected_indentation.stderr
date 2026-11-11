@@ -1,0 +1,10 @@
+error[L0304]: unexpected indentation
+ --> tests/ui/syntax/unexpected_indentation.lym:3:1
+  |
+3 |         print("why is this deeper?")
+  | ^^^^^^^^ this line is indented, but no block starts above it
+  |
+help: indent it like the line above, or start a block above it
+
+found 1 error in tests/ui/syntax/unexpected_indentation.lym
+run `lymra explain L0304` to read why a rule exists and how to fix it

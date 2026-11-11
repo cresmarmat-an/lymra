@@ -1,0 +1,10 @@
+fucntion main()
+    go()
+
+tpye Frog
+    string name
+
+function second()
+    whlie ready
+        go()
+    retrun 1

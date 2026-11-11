@@ -1,0 +1,7 @@
+function main()
+    print("one")
+        print("why is this deeper?")
+        print("and this?")
+    print("two")
+
+    constant total = 1

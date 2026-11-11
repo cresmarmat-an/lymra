@@ -1,0 +1,10 @@
+error[L0109]: this multiline comment is never closed
+ --> tests/ui/lexer/unterminated_comment.lym:4:1
+  |
+4 | #[ This comment is never closed.
+  | ^^ the comment starts here and runs to the end of the file
+  |
+help: close it with `]#`; for a one-line comment that begins with `[`, put a space after `#`
+
+found 1 error in tests/ui/lexer/unterminated_comment.lym
+run `lymra explain L0109` to read why a rule exists and how to fix it

@@ -1,0 +1,9 @@
+external function hypot(float64 x, float64 y) returns float64
+
+extern function atan2(float64 y, float64 x) returns float64
+
+function first[Item](view[Item] items) returns Item
+    return items[0]
+
+function main()
+    go()

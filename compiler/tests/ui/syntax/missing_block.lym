@@ -1,0 +1,10 @@
+function main()
+print("not indented")
+print("still not indented")
+
+function second()
+    if ready
+    go()
+    match shape
+    while true
+    return

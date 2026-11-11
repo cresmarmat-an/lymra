@@ -1,0 +1,57 @@
+error[L0301]: expected `,` or `)`, found the end of the line
+ --> tests/ui/syntax/unclosed_brackets.lym:2:21
+  |
+2 |     print("unclosed"
+  |                     ^ expected `,` or `)`
+  |          - this bracket is still open
+  |
+help: add `)`
+  |
+2 |     print("unclosed")
+
+error[L0301]: expected `)`, found the end of the line
+ --> tests/ui/syntax/unclosed_brackets.lym:6:28
+  |
+6 |     constant total = (1 + 2
+  |                            ^ expected `)`
+  |                      - this bracket is still open
+  |
+help: add `)`
+  |
+6 |     constant total = (1 + 2)
+
+error[L0301]: expected `]`, found the end of the line
+ --> tests/ui/syntax/unclosed_brackets.lym:7:28
+  |
+7 |     constant item = items[0
+  |                            ^ expected `]`
+  |                          - this bracket is still open
+  |
+help: add `]`
+  |
+7 |     constant item = items[0]
+
+error[L0301]: expected `,` or `)`, found the end of the line
+ --> tests/ui/syntax/unclosed_brackets.lym:8:28
+  |
+8 |     constant sum = add(1, 2
+  |                            ^ expected `,` or `)`
+  |                       - this bracket is still open
+  |
+help: add `)`
+  |
+8 |     constant sum = add(1, 2)
+
+error[L0301]: expected `,` or `)`, found the end of the line
+  --> tests/ui/syntax/unclosed_brackets.lym:11:40
+   |
+11 | function third(integer64 a, integer64 b
+   |                                        ^ expected `,` or `)`
+   |               - this bracket is still open
+   |
+help: add `)`
+   |
+11 | function third(integer64 a, integer64 b)
+
+found 5 errors in tests/ui/syntax/unclosed_brackets.lym
+run `lymra explain L0301` to read why a rule exists and how to fix it

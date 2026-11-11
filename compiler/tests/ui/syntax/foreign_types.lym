@@ -1,0 +1,18 @@
+type Frog
+    str name
+    u8 age
+    bool hungry
+
+function area(f64 width, double height) returns f64
+    constant list[i32] sizes = list()
+    constant array[byte, 4] bytes = load()
+    variable int count = 0
+    variable float ratio = 1.5
+    variable uint total = 0
+    return width * height
+
+function unnamed(int)
+    return
+
+function fine(integer64 a, unsigned8 b, float32 c, boolean d, string e) returns integer64
+    return a
