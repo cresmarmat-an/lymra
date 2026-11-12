@@ -154,7 +154,8 @@ fn build_writes_an_executable_next_to_the_source() {
         .output()
         .expect("the built program runs");
     assert_eq!(text(&program.stdout), "built and run\n");
-    fs::remove_file(&executable).expect("the executable can be removed");
+    // Windows can keep a program it just ran locked while antivirus scans it; a leftover in the scratch directory is harmless.
+    let _ = fs::remove_file(&executable);
 }
 
 #[test]

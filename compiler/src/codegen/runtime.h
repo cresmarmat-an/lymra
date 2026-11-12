@@ -52,8 +52,13 @@
 #define LYMRA_NO_INLINE __declspec(noinline)
 #define LYMRA_UNREACHABLE() __assume(0)
 #define LYMRA_SIGNAL_FENCE() _ReadWriteBarrier()
-/* MSVC has no attribute for unused functions; a program uses only part of the runtime, so its warning is off. */
-#pragma warning(disable : 4505)
+/*
+ * Two MSVC warnings do not apply to generated code: a program uses only part
+ * of the runtime, and MSVC has no attribute for unused functions (C4505);
+ * and once runtime checks are inlined, the optimizer finds trap paths that a
+ * known value can never take (C4702). Lymra itself rejects unreachable code.
+ */
+#pragma warning(disable : 4505 4702)
 #else
 #error "Lymra programs are compiled with GCC, Clang or MSVC"
 #endif
@@ -525,8 +530,10 @@ LYMRA_UNUSED static void lymra_catch_stack_overflow(void) {
     }
     char top;
     lymra_stack_top = (uintptr_t)&top;
+    /* `rlim_t` is unsigned on most systems and signed on some, such as FreeBSD; the limit itself is never negative. */
+    uintmax_t size = (uintmax_t)limit.rlim_cur;
     size_t largest = SIZE_MAX - LYMRA_STACK_SLACK;
-    lymra_stack_reach = (limit.rlim_cur < largest ? (size_t)limit.rlim_cur : largest) + LYMRA_STACK_SLACK;
+    lymra_stack_reach = (size < largest ? (size_t)size : largest) + LYMRA_STACK_SLACK;
 
     stack_t alternate;
     alternate.ss_sp = lymra_signal_stack;
