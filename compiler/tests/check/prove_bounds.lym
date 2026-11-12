@@ -1,0 +1,18 @@
+#!prove bounds
+
+function at(array[integer32, 4] values, unsigned8 position) returns integer32
+    return values[position]
+
+function shifted(array[integer32, 4] values, integer64 position) returns integer32
+    if position < 4
+        return values[position]
+    return 0
+
+function main()
+    variable array[integer32, 4] values = array(1)
+    variable integer64 count = 0
+    while count < 4
+        values[count] = 2
+        count = count + 1
+    for index in range(0, 5)
+        print("{values[index]} {at(values, 1)} {shifted(values, 2)}")

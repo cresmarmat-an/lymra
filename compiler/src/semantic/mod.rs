@@ -154,6 +154,7 @@ struct Checker<'src, 'ast> {
     /// Names of `type` and `choice` declarations, which are not available yet and already reported.
     unavailable_types: HashSet<&'src str>,
     optimize: Option<OptimizeMode>,
+    prove_bounds: bool,
     /// The function whose body is being checked. `None` while top-level constants are computed.
     scope: Option<FunctionScope<'src>>,
 }
@@ -168,6 +169,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             constants: Vec::new(),
             unavailable_types: HashSet::new(),
             optimize: None,
+            prove_bounds: false,
             scope: None,
         }
     }
@@ -183,8 +185,10 @@ impl<'src, 'ast> Checker<'src, 'ast> {
 
     fn read_directives(&mut self, directives: &[ast::Directive]) {
         for directive in directives {
-            if let ast::DirectiveKind::Optimize(mode) = directive.kind {
-                self.optimize = Some(mode);
+            match directive.kind {
+                ast::DirectiveKind::Optimize(mode) => self.optimize = Some(mode),
+                ast::DirectiveKind::ProveBounds => self.prove_bounds = true,
+                ast::DirectiveKind::Edition(_) => {}
             }
         }
     }
@@ -439,6 +443,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 functions,
                 main,
                 optimize: self.optimize,
+                prove_bounds: self.prove_bounds,
             }),
             // Every failure is reported where it happens, so this cannot occur without an error above.
             _ => Err(self.diagnostics),

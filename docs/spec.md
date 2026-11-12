@@ -62,6 +62,8 @@ Directives in 0.1:
 
 `#!prove bounds` is the safe replacement for `#!nocheck`. Instead of switching checks off and trusting the programmer, it makes the compiler show that no check is needed. Hot loops get check-free code and keep their safety guarantee. The usual fix for an `L0104` is one `assert` before the loop, such as `assert length(items) >= count`, which pays for one check instead of one per iteration.
 
+The compiler proves an index from what it knows at that point: the bounds of a `for` loop over `range`, the conditions of `if`, `while` and `assert`, and values known while compiling, carried through arithmetic. A later compiler may prove more, never less, so a file that compiles with `#!prove bounds` keeps compiling.
+
 Rejected directives: `#!nocheck` and `#!nonstrict` would turn off safety, which contradicts Goal 1. `#!strict` would do nothing, because Lymra is always strict.
 
 ### 2.4 Indentation

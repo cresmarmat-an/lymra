@@ -1,0 +1,5 @@
+exit status 0
+--- standard output
+square 16, total 140
+the first square, now at index 3, is 0
+--- standard error

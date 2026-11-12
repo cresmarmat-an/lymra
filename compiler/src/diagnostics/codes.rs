@@ -51,6 +51,7 @@ error_codes! {
     L0101 => "directive after the top of the file",
     L0102 => "tabs and spaces mixed in indentation",
     L0103 => "name does not follow the naming style",
+    L0104 => "index not proven in range",
     L0105 => "unknown directive",
     L0106 => "directive used incorrectly",
     L0107 => "inconsistent indentation depth",

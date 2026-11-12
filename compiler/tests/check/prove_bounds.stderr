@@ -1,0 +1,34 @@
+error[L0104]: this index is not proven to stay inside its array
+ --> tests/check/prove_bounds.lym:4:19
+  |
+4 |     return values[position]
+  |                   ^^^^^^^^ this can be any `unsigned8` here; the array's indexes are 0 to 3
+  |
+help: `#!prove bounds` needs every index proven: check it before this line, with an `if` or with `assert position < 4`, or loop over a range that stays inside the array
+
+error[L0104]: this index is not proven to stay inside its array
+ --> tests/check/prove_bounds.lym:8:23
+  |
+8 |         return values[position]
+  |                       ^^^^^^^^ this can be at most 3; the array's indexes are 0 to 3
+  |
+help: `#!prove bounds` needs every index proven: check it before this line, with an `if` or with `assert position >= 0`, or loop over a range that stays inside the array
+
+error[L0104]: this index is not proven to stay inside its array
+  --> tests/check/prove_bounds.lym:15:16
+   |
+15 |         values[count] = 2
+   |                ^^^^^ this can be at most 3; the array's indexes are 0 to 3
+   |
+help: `#!prove bounds` needs every index proven: check it before this line, with an `if` or with `assert count >= 0`, or loop over a range that stays inside the array
+
+error[L0104]: this index is not proven to stay inside its array
+  --> tests/check/prove_bounds.lym:18:24
+   |
+18 |         print("{values[index]} {at(values, 1)} {shifted(values, 2)}")
+   |                        ^^^^^ this can be from 0 to 4; the array's indexes are 0 to 3
+   |
+help: `#!prove bounds` needs every index proven: check it before this line, with an `if` or with `assert index < 4`, or loop over a range that stays inside the array
+
+found 4 errors in tests/check/prove_bounds.lym
+run `lymra explain L0104` to read why a rule exists and how to fix it

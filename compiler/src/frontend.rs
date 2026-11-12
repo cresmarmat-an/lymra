@@ -4,7 +4,7 @@ use crate::ast::Module;
 use crate::diagnostics::Diagnostic;
 use crate::ir::Program;
 use crate::source::SourceFile;
-use crate::{lexer, lint, parser, semantic};
+use crate::{lexer, lint, optimize, parser, semantic};
 
 /// The syntax tree of a file and every syntax error found while building it.
 pub struct Analysis<'src> {
@@ -39,7 +39,15 @@ pub fn check(source: &SourceFile) -> Result<Program<'_>, Vec<Diagnostic>> {
     if !analysis.diagnostics.is_empty() {
         return Err(analysis.diagnostics);
     }
-    semantic::check(source, &analysis.module)
+    let program = semantic::check(source, &analysis.module)?;
+    // `#!prove bounds` turns every index the optimizer cannot prove into an error.
+    if program.prove_bounds {
+        let unproven = optimize::unproven_bounds(&program, source);
+        if !unproven.is_empty() {
+            return Err(unproven);
+        }
+    }
+    Ok(program)
 }
 
 /// Checks a file that is meant to run, which also needs a `main` function.

@@ -18,17 +18,37 @@
 mod analysis;
 mod interval;
 mod loops;
+mod proof;
 
+pub use proof::UnprovenIndex;
+
+use crate::diagnostics::Diagnostic;
 use crate::ir::{Program, Value};
+use crate::source::SourceFile;
 
-/// Removes every check the analysis proves can never fail.
-pub fn remove_proven_checks(program: &mut Program<'_>) {
+/// Removes every check the analysis proves can never fail, and returns the index checks that stay.
+pub fn remove_proven_checks(program: &mut Program<'_>) -> Vec<UnprovenIndex> {
     let constants: Vec<Value> = program
         .constants
         .iter()
         .map(|constant| constant.value.clone())
         .collect();
-    for function in &mut program.functions {
-        analysis::optimize_function(function, &constants);
-    }
+    program
+        .functions
+        .iter_mut()
+        .flat_map(|function| analysis::optimize_function(function, &constants))
+        .collect()
+}
+
+/**
+ * The errors `#!prove bounds` asks for: one for each index of `program` the
+ * analysis cannot prove inside its array. The program itself keeps its
+ * checks, so a build can still compare it with the optimized one.
+ */
+pub fn unproven_bounds(program: &Program<'_>, source: &SourceFile) -> Vec<Diagnostic> {
+    let mut proof = program.clone();
+    remove_proven_checks(&mut proof)
+        .iter()
+        .map(|unproven| unproven.diagnostic(source))
+        .collect()
 }

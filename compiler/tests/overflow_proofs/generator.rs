@@ -1,7 +1,7 @@
 /*!
  * Writes random programs in the part of Lymra the optimizer reasons about:
- * integer variables, arithmetic, `if`, `for` and `while` loops, and calls that
- * change a variable through a `variable` argument.
+ * integer variables, arithmetic, an array of them, `if`, `for` and `while`
+ * loops, and calls that change a variable through a `variable` argument.
  *
  * Literals cluster at the edges of the program's type, and some are picked to
  * land exactly on, or one past, a bound that an earlier condition set. Those
@@ -76,9 +76,14 @@ pub fn literal_text(value: i128) -> String {
     }
 }
 
+/// The array every function body has, of the program's type.
+const ARRAY: &str = "cells";
+
 struct Writer {
     random: Random,
     ty: IntegerType,
+    /// The length of the array the current body declares.
+    length: usize,
     variables: Vec<String>,
     /// Names that can be read but not changed: the input and the variables of the loops around the current line.
     readable: Vec<String>,
@@ -96,6 +101,7 @@ impl Writer {
         let mut writer = Self {
             random: Random::new(random.next()),
             ty,
+            length: 1,
             variables: Vec::new(),
             readable: Vec::new(),
             bounds: Vec::new(),
@@ -142,12 +148,23 @@ impl Writer {
             self.line(&format!("variable {} {name} = {initial}", self.ty.name()));
             self.variables.push(name);
         }
+        // Short arrays put more of the indexes the program computes right at an end.
+        self.length = 1 + self.random.below(12);
+        let filler = self.literal();
+        self.line(&format!(
+            "variable array[{}, {}] {ARRAY} = array({filler})",
+            self.ty.name(),
+            self.length
+        ));
         self.statements(2, 7);
         // Every variable has to change and be read, or the checker rejects the program.
         for name in self.variables.clone() {
             self.line(&format!("nudge(variable {name}, 0)"));
             self.line(&format!("print(\"{{{name}}}\")"));
         }
+        self.line(&format!("{ARRAY}[0] = {ARRAY}[length({ARRAY}) - 1]"));
+        self.line(&format!("for element in {ARRAY}"));
+        self.line("    print(\"{element}\")");
         self.depth = 0;
         self.line("");
         self.variables.clear();
@@ -197,10 +214,31 @@ impl Writer {
     }
 
     fn operand(&mut self) -> String {
-        match self.random.below(10) {
+        match self.random.below(12) {
             0..=3 => self.random.pick(&self.variables).clone(),
             4..=6 if !self.readable.is_empty() => self.random.pick(&self.readable).clone(),
+            7 | 8 => {
+                let index = self.index();
+                format!("{ARRAY}[{index}]")
+            }
             _ => self.literal(),
+        }
+    }
+
+    /**
+     * An index into the array: a value the program computed, which can fall
+     * outside it, or a literal inside it. A literal outside would be an error
+     * while compiling.
+     */
+    fn index(&mut self) -> String {
+        match self.random.below(6) {
+            0 | 1 if !self.readable.is_empty() => self.random.pick(&self.readable).clone(),
+            2 => {
+                let name = self.random.pick(&self.variables).clone();
+                format!("{name} % {}", self.length)
+            }
+            3 => self.random.below(self.length).to_string(),
+            _ => self.random.pick(&self.variables).clone(),
         }
     }
 
@@ -250,14 +288,39 @@ impl Writer {
 
     fn statement(&mut self) {
         let can_nest = self.depth < 4;
-        match self.random.below(12) {
+        match self.random.below(15) {
             4 | 5 if can_nest => self.if_statement(),
             6 | 7 if can_nest => self.for_loop(),
             8 if can_nest => self.while_loop(),
             9 => self.nudge(),
             10 => self.take(),
+            11 | 12 => self.element_assignment(),
+            13 if can_nest => self.for_each(),
             _ => self.assignment(),
         }
+    }
+
+    fn element_assignment(&mut self) {
+        let index = self.index();
+        let value = self.expression(2);
+        self.line(&format!("{ARRAY}[{index}] = {value}"));
+    }
+
+    /// A loop over the array. Its body can change the elements it has yet to reach.
+    fn for_each(&mut self) {
+        let name = format!("element_{}", self.loops_written);
+        self.loops_written += 1;
+        self.line(&format!("for {name} in {ARRAY}"));
+        self.depth += 1;
+        // Read the element first, so it is never unused.
+        let target = self.random.pick(&self.variables).clone();
+        self.line(&format!("{target} = {target} + {name}"));
+        self.readable.push(name);
+        self.loop_depth += 1;
+        self.statements(0, 2);
+        self.loop_depth -= 1;
+        self.readable.pop();
+        self.depth -= 1;
     }
 
     fn assignment(&mut self) {
@@ -315,13 +378,15 @@ impl Writer {
     fn for_loop(&mut self) {
         let name = format!("index_{}", self.loops_written);
         self.loops_written += 1;
-        let (start, end) = match self.random.below(4) {
+        let ty = self.ty.name();
+        let (start, end) = match self.random.below(5) {
             0 => (self.literal(), self.literal()),
             1 => ("0".to_owned(), self.operand()),
+            // A loop over the array's indexes, whose bounds checks the optimizer should prove.
+            2 => ("0".to_owned(), format!("{ty}(length({ARRAY}))")),
             _ => ("0".to_owned(), (self.random.below(40) + 1).to_string()),
         };
         // The conversion gives the range the program's type; two plain literals would make it `integer64`.
-        let ty = self.ty.name();
         self.line(&format!("for {name} in range({ty}({start}), {end})"));
         self.depth += 1;
         // Read the loop variable first, so it is never unused.

@@ -1,0 +1,28 @@
+#!prove bounds
+
+#[
+    Every index in this file is proven inside its array while compiling, so
+    no bounds check is left: the facts come from `for` loops over a range, a
+    remainder, an `assert`, a condition and a known value.
+]#
+
+constant integer64 size = 8
+
+function rotated(array[integer64, size] values, integer64 shift) returns array[integer64, size]
+    variable result = values
+    assert shift >= 0
+    for index in range(0, length(values))
+        result[(index + shift) % size] = values[index]
+    return result
+
+function main()
+    variable array[integer64, size] squares = array(0)
+    for index in range(0, size)
+        squares[index] = index * index
+    variable integer64 total = 0
+    for value in rotated(squares, 3)
+        total = total + value
+    constant integer64 middle = 4
+    if middle < length(squares)
+        print("square {squares[middle]}, total {total}")
+    print("the first square, now at index 3, is {rotated(squares, 3)[3]}")

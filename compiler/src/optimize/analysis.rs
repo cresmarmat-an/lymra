@@ -22,6 +22,7 @@ use std::collections::HashSet;
 
 use super::interval::Interval;
 use super::loops::{self, Change, Changes, Followed};
+use super::proof::UnprovenIndex;
 use crate::ir::{
     Argument, ArithmeticOperator, Block, Branch, Call, ComparisonOperator, Expr, ExprKind,
     Function, IntegerType, Local, LocalId, LogicOperator, PrintPart, Statement, Type, Value,
@@ -34,11 +35,15 @@ use crate::ir::{
  */
 const REFINEMENT_ROUNDS: usize = 3;
 
-/// Removes the checks in one function that its bounds prove unnecessary.
-pub(super) fn optimize_function(function: &mut Function<'_>, constants: &[Value]) {
-    let analyzer = Analyzer {
+/// Removes the checks in one function that its bounds prove unnecessary, and returns the indexes it could not prove.
+pub(super) fn optimize_function(
+    function: &mut Function<'_>,
+    constants: &[Value],
+) -> Vec<UnprovenIndex> {
+    let mut analyzer = Analyzer {
         locals: &function.locals,
         constants,
+        unproven: Vec::new(),
     };
     let mut bounds = Bounds(vec![None; function.locals.len()]);
     analyzer.walk_block(
@@ -47,6 +52,7 @@ pub(super) fn optimize_function(function: &mut Function<'_>, constants: &[Value]
         &mut Changes::new(),
         Mode::Remove,
     );
+    analyzer.unproven
 }
 
 /// Bounds for each local, by id. `None` stands for any value of the local's type.
@@ -98,6 +104,8 @@ enum Mode {
 struct Analyzer<'function> {
     locals: &'function [Local<'function>],
     constants: &'function [Value],
+    /// Every index check that stays, with what is known about the index there.
+    unproven: Vec<UnprovenIndex>,
 }
 
 /// True if no value from the operand intervals can make the operation fail.
@@ -203,8 +211,24 @@ impl Analyzer<'_> {
         })
     }
 
+    /**
+     * Clears an index check when every value the index can have lies inside
+     * its array, and otherwise records what is known about the index.
+     */
+    fn prove_index(&mut self, index: &Expr, length: u64, checked: &mut bool, bounds: &Bounds) {
+        if !*checked {
+            return;
+        }
+        let range = self.range(index, bounds);
+        if range.is_some_and(|range| range.low >= 0 && range.high < i128::from(length)) {
+            *checked = false;
+        } else {
+            self.unproven.push(UnprovenIndex::new(index, range, length));
+        }
+    }
+
     /// Clears the checks of an expression's operations that cannot fail with values in these bounds.
-    fn remove_checks(&self, expr: &mut Expr, bounds: &Bounds) {
+    fn remove_checks(&mut self, expr: &mut Expr, bounds: &Bounds) {
         match &mut expr.kind {
             ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) => {}
             ExprKind::Negate { operand, .. }
@@ -226,6 +250,16 @@ impl Analyzer<'_> {
                 self.remove_checks(right, bounds);
             }
             ExprKind::Call(call) => self.remove_argument_checks(call, bounds),
+        }
+        if let ExprKind::Index {
+            index,
+            length,
+            checked,
+            ..
+        } = &mut expr.kind
+        {
+            self.prove_index(index, *length, checked, bounds);
+            return;
         }
         let Some(ty) = expr.ty.as_integer() else {
             return;
@@ -259,7 +293,7 @@ impl Analyzer<'_> {
         }
     }
 
-    fn remove_argument_checks(&self, call: &mut Call, bounds: &Bounds) {
+    fn remove_argument_checks(&mut self, call: &mut Call, bounds: &Bounds) {
         for argument in &mut call.arguments {
             if let Argument::Value(value) = argument {
                 self.remove_checks(value, bounds);
@@ -272,7 +306,13 @@ impl Analyzer<'_> {
      * that is the job, then forgets what is known about every local it
      * passes with `variable`, since the called function may change it.
      */
-    fn evaluate(&self, expr: &mut Expr, bounds: &mut Bounds, changes: &mut Changes, mode: Mode) {
+    fn evaluate(
+        &mut self,
+        expr: &mut Expr,
+        bounds: &mut Bounds,
+        changes: &mut Changes,
+        mode: Mode,
+    ) {
         if mode == Mode::Remove {
             self.remove_checks(expr, bounds);
         }
@@ -282,7 +322,7 @@ impl Analyzer<'_> {
     }
 
     fn walk_block(
-        &self,
+        &mut self,
         block: &mut Block,
         bounds: &mut Bounds,
         changes: &mut Changes,
@@ -297,7 +337,7 @@ impl Analyzer<'_> {
     }
 
     fn walk_statement(
-        &self,
+        &mut self,
         statement: &mut Statement,
         bounds: &mut Bounds,
         changes: &mut Changes,
@@ -319,6 +359,9 @@ impl Analyzer<'_> {
             // An element of an array changes, which no bounds the analysis holds describe.
             Statement::Assign { target, value } => {
                 for index in &mut target.indexes {
+                    if mode == Mode::Remove {
+                        self.prove_index(&index.value, index.length, &mut index.checked, bounds);
+                    }
                     self.evaluate(&mut index.value, bounds, changes, mode);
                 }
                 self.evaluate(value, bounds, changes, mode);
@@ -391,7 +434,7 @@ impl Analyzer<'_> {
     }
 
     fn walk_if(
-        &self,
+        &mut self,
         branches: &mut [Branch],
         otherwise: Option<&mut Block>,
         bounds: &mut Bounds,
@@ -451,7 +494,7 @@ impl Analyzer<'_> {
 
     /// A `while` loop runs an unknown number of times, so every variable it changes can hold any value.
     fn walk_while(
-        &self,
+        &mut self,
         condition: &mut Expr,
         body: &mut Block,
         bounds: &mut Bounds,
@@ -469,7 +512,7 @@ impl Analyzer<'_> {
 
     #[allow(clippy::too_many_arguments)]
     fn walk_for(
-        &self,
+        &mut self,
         variable: Option<LocalId>,
         start: &mut Expr,
         end: &mut Expr,
@@ -503,7 +546,7 @@ impl Analyzer<'_> {
      */
     #[allow(clippy::too_many_arguments)]
     fn walk_counted(
-        &self,
+        &mut self,
         body: &mut Block,
         variable: Option<(LocalId, Option<Interval>)>,
         trips: i128,
@@ -567,7 +610,7 @@ impl Analyzer<'_> {
      */
     #[allow(clippy::too_many_arguments)]
     fn loop_bounds(
-        &self,
+        &mut self,
         body: &mut Block,
         variable: Option<(LocalId, Option<Interval>)>,
         trips: i128,

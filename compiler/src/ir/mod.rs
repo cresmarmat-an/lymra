@@ -21,7 +21,7 @@ pub type ConstantId = usize;
 /// Index into `Function::locals`.
 pub type LocalId = usize;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Program<'src> {
     pub constants: Vec<Constant<'src>>,
     pub functions: Vec<Function<'src>>,
@@ -29,16 +29,18 @@ pub struct Program<'src> {
     pub main: Option<FunctionId>,
     /// The mode chosen with `#!optimize`, if the file sets one.
     pub optimize: Option<OptimizeMode>,
+    /// Set by `#!prove bounds`: every index has to be proven in range while compiling.
+    pub prove_bounds: bool,
 }
 
 /// A top-level constant, already computed.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Constant<'src> {
     pub name: &'src str,
     pub value: Value,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Function<'src> {
     pub name: &'src str,
     pub parameters: Vec<LocalId>,
@@ -49,7 +51,7 @@ pub struct Function<'src> {
 }
 
 /// A parameter, a binding, or a loop variable of one function.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Local<'src> {
     pub name: &'src str,
     pub ty: Type,
@@ -58,12 +60,12 @@ pub struct Local<'src> {
     pub by_reference: bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Block {
     pub statements: Vec<Statement>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Statement {
     Declare {
         local: LocalId,
@@ -116,7 +118,7 @@ pub enum Statement {
 }
 
 /// Where an assignment stores its value: a local, or an element inside it.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Place {
     pub local: LocalId,
     /// The indexes from the local inward: `grid[row][column]` has two.
@@ -124,7 +126,7 @@ pub struct Place {
 }
 
 /// One `[index]` of a place.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PlaceIndex {
     pub value: Expr,
     /// The length of the array the index selects from.
@@ -135,13 +137,13 @@ pub struct PlaceIndex {
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Branch {
     pub condition: Expr,
     pub body: Block,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum PrintPart {
     Text(String),
     /// A value, and how it is written as text.
@@ -173,14 +175,14 @@ impl TextForm {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Expr {
     pub kind: ExprKind,
     pub ty: Type,
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ExprKind {
     Literal(Value),
     Local(LocalId),
@@ -295,13 +297,13 @@ impl Expr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Call {
     pub function: FunctionId,
     pub arguments: Vec<Argument>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Argument {
     Value(Expr),
     /// A binding passed with `variable`, which the called function may change.

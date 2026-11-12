@@ -11,6 +11,7 @@ From 04 on, they are the chapter of the [specification](../spec.md) the rule com
 | [L0101](L0101.md) | directive after the top of the file |
 | [L0102](L0102.md) | tabs and spaces mixed in indentation |
 | [L0103](L0103.md) | name does not follow the naming style |
+| [L0104](L0104.md) | index not proven in range |
 | [L0105](L0105.md) | unknown directive |
 | [L0106](L0106.md) | directive used incorrectly |
 | [L0107](L0107.md) | inconsistent indentation depth |
