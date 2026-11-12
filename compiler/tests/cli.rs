@@ -189,7 +189,7 @@ fn a_missing_c_compiler_is_explained() {
     let report = text(&output.stderr);
     assert!(report.starts_with("error: no C compiler found"), "{report}");
     assert!(
-        report.contains("install GCC or Clang, or set CC"),
+        report.contains("install GCC, Clang or MSVC, or set CC"),
         "{report}"
     );
 }

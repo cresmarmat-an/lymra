@@ -29,7 +29,7 @@ Commands:
   help                 Show this message
   version              Show the compiler version
 
-Building needs a C compiler, GCC or Clang. Set CC to choose one.
+Building needs a C compiler: GCC, Clang or MSVC. Set CC to choose one.
 ";
 
 /// The commands that take exactly one operand: a file, or an error code for `explain`.

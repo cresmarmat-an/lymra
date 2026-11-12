@@ -20,6 +20,9 @@ use crate::ast::OptimizeMode;
 
 const COMPILER_CANDIDATES: [&str; 4] = ["cc", "gcc", "clang", "cl"];
 
+/// The first MSVC with C11, which the generated code is written in: the one in Visual Studio 2019 version 16.8.
+const OLDEST_MSVC: (u32, u32) = (19, 28);
+
 /// How the C compiler treats warnings in the generated code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Warnings {
@@ -35,6 +38,8 @@ pub enum DriverError {
     NoCompiler { tried: Vec<String> },
     /// The C compiler rejected the generated code, which is a bug in this compiler.
     CompilerRejected { command: String, output: String },
+    /// The C compiler is an MSVC older than the generated code needs.
+    CompilerTooOld { compiler: String, version: String },
     /// A file, a directory or a process could not be used.
     Io { action: String, error: io::Error },
 }
@@ -45,7 +50,8 @@ impl fmt::Display for DriverError {
             Self::NoCompiler { tried } => write!(
                 formatter,
                 "error: no C compiler found (tried {})\n\
-                 help: Lymra compiles to C; install GCC or Clang, or set CC to the compiler to use\n",
+                 help: Lymra compiles to C; install GCC, Clang or MSVC, or set CC to the compiler to use. \
+                 MSVC's `cl` is found from a Visual Studio developer prompt.\n",
                 tried.join(", ")
             ),
             Self::CompilerRejected { command, output } => write!(
@@ -53,6 +59,13 @@ impl fmt::Display for DriverError {
                 "error: the C compiler rejected the code Lymra generated\n\
                  This is a bug in the Lymra compiler, not in your program. Please report it with the source file.\n\
                  command: {command}\n{output}"
+            ),
+            Self::CompilerTooOld { compiler, version } => write!(
+                formatter,
+                "error: `{compiler}` is MSVC {version}, too old to build Lymra programs\n\
+                 help: Lymra needs MSVC {}.{} or newer, from Visual Studio 2019 version 16.8 on; \
+                 update Visual Studio or its Build Tools, or set CC to GCC or Clang\n",
+                OLDEST_MSVC.0, OLDEST_MSVC.1
             ),
             Self::Io { action, error } => writeln!(formatter, "error: cannot {action}: {error}"),
         }
@@ -204,6 +217,12 @@ impl Compiler {
         if output.status.success() {
             return Ok(());
         }
+        if let Some(version) = self.too_old_msvc() {
+            return Err(DriverError::CompilerTooOld {
+                compiler: self.name(),
+                version,
+            });
+        }
         let mut report = String::from_utf8_lossy(&output.stderr).into_owned();
         report.push_str(&String::from_utf8_lossy(&output.stdout));
         Err(DriverError::CompilerRejected {
@@ -211,6 +230,36 @@ impl Compiler {
             output: report,
         })
     }
+
+    /**
+     * The version of this compiler when it is an MSVC too old for the
+     * generated code. Asked only after the compiler rejected the code, so a
+     * successful build never pays for it.
+     */
+    fn too_old_msvc(&self) -> Option<String> {
+        if self.style() != Style::Msvc {
+            return None;
+        }
+        let output = Command::new(&self.program)
+            .args(&self.leading_arguments)
+            .stdin(Stdio::null())
+            .output()
+            .ok()?;
+        let version = msvc_version(&String::from_utf8_lossy(&output.stderr))?;
+        (version < OLDEST_MSVC).then(|| format!("{}.{}", version.0, version.1))
+    }
+}
+
+/// The major and minor version in the banner `cl` prints, as in `Version 19.29.30154`, in whatever language it is in.
+fn msvc_version(banner: &str) -> Option<(u32, u32)> {
+    banner.split_whitespace().find_map(|word| {
+        let mut numbers = word.split('.').map(str::parse::<u32>);
+        let major = numbers.next()?.ok()?;
+        let minor = numbers.next()?.ok()?;
+        // A version has a third number, which keeps other numbers in the banner from being taken for one.
+        numbers.next()?.ok()?;
+        Some((major, minor))
+    })
 }
 
 fn optimization_flags(mode: Option<OptimizeMode>) -> &'static [&'static str] {
@@ -321,6 +370,18 @@ mod tests {
         assert_eq!(compiler.leading_arguments, ["-m32", "-static"]);
         assert_eq!(compiler.name(), "gcc -m32 -static");
         assert_eq!(Compiler::from_command(" \t "), None);
+    }
+
+    #[test]
+    fn the_msvc_version_is_read_from_its_banner_in_any_language() {
+        let english = "Microsoft (R) C/C++ Optimizing Compiler Version 19.29.30154 for x64\n\
+                       Copyright (C) Microsoft Corporation.  All rights reserved.\n";
+        assert_eq!(msvc_version(english), Some((19, 29)));
+        let japanese = "Microsoft(R) C/C++ \u{6700}\u{9069}\u{5316}\u{30b3}\u{30f3}\u{30d1}\u{30a4}\u{30e9} \
+                        Version 19.16.27051 for x86";
+        assert_eq!(msvc_version(japanese), Some((19, 16)));
+        assert_eq!(msvc_version("clang-cl: error: no input files"), None);
+        assert!((19, 27) < OLDEST_MSVC && (19, 28) >= OLDEST_MSVC);
     }
 
     #[test]
