@@ -105,7 +105,7 @@ jobs:
       - name: Lint
         run: cargo clippy --all-targets ${{ matrix.target && format('--target={0}', matrix.target) || '' }} -- -D warnings
       - name: Test
-        run: cargo test ${{ matrix.target && format('--target={0}', matrix.target) || '' }}
+        run: cargo test --no-fail-fast ${{ matrix.target && format('--target={0}', matrix.target) || '' }}
 
   thirty-two-bit:
     name: Test 32-bit programs on Linux
@@ -117,7 +117,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y gcc-multilib
       # With CC set, every program is also built as 32-bit code, and has to behave exactly as the 64-bit builds do.
       - name: Test
-        run: cargo test
+        run: cargo test --no-fail-fast
         env:
           CC: gcc -m32
 
@@ -155,7 +155,7 @@ jobs:
           ./probe
       # With CC set, every program the tests build is also built for the emulated processor and run through QEMU.
       - name: Test
-        run: cargo test
+        run: cargo test --no-fail-fast
         env:
           CC: ${{ matrix.compiler }} -static
 
@@ -169,7 +169,7 @@ jobs:
         run: arch -x86_64 /usr/bin/true || sudo softwareupdate --install-rosetta --agree-to-license
       # With CC set, every program the tests build is also built for x86-64 and run through Rosetta.
       - name: Test
-        run: cargo test
+        run: cargo test --no-fail-fast
         env:
           CC: clang -arch x86_64
 
@@ -186,7 +186,7 @@ jobs:
           prepare: pkg install -y rust
           run: |
             cc --version
-            cargo test
+            cargo test --no-fail-fast
 
   freebsd-arm:
     name: Test on FreeBSD ARM64
@@ -204,7 +204,7 @@ jobs:
           run: |
             uname -m
             cc --version
-            cargo test
+            cargo test --no-fail-fast
 
   openbsd:
     name: Test on OpenBSD x86-64
@@ -219,7 +219,7 @@ jobs:
           prepare: pkg_add rust
           run: |
             cc --version
-            cargo test
+            cargo test --no-fail-fast
 
   netbsd:
     name: Test on NetBSD x86-64
@@ -236,7 +236,7 @@ jobs:
             pkgin -y install rust
           run: |
             cc --version
-            cargo test
+            cargo test --no-fail-fast
 
   format:
     name: Check formatting
@@ -254,4 +254,4 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@1.85.0
-      - run: cargo test
+      - run: cargo test --no-fail-fast

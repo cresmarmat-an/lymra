@@ -97,6 +97,13 @@ int main(int argc, char **argv) {
     STARTUPINFOEXA startup;
     memset(&startup, 0, sizeof startup);
     startup.StartupInfo.cb = sizeof startup;
+    /*
+     * Null standard handles, which Windows replaces with the pseudo console's
+     * when the program starts. Without them, Windows hands the program this
+     * host's own standard handles, pipes here, and its output would go around
+     * the pseudo console, as it does not in a terminal.
+     */
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
     startup.lpAttributeList = attributes;
     char command[MAX_PATH + 3];
     snprintf(command, sizeof command, "\"%s\"", argv[1]);
@@ -155,6 +162,13 @@ fn a_pseudo_console_receives_the_text_and_the_error_a_program_writes() {
             .output()
             .expect("the host runs");
         let received = String::from_utf8_lossy(&output.stdout);
+        // The host writes nothing of its own there, so anything on it went around the pseudo console.
+        assert!(
+            output.stderr.is_empty(),
+            "{}: the program wrote around the pseudo console:\n{:?}",
+            compiler.name(),
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(
             output.status.code(),
             Some(RUNTIME_ERROR_STATUS),
