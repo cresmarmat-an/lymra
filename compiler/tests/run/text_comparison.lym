@@ -1,0 +1,19 @@
+#[
+    Text compares by its UTF-8 bytes, which is the order of the characters'
+    code points: every capital letter comes before every small one, and a
+    text that starts another comes first.
+]#
+
+function compared(string left, string right)
+    print("[{left}] < [{right}]: {left < right}, equal: {left == right}, at least: {left >= right}")
+
+function main()
+    compared("apple", "banana")
+    compared("apple", "apple")
+    compared("Zebra", "apple")
+    compared("app", "apple")
+    compared("", "a")
+    compared("é", "z")
+    constant greeting = "hi"
+    if greeting != "hello"
+        print("known while compiling: {"b" > "a"}")

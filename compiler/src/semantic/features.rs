@@ -26,7 +26,6 @@ pub(super) enum Feature {
     Choices,
     Fields,
     NamedArguments,
-    TextComparison,
     TextBuilding,
     Lists,
     ForEach,
@@ -67,7 +66,6 @@ impl Feature {
             Self::Choices => "choices and `match` are",
             Self::Fields => "fields are",
             Self::NamedArguments => "named arguments are",
-            Self::TextComparison => "comparing text is",
             Self::TextBuilding => {
                 return "text with interpolation can only be given to `print` for now".to_owned();
             }
@@ -92,8 +90,7 @@ impl Feature {
             | Self::CustomTypes
             | Self::Choices
             | Self::Fields
-            | Self::NamedArguments
-            | Self::TextComparison => 2,
+            | Self::NamedArguments => 2,
             Self::TextBuilding
             | Self::Lists
             | Self::ForEach

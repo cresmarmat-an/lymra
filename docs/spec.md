@@ -201,9 +201,11 @@ Type rules:
 |---|---|---|
 | `+` `-` `*` `/` `%` | two integers of the same type | that type |
 | `-` in front of a value | a signed integer | the same type |
-| `<` `<=` `>` `>=` | two integers of the same type | `boolean` |
-| `==` `!=` | two integers, or two `boolean` values, of the same type | `boolean` |
+| `<` `<=` `>` `>=` | two integers of the same type, or two `string` values | `boolean` |
+| `==` `!=` | two integers of the same type, two `boolean` values, or two `string` values | `boolean` |
 | `and` `or` `not` | `boolean` values | `boolean` |
+
+Text compares by its UTF-8 bytes, one at a time, which is the order of the characters' code points: `"apple" < "banana"`, every capital letter comes before every small one, and a text that starts another comes first, as `"app" < "apple"`. The order is the same on every system, whatever its language settings.
 
 Any other use is error `L0405`. `and` and `or` only evaluate their right side when the left side does not decide the result already.
 

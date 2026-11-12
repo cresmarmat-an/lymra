@@ -1,0 +1,10 @@
+exit status 0
+--- standard output
+[apple] < [banana]: true, equal: false, at least: false
+[apple] < [apple]: false, equal: true, at least: true
+[Zebra] < [apple]: true, equal: false, at least: false
+[app] < [apple]: true, equal: false, at least: false
+[] < [a]: true, equal: false, at least: false
+[é] < [z]: false, equal: false, at least: true
+known while compiling: true
+--- standard error

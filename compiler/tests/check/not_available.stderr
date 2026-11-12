@@ -78,14 +78,6 @@ error[L0309]: text with interpolation can only be given to `print` for now
    |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-error[L0309]: comparing text is not available yet
-  --> tests/check/not_available.lym:18:21
-   |
-18 |     constant same = "a" == "b"
-   |                     ^^^^^^^^^^ the compiler adds this in roadmap phase 2
-   |
-help: write this part another way for now; the roadmap in the README lists what each phase adds
-
 error[L0309]: fields are not available yet
   --> tests/check/not_available.lym:19:13
    |
@@ -134,5 +126,5 @@ error[L0309]: `float32` and `float64` are not available yet
    |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-found 17 errors in tests/check/not_available.lym
+found 16 errors in tests/check/not_available.lym
 run `lymra explain L0309` to read why a rule exists and how to fix it

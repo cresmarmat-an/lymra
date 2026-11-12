@@ -496,7 +496,6 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             )));
         }
         match &left.ty {
-            Type::String => return Err(self.report(Feature::TextComparison.diagnostic(span))),
             Type::Boolean if !operator.is_equality() => {
                 return Err(self.report(errors::operator_type(
                     format!("`{symbol}` compares numbers, and a `boolean` has no order"),
@@ -513,7 +512,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     "compare the elements one by one in a loop",
                 )));
             }
-            Type::Integer(_) | Type::Boolean => {}
+            Type::Integer(_) | Type::Boolean | Type::String => {}
         }
         if let (Some(left_value), Some(right_value)) =
             (self.known_value(&left), self.known_value(&right))

@@ -240,7 +240,14 @@ impl Generator<'_, '_> {
         else {
             return self.expr(function, expr, writer);
         };
+        let is_text = matches!(left.ty, Type::String);
         let (left, right) = self.pair(function, left, right, writer);
+        if is_text {
+            return format!(
+                "lymra_compare_text({left}, {right}) {} 0",
+                operator.symbol()
+            );
+        }
         format!("{left} {} {right}", operator.symbol())
     }
 

@@ -555,6 +555,20 @@ LYMRA_UNUSED static inline uint64_t lymra_check_unsigned(uint64_t value, uint64_
     return value;
 }
 
+/*
+ * Orders two texts by their UTF-8 bytes, which is the order of their
+ * characters: negative when `left` comes first, zero when they are equal,
+ * positive otherwise. A text that starts another comes first.
+ */
+LYMRA_UNUSED static inline int lymra_compare_text(lymra_string left, lymra_string right) {
+    size_t shorter = left.length < right.length ? left.length : right.length;
+    int order = shorter == 0 ? 0 : memcmp(left.data, right.data, shorter);
+    if (order != 0) {
+        return order;
+    }
+    return (left.length > right.length) - (left.length < right.length);
+}
+
 LYMRA_UNUSED static inline void lymra_write_text(lymra_string text) {
     lymra_append(text.data, text.length);
 }

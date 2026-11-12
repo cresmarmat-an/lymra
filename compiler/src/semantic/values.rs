@@ -130,7 +130,8 @@ pub(super) fn fold_compare(
             left.cmp(right)
         }
         (Value::Boolean(left), Value::Boolean(right)) if operator.is_equality() => left.cmp(right),
-        (Value::Text(left), Value::Text(right)) if operator.is_equality() => left.cmp(right),
+        // Text orders by its UTF-8 bytes, as the generated code compares it.
+        (Value::Text(left), Value::Text(right)) => left.as_bytes().cmp(right.as_bytes()),
         _ => return None,
     };
     Some(match operator {
