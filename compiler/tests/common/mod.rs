@@ -89,25 +89,51 @@ pub fn files_with_extension(directory: &Path, extension: &str) -> Vec<PathBuf> {
     found
 }
 
+/// When set, names the exact C compilers the tests build with, separated by commas, as in `cl, clang -m32`.
+const COMPILERS_VARIABLE: &str = "LYMRA_TEST_COMPILERS";
+
 /**
- * The C compilers the tests build with: GCC, Clang and MSVC's `cl` where they
- * are installed, and the one in `CC` when it is set, with its arguments, as
- * in `CC="gcc -m32"`. Programs have to behave the same with every one.
+ * The C compilers the tests build with. `LYMRA_TEST_COMPILERS` names them
+ * exactly, for a machine where only some of the installed ones suit the
+ * target. Otherwise they are GCC, Clang and MSVC's `cl` where installed, and
+ * the one in `CC` when it is set, with its arguments, as in
+ * `CC="gcc -m32"`. Programs have to behave the same with every one.
  */
 pub fn c_compilers() -> Vec<Compiler> {
-    let mut compilers: Vec<Compiler> = ["gcc", "clang", "cl"]
-        .iter()
-        .map(|name| Compiler::named(name))
-        .filter(Compiler::is_available)
-        .collect();
-    if let Some(chosen) = Compiler::from_environment() {
-        if chosen.is_available() && !compilers.contains(&chosen) {
-            compilers.push(chosen);
+    let compilers: Vec<Compiler> = match std::env::var_os(COMPILERS_VARIABLE) {
+        Some(list) => list
+            .to_string_lossy()
+            .split(',')
+            .filter_map(Compiler::from_command)
+            .map(required)
+            .collect(),
+        None => {
+            let mut found: Vec<Compiler> = ["gcc", "clang", "cl"]
+                .iter()
+                .map(|name| Compiler::named(name))
+                .filter(Compiler::is_available)
+                .collect();
+            if let Some(chosen) = Compiler::from_environment().map(required) {
+                if !found.contains(&chosen) {
+                    found.push(chosen);
+                }
+            }
+            found
         }
-    }
+    };
     assert!(
         !compilers.is_empty(),
         "these tests need a C compiler; install GCC, Clang or MSVC"
     );
     compilers
+}
+
+/// A compiler named in the environment has to start: skipping it would quietly drop the target it stands for.
+fn required(compiler: Compiler) -> Compiler {
+    assert!(
+        compiler.is_available(),
+        "`{}` is named in the environment but cannot be started",
+        compiler.name()
+    );
+    compiler
 }

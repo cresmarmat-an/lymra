@@ -100,9 +100,13 @@ impl Compiler {
 
     /// The compiler `CC` names with its leading arguments, as in `CC="gcc -m32"`, or `None` when `CC` is not set.
     pub fn from_environment() -> Option<Self> {
-        let variable = std::env::var_os("CC").filter(|value| !value.is_empty())?;
-        let text = variable.to_string_lossy().into_owned();
-        let mut words = text.split_whitespace().map(OsString::from);
+        let variable = std::env::var_os("CC")?;
+        Self::from_command(&variable.to_string_lossy())
+    }
+
+    /// The compiler a command starts with and the arguments after it, as in `gcc -m32`, or `None` for a blank command.
+    pub fn from_command(command: &str) -> Option<Self> {
+        let mut words = command.split_whitespace().map(OsString::from);
         let program = words.next()?;
         Some(Self {
             program,
@@ -307,6 +311,16 @@ mod tests {
         assert_eq!(optimization_flags(Some(OptimizeMode::Debug)), ["-O0", "-g"]);
         assert_eq!(msvc_optimization_flags(None), ["/O2"]);
         assert_eq!(msvc_optimization_flags(Some(OptimizeMode::Size)), ["/O1"]);
+    }
+
+    #[test]
+    fn a_command_names_the_compiler_and_its_leading_arguments() {
+        let compiler =
+            Compiler::from_command("  gcc   -m32 -static ").expect("the command names a compiler");
+        assert_eq!(compiler.program, "gcc");
+        assert_eq!(compiler.leading_arguments, ["-m32", "-static"]);
+        assert_eq!(compiler.name(), "gcc -m32 -static");
+        assert_eq!(Compiler::from_command(" \t "), None);
     }
 
     #[test]
