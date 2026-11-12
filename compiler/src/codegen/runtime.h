@@ -263,13 +263,17 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
 /*
  * Whether `left op right` falls outside the type, and when it does not, its
  * value in `*result`. GCC and Clang compute this with one instruction and its
- * overflow flag. The portable version, for other compilers, compares with the
- * type's limits before it computes anything, so it never overflows itself.
- * Defining LYMRA_PORTABLE_ARITHMETIC selects it everywhere, which the tests
- * use to compare the two.
+ * overflow flag. Other compilers get code that never overflows itself: a sum
+ * or a difference is compared with the type's limits before it is computed,
+ * and a product of types up to 32 bits is exact in 64 bits, so one multiply
+ * and one comparison decide it. A 64-bit product comes from the 128-bit
+ * multiply of MSVC on x86-64 and ARM64, and elsewhere from comparing with a
+ * limit divided by one operand. Defining LYMRA_PORTABLE_ARITHMETIC selects
+ * the code without builtins or intrinsics everywhere, which the tests use to
+ * check it.
  */
 #if (defined(__GNUC__) || defined(__clang__)) && !defined(LYMRA_PORTABLE_ARITHMETIC)
-#define LYMRA_OVERFLOW_CHECKS(name, type, minimum, maximum)                                                    \
+#define LYMRA_OVERFLOW_CHECKS(name, type)                                                                      \
     LYMRA_UNUSED static inline bool lymra_add_overflows_##name(type left, type right, type *result) {          \
         return __builtin_add_overflow(left, right, result);                                                    \
     }                                                                                                          \
@@ -279,10 +283,11 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
     LYMRA_UNUSED static inline bool lymra_multiply_overflows_##name(type left, type right, type *result) {     \
         return __builtin_mul_overflow(left, right, result);                                                    \
     }
-#define LYMRA_SIGNED_OVERFLOW_CHECKS(name, type, minimum, maximum) LYMRA_OVERFLOW_CHECKS(name, type, minimum, maximum)
-#define LYMRA_UNSIGNED_OVERFLOW_CHECKS(name, type, maximum) LYMRA_OVERFLOW_CHECKS(name, type, 0, maximum)
+/* The builtins take every width, so they need no way of checking a product. */
+#define LYMRA_SIGNED_OVERFLOW_CHECKS(name, type, minimum, maximum, product) LYMRA_OVERFLOW_CHECKS(name, type)
+#define LYMRA_UNSIGNED_OVERFLOW_CHECKS(name, type, maximum, product) LYMRA_OVERFLOW_CHECKS(name, type)
 #else
-#define LYMRA_SIGNED_OVERFLOW_CHECKS(name, type, minimum, maximum)                                             \
+#define LYMRA_SIGNED_OVERFLOW_CHECKS(name, type, minimum, maximum, product)                                    \
     LYMRA_UNUSED static inline bool lymra_add_overflows_##name(type left, type right, type *result) {          \
         if ((right > 0 && left > (maximum) - right) || (right < 0 && left < (minimum) - right)) {              \
             return true;                                                                                       \
@@ -297,16 +302,8 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
         *result = (type)(left - right);                                                                        \
         return false;                                                                                          \
     }                                                                                                          \
-    LYMRA_UNUSED static inline bool lymra_multiply_overflows_##name(type left, type right, type *result) {     \
-        /* Each case divides a limit by a value that cannot make the division overflow. */                   \
-        if (left > 0 ? (right > 0 ? left > (maximum) / right : right < (minimum) / left)                       \
-                     : (right > 0 ? left < (minimum) / right : left != 0 && right < (maximum) / left)) {       \
-            return true;                                                                                       \
-        }                                                                                                      \
-        *result = (type)(left * right);                                                                        \
-        return false;                                                                                          \
-    }
-#define LYMRA_UNSIGNED_OVERFLOW_CHECKS(name, type, maximum)                                                    \
+    product(name, type, minimum, maximum)
+#define LYMRA_UNSIGNED_OVERFLOW_CHECKS(name, type, maximum, product)                                           \
     LYMRA_UNUSED static inline bool lymra_add_overflows_##name(type left, type right, type *result) {          \
         if (left > (maximum) - right) {                                                                        \
             return true;                                                                                       \
@@ -321,6 +318,88 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
         *result = (type)(left - right);                                                                        \
         return false;                                                                                          \
     }                                                                                                          \
+    product(name, type, 0, maximum)
+/* A product of types up to 32 bits is exact in 64 bits. */
+#define LYMRA_SIGNED_WIDENED_PRODUCT(name, type, minimum, maximum)                                             \
+    LYMRA_UNUSED static inline bool lymra_multiply_overflows_##name(type left, type right, type *result) {     \
+        int64_t product = (int64_t)left * right;                                                               \
+        if (product < (minimum) || product > (maximum)) {                                                      \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = (type)product;                                                                               \
+        return false;                                                                                          \
+    }
+#define LYMRA_UNSIGNED_WIDENED_PRODUCT(name, type, minimum, maximum)                                           \
+    LYMRA_UNUSED static inline bool lymra_multiply_overflows_##name(type left, type right, type *result) {     \
+        uint64_t product = (uint64_t)left * right;                                                             \
+        if (product > (maximum)) {                                                                             \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = (type)product;                                                                               \
+        return false;                                                                                          \
+    }
+#if defined(_MSC_VER) && !defined(LYMRA_PORTABLE_ARITHMETIC) && defined(_M_X64) && !defined(_M_ARM64EC)
+/* The high 64 bits of the full product, with the low 64 bits in `*low`, from one 128-bit multiply. */
+LYMRA_UNUSED static inline int64_t lymra_signed_product(int64_t left, int64_t right, int64_t *low) {
+    int64_t high = 0;
+    *low = _mul128(left, right, &high);
+    return high;
+}
+LYMRA_UNUSED static inline uint64_t lymra_unsigned_product(uint64_t left, uint64_t right, uint64_t *low) {
+    uint64_t high = 0;
+    *low = _umul128(left, right, &high);
+    return high;
+}
+#define LYMRA_FULL_PRODUCT 1
+#elif defined(_MSC_VER) && !defined(LYMRA_PORTABLE_ARITHMETIC) && defined(_M_ARM64)
+LYMRA_UNUSED static inline int64_t lymra_signed_product(int64_t left, int64_t right, int64_t *low) {
+    *low = (int64_t)((uint64_t)left * (uint64_t)right);
+    return __mulh(left, right);
+}
+LYMRA_UNUSED static inline uint64_t lymra_unsigned_product(uint64_t left, uint64_t right, uint64_t *low) {
+    *low = left * right;
+    return __umulh(left, right);
+}
+#define LYMRA_FULL_PRODUCT 1
+#endif
+#if defined(LYMRA_FULL_PRODUCT)
+/*
+ * A 64-bit product fits when its high half only repeats the sign of its low
+ * half. The high half is read in a statement of its own, after the multiply
+ * has written the low half.
+ */
+#define LYMRA_SIGNED_64_PRODUCT(name, type, minimum, maximum)                                                  \
+    LYMRA_UNUSED static inline bool lymra_multiply_overflows_##name(type left, type right, type *result) {     \
+        type low = 0;                                                                                          \
+        type high = lymra_signed_product(left, right, &low);                                                   \
+        if (high != (low < 0 ? -1 : 0)) {                                                                      \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = low;                                                                                         \
+        return false;                                                                                          \
+    }
+#define LYMRA_UNSIGNED_64_PRODUCT(name, type, minimum, maximum)                                                \
+    LYMRA_UNUSED static inline bool lymra_multiply_overflows_##name(type left, type right, type *result) {     \
+        type low = 0;                                                                                          \
+        type high = lymra_unsigned_product(left, right, &low);                                                 \
+        if (high != 0) {                                                                                       \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = low;                                                                                         \
+        return false;                                                                                          \
+    }
+#else
+/* Without a 128-bit multiply, each case divides a limit by a value that cannot make the division overflow. */
+#define LYMRA_SIGNED_64_PRODUCT(name, type, minimum, maximum)                                                  \
+    LYMRA_UNUSED static inline bool lymra_multiply_overflows_##name(type left, type right, type *result) {     \
+        if (left > 0 ? (right > 0 ? left > (maximum) / right : right < (minimum) / left)                       \
+                     : (right > 0 ? left < (minimum) / right : left != 0 && right < (maximum) / left)) {       \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = (type)(left * right);                                                                        \
+        return false;                                                                                          \
+    }
+#define LYMRA_UNSIGNED_64_PRODUCT(name, type, minimum, maximum)                                                \
     LYMRA_UNUSED static inline bool lymra_multiply_overflows_##name(type left, type right, type *result) {     \
         if (left != 0 && right > (maximum) / left) {                                                           \
             return true;                                                                                       \
@@ -328,6 +407,7 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
         *result = (type)(left * right);                                                                        \
         return false;                                                                                          \
     }
+#endif
 #endif
 
 /* The trapping form of each check, which the generated code calls. */
@@ -355,8 +435,8 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
     }
 
 /* Checked arithmetic for a signed type, with division and negation. */
-#define LYMRA_SIGNED_OPERATIONS(name, type, minimum, maximum)                                                  \
-    LYMRA_SIGNED_OVERFLOW_CHECKS(name, type, minimum, maximum)                                                 \
+#define LYMRA_SIGNED_OPERATIONS(name, type, minimum, maximum, product)                                         \
+    LYMRA_SIGNED_OVERFLOW_CHECKS(name, type, minimum, maximum, product)                                        \
     LYMRA_CHECKED_ARITHMETIC(name, type)                                                                       \
     LYMRA_UNUSED static inline type lymra_divide_##name(type left, type right, const char *site) {             \
         if (right == 0) {                                                                                      \
@@ -385,8 +465,8 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
     }
 
 /* Checked arithmetic for an unsigned type, with division. Lymra has no negation of unsigned values. */
-#define LYMRA_UNSIGNED_OPERATIONS(name, type, maximum)                                                         \
-    LYMRA_UNSIGNED_OVERFLOW_CHECKS(name, type, maximum)                                                        \
+#define LYMRA_UNSIGNED_OPERATIONS(name, type, maximum, product)                                                \
+    LYMRA_UNSIGNED_OVERFLOW_CHECKS(name, type, maximum, product)                                               \
     LYMRA_CHECKED_ARITHMETIC(name, type)                                                                       \
     LYMRA_UNUSED static inline type lymra_divide_##name(type left, type right, const char *site) {             \
         if (right == 0) {                                                                                      \
@@ -401,14 +481,14 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
         return (type)(left % right);                                                                           \
     }
 
-LYMRA_SIGNED_OPERATIONS(integer8, int8_t, INT8_MIN, INT8_MAX)
-LYMRA_SIGNED_OPERATIONS(integer16, int16_t, INT16_MIN, INT16_MAX)
-LYMRA_SIGNED_OPERATIONS(integer32, int32_t, INT32_MIN, INT32_MAX)
-LYMRA_SIGNED_OPERATIONS(integer64, int64_t, INT64_MIN, INT64_MAX)
-LYMRA_UNSIGNED_OPERATIONS(unsigned8, uint8_t, UINT8_MAX)
-LYMRA_UNSIGNED_OPERATIONS(unsigned16, uint16_t, UINT16_MAX)
-LYMRA_UNSIGNED_OPERATIONS(unsigned32, uint32_t, UINT32_MAX)
-LYMRA_UNSIGNED_OPERATIONS(unsigned64, uint64_t, UINT64_MAX)
+LYMRA_SIGNED_OPERATIONS(integer8, int8_t, INT8_MIN, INT8_MAX, LYMRA_SIGNED_WIDENED_PRODUCT)
+LYMRA_SIGNED_OPERATIONS(integer16, int16_t, INT16_MIN, INT16_MAX, LYMRA_SIGNED_WIDENED_PRODUCT)
+LYMRA_SIGNED_OPERATIONS(integer32, int32_t, INT32_MIN, INT32_MAX, LYMRA_SIGNED_WIDENED_PRODUCT)
+LYMRA_SIGNED_OPERATIONS(integer64, int64_t, INT64_MIN, INT64_MAX, LYMRA_SIGNED_64_PRODUCT)
+LYMRA_UNSIGNED_OPERATIONS(unsigned8, uint8_t, UINT8_MAX, LYMRA_UNSIGNED_WIDENED_PRODUCT)
+LYMRA_UNSIGNED_OPERATIONS(unsigned16, uint16_t, UINT16_MAX, LYMRA_UNSIGNED_WIDENED_PRODUCT)
+LYMRA_UNSIGNED_OPERATIONS(unsigned32, uint32_t, UINT32_MAX, LYMRA_UNSIGNED_WIDENED_PRODUCT)
+LYMRA_UNSIGNED_OPERATIONS(unsigned64, uint64_t, UINT64_MAX, LYMRA_UNSIGNED_64_PRODUCT)
 
 /* Checks a conversion from a signed type: the value has to lie within [minimum, maximum]. */
 LYMRA_UNUSED static inline int64_t lymra_check_signed(int64_t value, int64_t minimum, int64_t maximum,
