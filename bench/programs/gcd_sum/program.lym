@@ -1,0 +1,19 @@
+#[
+    Sums the greatest common divisor of every pair of numbers below 2000.
+]#
+
+function greatest_common_divisor(integer64 first, integer64 second) returns integer64
+    variable integer64 left = first
+    variable integer64 right = second
+    while right != 0
+        constant remainder = left % right
+        left = right
+        right = remainder
+    return left
+
+function main()
+    variable integer64 total = 0
+    for first in range(1, 2_000)
+        for second in range(1, 2_000)
+            total = total + greatest_common_divisor(first, second)
+    print("{total}")

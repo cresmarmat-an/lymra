@@ -71,6 +71,15 @@ error: integer overflow
   |                 ^^^^^^^^^
 ```
 
+## Speed
+
+`cargo run --release -p lymra-bench` times six programs written in Lymra, C and Rust, and writes [bench/results.md](bench/results.md). On the last run:
+
+- Where the compiler proves that no overflow check in a loop can fail, Lymra runs as fast as C. In one benchmark that lets GCC and Clang replace the loop with a formula: it takes 1 millisecond, against 0.62 seconds for Rust with overflow checks, which keeps every check.
+- Where checks stay in hot code, Lymra takes up to 1.7 times as long as C, about what Rust with overflow checks takes.
+
+[bench/README.md](bench/README.md) explains every number, including the one that flatters Lymra by accident.
+
 ## Documents
 
 - [Language specification](docs/spec.md)
@@ -96,6 +105,7 @@ error: integer overflow
 | `compiler/tests/check` | Golden errors about names, types and control flow |
 | `compiler/tests/run` | Programs that are built with GCC and Clang, with and without the optimizer, and run, with their recorded output |
 | `compiler/tests/overflow_proofs` | Thousands of generated programs run in an exact interpreter, to catch a check removed by a wrong proof |
+| `bench` | The same programs in Lymra, C and Rust, and the runner that times them |
 | `docs/errors` | One page per error code, embedded in the compiler for `lymra explain` |
 
 ## Development

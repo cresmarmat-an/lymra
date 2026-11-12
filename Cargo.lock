@@ -5,3 +5,10 @@ version = 4
 [[package]]
 name = "lymra"
 version = "0.1.0"
+
+[[package]]
+name = "lymra-bench"
+version = "0.1.0"
+dependencies = [
+ "lymra",
+]

@@ -1,0 +1,11 @@
+#[
+    A sum the C compiler can turn into a formula, when it may assume the
+    arithmetic never overflows.
+]#
+
+function main()
+    variable integer64 total = 0
+    for round in range(0, 20)
+        for index in range(0, 50_000_000)
+            total = total + index * 3 + round
+    print("{total}")

@@ -1,0 +1,9 @@
+#[
+    A loop whose remainder keeps the C compiler from finding a formula.
+]#
+
+function main()
+    variable integer64 total = 0
+    for index in range(0, 300_000_000)
+        total = total + index % 7 * 3
+    print("{total}")

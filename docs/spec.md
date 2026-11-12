@@ -536,7 +536,7 @@ error: integer overflow
 | O7 | Bitwise operations | Functions with whole-word names such as `bit_and` and `shift_left`, not symbols |
 | O8 | Calling C: the syntax and rules of `external` declarations | `external function hypot(float64 x, float64 y) returns float64` |
 | O10 | Reading the command line and choosing an exit status | Parameters of `main` and a `returns` type, once the needed types exist |
-| O11 | Removing overflow checks the compiler can prove unnecessary. A first measurement: a loop that GCC and Clang can turn into a formula ran about 200 times slower with the checks, because a check has to stop the program at the exact operation that overflows. A loop they cannot transform ran at the same speed. | Range analysis over loop bounds and known values, the same way bounds checks are removed |
+| O11 | Removing the overflow checks that stay. The compiler removes every check its interval analysis proves can never fail. Measured in `bench/results.md`: where that covers a whole loop, Lymra runs at C's speed, and a loop that GCC and Clang turn into a formula finishes in a millisecond instead of 0.6 seconds. The checks that stay, on variables a `while` loop changes and on results of calls, cost up to 1.7 times C's time, about what Rust with overflow checks costs. | Bound `while` loops by repeating the analysis until it settles, and carry facts about parameters and results across calls |
 
 ## 13. Where speed comes from
 
@@ -565,6 +565,8 @@ What Lymra pays for and C++ doesn't:
 
 Speed claims are only allowed if they come with:
 
-- A public benchmark suite in `bench/`, with the equivalent C++ and Rust programs next to each Lymra program.
+- A public benchmark suite in `bench/`, with the equivalent C and Rust programs next to each Lymra program.
 - Published results for every benchmark, including the ones where Lymra loses.
 - The compiler versions, flags, and hardware used.
+
+`cargo run --release -p lymra-bench` builds each program as C, as Lymra with and without the optimizer, and as Rust with and without overflow checks. It checks that every version prints the same output and writes the timings to [`bench/results.md`](../bench/results.md). [`bench/README.md`](../bench/README.md) explains what the numbers show.

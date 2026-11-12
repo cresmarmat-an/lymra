@@ -1,0 +1,16 @@
+[package]
+name = "lymra-bench"
+description = "Times programs compiled by Lymra against the same programs in C and Rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+lymra = { path = "../compiler" }
+
+[lints]
+workspace = true

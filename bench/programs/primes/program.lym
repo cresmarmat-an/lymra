@@ -1,0 +1,20 @@
+#[
+    Counts the primes below three million by trial division.
+]#
+
+function is_prime(integer64 candidate) returns boolean
+    if candidate < 2
+        return false
+    variable integer64 divisor = 2
+    while divisor * divisor <= candidate
+        if candidate % divisor == 0
+            return false
+        divisor = divisor + 1
+    return true
+
+function main()
+    variable integer64 count = 0
+    for candidate in range(0, 3_000_000)
+        if is_prime(candidate)
+            count = count + 1
+    print("{count}")

@@ -1,0 +1,11 @@
+#[
+    Recursive Fibonacci: mostly the cost of calls.
+]#
+
+function fibonacci(integer64 number) returns integer64
+    if number < 2
+        return number
+    return fibonacci(number - 1) + fibonacci(number - 2)
+
+function main()
+    print("{fibonacci(40)}")
