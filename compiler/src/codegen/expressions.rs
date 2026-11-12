@@ -228,6 +228,7 @@ impl Generator<'_, '_> {
 
     /// Computes `code`, of type `ty`, into a new constant and returns the constant's name.
     pub(super) fn temporary(&mut self, ty: &Type, code: &str, writer: &mut Writer) -> String {
+        self.frame = self.frame.saturating_add(super::array_bytes(ty));
         let name = self.helper("value");
         let ty = self.types.name(ty);
         writer.line(&format!("const {ty} {name} = {code};"));

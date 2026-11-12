@@ -3,4 +3,4 @@ exit status 70
 before
 --- standard error
 error: stack overflow: calls nested too deeply
-help: a function kept calling itself, or functions kept calling one another; make sure every chain of calls reaches a case that returns
+help: a function kept calling itself, or functions kept calling one another; make sure every chain of calls reaches a case that returns. Every call in progress keeps its arrays on the stack too, so keep large arrays out of deep chains of calls

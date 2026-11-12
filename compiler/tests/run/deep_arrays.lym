@@ -1,0 +1,15 @@
+#[
+    Four calls in progress hold half a mebibyte of array each, 2 MiB in all.
+    Every system gives a program the same 8 MiB stack, Windows included,
+    whose own default of 1 MiB would not hold them.
+]#
+
+function total(integer64 depth) returns integer64
+    variable array[integer64, 65536] block = array(depth)
+    block[65535] = depth * 2
+    if depth == 0
+        return block[0]
+    return total(depth - 1) + block[0] + block[65535]
+
+function main()
+    print("{total(3)}")

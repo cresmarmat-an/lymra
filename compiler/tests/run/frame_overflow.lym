@@ -1,0 +1,17 @@
+#[
+    Each call holds 2 MiB of arrays, so the stack runs out after a few calls.
+    Where the C compiler does not touch a large frame a page at a time, the
+    first access lands far past the stack's limit; the program still stops
+    with the stack overflow error, not a crash.
+]#
+
+function descend(integer64 depth) returns integer64
+    constant array[integer64, 131072] low = array(depth)
+    constant array[integer64, 131072] high = array(depth + 1)
+    if depth > 1000000
+        return low[0]
+    return descend(low[131071] + high[0]) + high[131071]
+
+function main()
+    print("starting")
+    print("{descend(0)}")

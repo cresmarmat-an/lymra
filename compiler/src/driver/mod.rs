@@ -13,6 +13,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -77,11 +78,17 @@ fn io_error(action: impl Into<String>) -> impl FnOnce(io::Error) -> DriverError 
     move |error| DriverError::Io { action, error }
 }
 
+mod abilities;
+
+use abilities::{Abilities, PROGRAM_STACK_SIZE};
+
 /// A C compiler and the arguments that always come first, as `CC` may hold both.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Compiler {
     program: OsString,
     leading_arguments: Vec<OsString>,
+    /// What a GCC-style compiler answered when first asked.
+    abilities: OnceLock<Abilities>,
 }
 
 /// How a C compiler takes its options.
@@ -124,6 +131,7 @@ impl Compiler {
         Some(Self {
             program,
             leading_arguments: words.collect(),
+            abilities: OnceLock::new(),
         })
     }
 
@@ -132,6 +140,7 @@ impl Compiler {
         Self {
             program: OsString::from(program),
             leading_arguments: Vec::new(),
+            abilities: OnceLock::new(),
         }
     }
 
@@ -182,11 +191,16 @@ impl Compiler {
         command.args(&self.leading_arguments);
         match self.style() {
             Style::Gnu => {
+                let abilities = self.abilities.get_or_init(|| Abilities::of(self));
                 command.arg("-std=c11").args(optimization_flags(optimize));
+                if abilities.probes_stack {
+                    command.arg("-fstack-clash-protection");
+                }
                 if warnings == Warnings::Strict {
                     command.args(["-Wall", "-Wextra", "-Wpedantic", "-Werror"]);
                 }
                 command.arg("-o").arg(executable).arg(&c_file);
+                command.args(&abilities.stack_option);
             }
             Style::Msvc => {
                 // MSVC leaves object files in its working directory, so that is the temporary one.
@@ -201,7 +215,11 @@ impl Compiler {
                 if warnings == Warnings::Strict {
                     command.args(["/W4", "/WX"]);
                 }
-                command.arg(output).arg(&c_file);
+                command
+                    .arg(output)
+                    .arg(&c_file)
+                    .arg("/link")
+                    .arg(format!("/STACK:{PROGRAM_STACK_SIZE}"));
             }
         }
 

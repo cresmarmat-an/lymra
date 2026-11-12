@@ -602,7 +602,8 @@ LYMRA_UNUSED static inline void lymra_end_line(void) {
 LYMRA_UNUSED static const char lymra_stack_overflow_message[] =
     "error: stack overflow: calls nested too deeply\n"
     "help: a function kept calling itself, or functions kept calling one another; "
-    "make sure every chain of calls reaches a case that returns\n";
+    "make sure every chain of calls reaches a case that returns. Every call in progress "
+    "keeps its arrays on the stack too, so keep large arrays out of deep chains of calls\n";
 
 #if defined(LYMRA_POSIX)
 /*
@@ -622,12 +623,23 @@ LYMRA_UNUSED static const char lymra_stack_overflow_message[] =
  */
 #define LYMRA_LEAST_STACK_SIZE ((uintmax_t)8 << 20)
 /*
- * How far past the stack's limit a fault still counts as an overflow: the
- * largest frame a function can have. Phase 1 frames hold only numbers, far
- * below this. Once arrays can live on the stack, large frames will need stack
- * probing, so that they cannot step over the guard page.
+ * The largest stack frame a function of the program can have. The code the
+ * Lymra compiler generates defines it before this file, from the arrays its
+ * functions hold.
  */
-#define LYMRA_STACK_SLACK ((size_t)1 << 20)
+#ifndef LYMRA_LARGEST_FRAME
+#define LYMRA_LARGEST_FRAME ((size_t)0)
+#endif
+/*
+ * How far past the stack's limit a fault still counts as an overflow. Where
+ * the C compiler does not probe a large frame a page at a time, a function
+ * moves past the limit by up to its whole frame before it touches the stack,
+ * so the window holds the largest frame and a mebibyte more for the frames of
+ * the runtime and the C library. Nothing else is mapped that close below the
+ * stack, and Lymra code never reads or writes memory it does not own, so a
+ * fault there is the stack running out.
+ */
+#define LYMRA_STACK_SLACK (((size_t)1 << 20) + LYMRA_LARGEST_FRAME)
 
 LYMRA_UNUSED static char lymra_signal_stack[(size_t)1 << 16];
 /* The stack position where the program starts, and how far below it the stack can reach. */
