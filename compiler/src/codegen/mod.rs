@@ -296,7 +296,7 @@ impl Generator<'_, '_> {
         writer.depth += 1;
         writer.line(&format!("const {ty} {limit} = {end};"));
         writer.line(&format!(
-            "for ({ty} {counter} = {start}; {counter} < {limit}; {counter} += 1) {{"
+            "for ({ty} {counter} = {start}; {counter} < {limit}; ++{counter}) {{"
         ));
         writer.depth += 1;
         if let Some(variable) = variable {
