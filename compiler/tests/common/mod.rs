@@ -89,7 +89,7 @@ pub fn files_with_extension(directory: &Path, extension: &str) -> Vec<PathBuf> {
     found
 }
 
-/// When set, names the exact C compilers the tests build with, separated by commas, as in `cl, clang -m32`.
+/// When set and not empty, names the exact C compilers the tests build with, separated by commas, as in `cl, clang -m32`.
 const COMPILERS_VARIABLE: &str = "LYMRA_TEST_COMPILERS";
 
 /**
@@ -100,27 +100,28 @@ const COMPILERS_VARIABLE: &str = "LYMRA_TEST_COMPILERS";
  * `CC="gcc -m32"`. Programs have to behave the same with every one.
  */
 pub fn c_compilers() -> Vec<Compiler> {
-    let compilers: Vec<Compiler> = match std::env::var_os(COMPILERS_VARIABLE) {
-        Some(list) => list
-            .to_string_lossy()
-            .split(',')
-            .filter_map(Compiler::from_command)
-            .map(required)
-            .collect(),
-        None => {
-            let mut found: Vec<Compiler> = ["gcc", "clang", "cl"]
-                .iter()
-                .map(|name| Compiler::named(name))
-                .filter(Compiler::is_available)
-                .collect();
-            if let Some(chosen) = Compiler::from_environment().map(required) {
-                if !found.contains(&chosen) {
-                    found.push(chosen);
+    let compilers: Vec<Compiler> =
+        match std::env::var_os(COMPILERS_VARIABLE).filter(|list| !list.is_empty()) {
+            Some(list) => list
+                .to_string_lossy()
+                .split(',')
+                .filter_map(Compiler::from_command)
+                .map(required)
+                .collect(),
+            None => {
+                let mut found: Vec<Compiler> = ["gcc", "clang", "cl"]
+                    .iter()
+                    .map(|name| Compiler::named(name))
+                    .filter(Compiler::is_available)
+                    .collect();
+                if let Some(chosen) = Compiler::from_environment().map(required) {
+                    if !found.contains(&chosen) {
+                        found.push(chosen);
+                    }
                 }
+                found
             }
-            found
-        }
-    };
+        };
     assert!(
         !compilers.is_empty(),
         "these tests need a C compiler; install GCC, Clang or MSVC"

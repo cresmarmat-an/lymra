@@ -12,25 +12,90 @@ env:
 
 jobs:
   test:
-    name: Test on ${{ matrix.os }}
+    name: Test on ${{ matrix.name }}
     strategy:
       # Every platform reports, even when another fails.
       fail-fast: false
       matrix:
-        # Linux, macOS and Windows, each on x86-64 and on ARM64.
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest, windows-11-arm]
+        include:
+          - name: Linux x86-64
+            os: ubuntu-latest
+          - name: Linux ARM64
+            os: ubuntu-24.04-arm
+          - name: macOS ARM64
+            os: macos-latest
+          - name: macOS x86-64
+            os: macos-15-intel
+          - name: Windows x86-64
+            os: windows-latest
+            msvc: x64
+          - name: Windows ARM64
+            os: windows-11-arm
+            msvc: arm64
+          # The compiler itself runs as 32-bit code here, and MSVC and Clang build 32-bit programs.
+          - name: Windows x86 (32-bit)
+            os: windows-latest
+            msvc: x64_x86
+            target: i686-pc-windows-msvc
+            cc: cl
+            compilers: cl, clang -m32
+          - name: Windows x86-64 with Visual Studio 2022
+            os: windows-2022
+            msvc: x64
+          # MSVC has C11 from Visual Studio 2019 version 16.8 on; 14.29 is the last toolset of that release line.
+          - name: Windows x86-64 with the Visual Studio 2019 compiler
+            os: windows-2022
+            msvc: x64 -vcvars_ver=14.29
+            toolset: "14.29"
     runs-on: ${{ matrix.os }}
+    env:
+      CC: ${{ matrix.cc }}
+      LYMRA_TEST_COMPILERS: ${{ matrix.compilers }}
+      TARGET_OPTION: ${{ matrix.target && format('--target={0}', matrix.target) || '' }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+          targets: ${{ matrix.target }}
+      - name: Install the Visual Studio 2019 compiler
+        if: matrix.toolset
+        shell: pwsh
+        env:
+          TOOLSET: ${{ matrix.toolset }}
+        run: |
+          $installation = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $tools = Join-Path $installation 'VC\Tools\MSVC'
+          Write-Output "MSVC toolsets: $((Get-ChildItem $tools -Directory).Name -join ', ')"
+          if (-not (Get-ChildItem $tools -Directory -Filter "$env:TOOLSET.*")) {
+            $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+            $arguments = "modify --installPath `"$installation`" --add Microsoft.VisualStudio.Component.VC.14.29.16.11.x86.x64 --quiet --norestart --nocache"
+            $process = Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru
+            if ($process.ExitCode -notin 0, 3010) { throw "the Visual Studio installer failed with exit code $($process.ExitCode)" }
+            Write-Output "MSVC toolsets now: $((Get-ChildItem $tools -Directory).Name -join ', ')"
+          }
       # The tests build every program with each C compiler they find, so on Windows MSVC joins GCC and Clang.
+      # vcvarsall.bat sets MSVC up; the variables it changes are passed on to the later steps.
       - name: Make MSVC available
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+        if: matrix.msvc
+        shell: pwsh
+        env:
+          MSVC_ARGUMENTS: ${{ matrix.msvc }}
+        run: |
+          $installation = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          if (-not $installation) { throw "Visual Studio is not installed" }
+          $vcvars = Join-Path $installation 'VC\Auxiliary\Build\vcvarsall.bat'
+          $script = Join-Path $env:RUNNER_TEMP 'msvc-environment.cmd'
+          Set-Content -Path $script -Encoding ascii -Value "@call `"$vcvars`" $env:MSVC_ARGUMENTS 1>&2 || exit /b 1`r`n@set"
+          $after = & cmd.exe /d /c $script
+          if ($LASTEXITCODE -ne 0) { throw "vcvarsall.bat $env:MSVC_ARGUMENTS failed" }
+          $before = @{}
+          foreach ($entry in [Environment]::GetEnvironmentVariables().GetEnumerator()) { $before[$entry.Key] = $entry.Value }
+          foreach ($line in $after) {
+            if ($line -match '^([^=]+)=(.*)$' -and $before[$Matches[1]] -cne $Matches[2]) {
+              Add-Content -Path $env:GITHUB_ENV -Encoding utf8 -Value "$($Matches[1])=$($Matches[2])"
+            }
+          }
       - name: Show the C compilers
         shell: bash
         run: |
@@ -38,9 +103,11 @@ jobs:
           clang --version || echo "clang is not installed"
           if command -v cl > /dev/null; then cl 2>&1 | head -n 1 || true; else echo "cl is not installed"; fi
       - name: Lint
-        run: cargo clippy --all-targets -- -D warnings
+        shell: bash
+        run: cargo clippy --all-targets $TARGET_OPTION -- -D warnings
       - name: Test
-        run: cargo test
+        shell: bash
+        run: cargo test $TARGET_OPTION
 
   thirty-two-bit:
     name: Test 32-bit programs on Linux
@@ -56,8 +123,60 @@ jobs:
         env:
           CC: gcc -m32
 
+  emulated:
+    name: Test ${{ matrix.name }} programs under QEMU
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: 32-bit ARM
+            compiler: arm-linux-gnueabihf-gcc
+          - name: 64-bit RISC-V
+            compiler: riscv64-linux-gnu-gcc
+          # IBM Z stores the most significant byte first, which catches any assumption of the other order.
+          - name: big-endian IBM Z
+            compiler: s390x-linux-gnu-gcc
+          - name: 64-bit PowerPC
+            compiler: powerpc64le-linux-gnu-gcc
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install the cross compiler and QEMU
+        env:
+          COMPILER: ${{ matrix.compiler }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static "gcc-${COMPILER%-gcc}"
+      - name: Check that programs for the emulated processor run
+        working-directory: ${{ runner.temp }}
+        run: |
+          printf 'int main(void) { return 0; }\n' > probe.c
+          ${{ matrix.compiler }} -static probe.c -o probe
+          file probe
+          ./probe
+      # With CC set, every program the tests build is also built for the emulated processor and run through QEMU.
+      - name: Test
+        run: cargo test
+        env:
+          CC: ${{ matrix.compiler }} -static
+
+  rosetta:
+    name: Test x86-64 programs on Apple silicon through Rosetta
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Make sure Rosetta is installed
+        run: arch -x86_64 /usr/bin/true || sudo softwareupdate --install-rosetta --agree-to-license
+      # With CC set, every program the tests build is also built for x86-64 and run through Rosetta.
+      - name: Test
+        run: cargo test
+        env:
+          CC: clang -arch x86_64
+
   freebsd:
-    name: Test on FreeBSD
+    name: Test on FreeBSD x86-64
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -67,6 +186,56 @@ jobs:
         with:
           usesh: true
           prepare: pkg install -y rust
+          run: |
+            cc --version
+            cargo test
+
+  freebsd-arm:
+    name: Test on FreeBSD ARM64
+    runs-on: ubuntu-latest
+    # The ARM64 machine is emulated, which makes it many times slower.
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+      - name: Test in a FreeBSD virtual machine
+        uses: vmactions/freebsd-vm@v1
+        with:
+          arch: aarch64
+          usesh: true
+          prepare: pkg install -y rust
+          run: |
+            uname -m
+            cc --version
+            cargo test
+
+  openbsd:
+    name: Test on OpenBSD x86-64
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - name: Test in an OpenBSD virtual machine
+        uses: vmactions/openbsd-vm@v1
+        with:
+          usesh: true
+          prepare: pkg_add rust
+          run: |
+            cc --version
+            cargo test
+
+  netbsd:
+    name: Test on NetBSD x86-64
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - name: Test in a NetBSD virtual machine
+        uses: vmactions/netbsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            /usr/sbin/pkg_add pkgin
+            pkgin -y install rust
           run: |
             cc --version
             cargo test
