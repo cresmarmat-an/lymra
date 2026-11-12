@@ -1,0 +1,22 @@
+#!edition 0.1
+
+#[
+    Counts the primes below 10000 with the sieve of Eratosthenes: every
+    multiple of a prime is crossed out, and the numbers left are prime.
+]#
+
+constant integer64 limit = 10000
+
+function main()
+    variable array[boolean, limit] crossed_out = array(false)
+    variable integer64 count = 0
+    variable integer64 largest = 0
+    for number in range(2, limit)
+        if not crossed_out[number]
+            count = count + 1
+            largest = number
+            variable multiple = number * number
+            while multiple < limit
+                crossed_out[multiple] = true
+                multiple = multiple + number
+    print("{count} primes below {limit}, the largest {largest}")

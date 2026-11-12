@@ -1,0 +1,16 @@
+#[
+    An index past the end of an array stops the program before anything is
+    stored, and before the value to store is even computed.
+]#
+
+function noted(string name, integer64 value) returns integer64
+    print("{name}")
+    return value
+
+function fill(variable array[integer64, 3] values, integer64 count)
+    for position in range(0, count)
+        values[position] = noted("stored", position)
+
+function main()
+    variable array[integer64, 3] values = array(0)
+    fill(variable values, 4)

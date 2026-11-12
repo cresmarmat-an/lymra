@@ -17,8 +17,8 @@ function main()
     variable integer64 longest = 0
     variable integer64 best_start = 0
     for start in range(1, 1_000_000)
-        constant length = chain_length(start)
-        if length > longest
-            longest = length
+        constant steps = chain_length(start)
+        if steps > longest
+            longest = steps
             best_start = start
     print("{best_start} {longest}")

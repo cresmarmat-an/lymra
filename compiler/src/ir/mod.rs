@@ -9,7 +9,7 @@
 
 mod types;
 
-pub use types::{IntegerType, Type, Value};
+pub use types::{ArrayType, IntegerType, Type, Value};
 
 use crate::ast::OptimizeMode;
 use crate::source::Span;
@@ -71,8 +71,9 @@ pub enum Statement {
     },
     /// `constant _ = value`: compute the value and drop it.
     Discard(Expr),
+    /// The target's indexes are computed and checked, then the value, then the value is stored.
     Assign {
-        target: LocalId,
+        target: Place,
         value: Expr,
     },
     /// A call to a function that returns nothing.
@@ -94,12 +95,44 @@ pub enum Statement {
         end: Expr,
         body: Block,
     },
+    /**
+     * `for variable in array`. The array is computed once; each element is
+     * read when its turn comes, so a change the body makes to a later
+     * element is seen.
+     */
+    ForEach {
+        variable: Option<LocalId>,
+        array: Expr,
+        /// How many elements the array has, so how many times the body runs.
+        length: u64,
+        body: Block,
+    },
     Return(Option<Expr>),
     Break,
     Continue,
     Assert {
         condition: Expr,
     },
+}
+
+/// Where an assignment stores its value: a local, or an element inside it.
+#[derive(Debug)]
+pub struct Place {
+    pub local: LocalId,
+    /// The indexes from the local inward: `grid[row][column]` has two.
+    pub indexes: Vec<PlaceIndex>,
+}
+
+/// One `[index]` of a place.
+#[derive(Debug)]
+pub struct PlaceIndex {
+    pub value: Expr,
+    /// The length of the array the index selects from.
+    pub length: u64,
+    /// Whether the index can fall outside its array and has to be checked when the program runs.
+    pub checked: bool,
+    /// The place up to and including this index, which a failed check points at.
+    pub span: Span,
 }
 
 #[derive(Debug)]
@@ -111,7 +144,33 @@ pub struct Branch {
 #[derive(Debug)]
 pub enum PrintPart {
     Text(String),
-    Value(Expr),
+    /// A value, and how it is written as text.
+    Value {
+        value: Expr,
+        form: TextForm,
+    },
+}
+
+/// How a value is written as text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextForm {
+    Text,
+    Boolean,
+    Signed,
+    Unsigned,
+}
+
+impl TextForm {
+    /// How values of `ty` are written, or `None` for an array, which text cannot hold.
+    pub fn of(ty: &Type) -> Option<TextForm> {
+        match ty {
+            Type::String => Some(Self::Text),
+            Type::Boolean => Some(Self::Boolean),
+            Type::Integer(integer) if integer.is_signed() => Some(Self::Signed),
+            Type::Integer(_) => Some(Self::Unsigned),
+            Type::Array(_) => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -161,6 +220,79 @@ pub enum ExprKind {
         /// False when every value of the operand's type fits the target, so nothing can fail.
         checked: bool,
     },
+    /// `array[index]`, an element of an array.
+    Index {
+        array: Box<Expr>,
+        index: Box<Expr>,
+        /// The length of the array, which the index has to stay below.
+        length: u64,
+        /// Whether the index can fall outside the array and has to be checked when the program runs.
+        checked: bool,
+    },
+    /// `array(value)`: every element of the array is `value`. The expression's type is the array type.
+    Fill(Box<Expr>),
+    /// `length(value)` of a text, or of an array that has to be computed because computing it has effects.
+    Length(Box<Expr>),
+}
+
+impl Expr {
+    /// Whether the expression reads `local` or passes it to a call.
+    pub fn mentions(&self, local: LocalId) -> bool {
+        match &self.kind {
+            ExprKind::Local(id) => *id == local,
+            ExprKind::Literal(_) | ExprKind::Constant(_) => false,
+            ExprKind::Negate { operand, .. }
+            | ExprKind::Not(operand)
+            | ExprKind::Convert { operand, .. }
+            | ExprKind::Fill(operand)
+            | ExprKind::Length(operand) => operand.mentions(local),
+            ExprKind::Arithmetic { left, right, .. }
+            | ExprKind::Compare { left, right, .. }
+            | ExprKind::Logic { left, right, .. }
+            | ExprKind::Index {
+                array: left,
+                index: right,
+                ..
+            } => left.mentions(local) || right.mentions(local),
+            ExprKind::Call(call) => call.arguments.iter().any(|argument| match argument {
+                Argument::Reference(id) => *id == local,
+                Argument::Value(value) => value.mentions(local),
+            }),
+        }
+    }
+
+    /**
+     * Whether computing the expression can be seen from outside it: a call
+     * can print or stop the program, and so can a checked operation. Reading
+     * values cannot.
+     */
+    pub fn has_effects(&self) -> bool {
+        match &self.kind {
+            ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) => false,
+            ExprKind::Call(_) => true,
+            ExprKind::Not(operand) | ExprKind::Fill(operand) | ExprKind::Length(operand) => {
+                operand.has_effects()
+            }
+            ExprKind::Negate { operand, checked } | ExprKind::Convert { operand, checked } => {
+                *checked || operand.has_effects()
+            }
+            ExprKind::Arithmetic {
+                left,
+                right,
+                checked,
+                ..
+            } => *checked || left.has_effects() || right.has_effects(),
+            ExprKind::Compare { left, right, .. } | ExprKind::Logic { left, right, .. } => {
+                left.has_effects() || right.has_effects()
+            }
+            ExprKind::Index {
+                array,
+                index,
+                checked,
+                ..
+            } => *checked || array.has_effects() || index.has_effects(),
+        }
+    }
 }
 
 #[derive(Debug)]

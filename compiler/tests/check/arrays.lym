@@ -1,0 +1,41 @@
+constant integer64 count = 3
+constant integer64 negative = -2
+constant array[integer64, 2] table = array(0)
+
+function sizes(integer64[3] _, array[integer64] _, array[integer64, 0] _, array[integer64, negative] _)
+    return
+
+function main()
+    variable array[integer64, 1000000] huge = array(0)
+    variable array[integer64, 3] values = array(0)
+    values[3] = 1
+    print("{values[-1]}")
+    variable unknown = array(0)
+    constant integer64 number = 5
+    print("{number[0]}")
+    print("{values[true]}")
+    print("{values}")
+    print(values)
+    for item in number
+        print("{item}")
+    for character in "text"
+        print("{character}")
+    print("{length(number)}")
+    print("{length(values, values)}")
+    take(variable values[0])
+    values[0] = values[0] + count
+    made()[0] = 1
+    values = array(1, 2)
+    if values == values
+        print("same")
+    values[values[0]] = take_back(variable values)
+
+function take(variable integer64 slot)
+    slot = 1
+
+function take_back(variable array[integer64, 3] slots) returns integer64
+    slots[0] = 1
+    return 2
+
+function made() returns array[integer64, 3]
+    return array(0)

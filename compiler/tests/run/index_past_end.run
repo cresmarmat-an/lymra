@@ -1,0 +1,11 @@
+exit status 70
+--- standard output
+stored
+stored
+stored
+--- standard error
+error: index 3 is out of range for an array of length 3
+  --> tests/run/index_past_end.lym:12:9
+   |
+12 |         values[position] = noted("stored", position)
+   |         ^^^^^^^^^^^^^^^^

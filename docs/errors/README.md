@@ -47,6 +47,10 @@ From 04 on, they are the chapter of the [specification](../spec.md) the rule com
 | [L0404](L0404.md) | number does not fit its type |
 | [L0405](L0405.md) | operator used on the wrong type |
 | [L0406](L0406.md) | division by zero |
+| [L0409](L0409.md) | array type written wrong |
+| [L0410](L0410.md) | array too large for the call stack |
+| [L0411](L0411.md) | index out of range |
+| [L0412](L0412.md) | `array(value)` without a type |
 | [L0501](L0501.md) | wrong number of arguments |
 | [L0502](L0502.md) | function can end without returning a value |
 | [L0503](L0503.md) | `return` does not match the function |

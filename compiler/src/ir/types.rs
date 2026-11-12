@@ -1,6 +1,7 @@
-//! The types and compile-time values of edition 0.1, phase 1.
+//! The types and compile-time values of edition 0.1.
 
 use std::fmt;
+use std::sync::Arc;
 
 /// The built-in integer types. Each states its size in bits (spec 4.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -84,34 +85,67 @@ impl IntegerType {
     }
 }
 
-/// A type the checker knows. Values of every type can be printed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// A type the checker knows.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type {
     Integer(IntegerType),
     Boolean,
     String,
+    /// `array[element, length]`, shared so that copying a type stays cheap.
+    Array(Arc<ArrayType>),
+}
+
+/// A fixed number of elements of one type, known while compiling (spec 4.4).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ArrayType {
+    pub element: Type,
+    /// At least one.
+    pub length: u64,
 }
 
 impl Type {
-    pub const fn name(self) -> &'static str {
+    pub fn array(element: Type, length: u64) -> Type {
+        Type::Array(Arc::new(ArrayType { element, length }))
+    }
+
+    pub const fn as_integer(&self) -> Option<IntegerType> {
         match self {
-            Self::Integer(integer) => integer.name(),
-            Self::Boolean => "boolean",
-            Self::String => "string",
+            Self::Integer(integer) => Some(*integer),
+            Self::Boolean | Self::String | Self::Array(_) => None,
         }
     }
 
-    pub const fn as_integer(self) -> Option<IntegerType> {
+    pub fn as_array(&self) -> Option<&ArrayType> {
         match self {
-            Self::Integer(integer) => Some(integer),
-            Self::Boolean | Self::String => None,
+            Self::Array(array) => Some(array),
+            Self::Integer(_) | Self::Boolean | Self::String => None,
+        }
+    }
+
+    /**
+     * The size of a value in bytes, or `None` when it does not fit a `u64`.
+     * Sizes are those of a 64-bit system on every system, so a program that
+     * one compiler accepts, every compiler accepts.
+     */
+    pub fn size(&self) -> Option<u64> {
+        match self {
+            Self::Integer(integer) => Some(u64::from(integer.bits() / 8)),
+            Self::Boolean => Some(1),
+            // A text value is a pointer and a length.
+            Self::String => Some(16),
+            Self::Array(array) => array.element.size()?.checked_mul(array.length),
         }
     }
 }
 
 impl fmt::Display for Type {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.name())
+        match self {
+            Self::Integer(integer) => formatter.write_str(integer.name()),
+            Self::Boolean => formatter.write_str("boolean"),
+            Self::String => formatter.write_str("string"),
+            Self::Array(array) => write!(formatter, "array[{}, {}]", array.element, array.length),
+        }
     }
 }
 
@@ -150,6 +184,17 @@ mod tests {
         assert_eq!(IntegerType::Unsigned64.maximum(), i128::from(u64::MAX));
         assert!(IntegerType::Unsigned16.contains(65_535));
         assert!(!IntegerType::Unsigned16.contains(-1));
+    }
+
+    #[test]
+    fn arrays_are_named_and_sized_as_written() {
+        let row = Type::array(Type::Integer(IntegerType::Integer32), 16);
+        let board = Type::array(row.clone(), 8);
+        assert_eq!(board.to_string(), "array[array[integer32, 16], 8]");
+        assert_eq!(board.size(), Some(512));
+        assert_eq!(Type::array(board.clone(), u64::MAX).size(), None);
+        assert_eq!(board.as_array().map(|array| &array.element), Some(&row));
+        assert_ne!(row, Type::array(Type::Integer(IntegerType::Integer32), 15));
     }
 
     #[test]

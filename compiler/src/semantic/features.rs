@@ -4,8 +4,7 @@ use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
 use crate::source::Span;
 
 /// Built-in functions the spec describes, with the phase that implements each.
-const FUTURE_FUNCTIONS: [(&str, u8); 16] = [
-    ("length", 2),
+const FUTURE_FUNCTIONS: [(&str, u8); 15] = [
     ("wrapping_add", 2),
     ("wrapping_subtract", 2),
     ("wrapping_multiply", 2),
@@ -26,7 +25,6 @@ const FUTURE_FUNCTIONS: [(&str, u8); 16] = [
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Feature {
     Floats,
-    Arrays,
     CustomTypes,
     Choices,
     Fields,
@@ -59,7 +57,6 @@ impl Feature {
     pub fn future_type(name: &str) -> Option<Feature> {
         match name {
             "float32" | "float64" => Some(Feature::Floats),
-            "array" => Some(Feature::Arrays),
             "list" | "stack" | "view" => Some(Feature::Lists),
             "pool" | "handle" => Some(Feature::Pools),
             _ => None,
@@ -69,7 +66,6 @@ impl Feature {
     fn message(self) -> String {
         let subject = match self {
             Self::Floats => "`float32` and `float64` are",
-            Self::Arrays => "arrays and indexing are",
             Self::CustomTypes => "`type` declarations are",
             Self::Choices => "choices and `match` are",
             Self::Fields => "fields are",
@@ -79,7 +75,9 @@ impl Feature {
                 return "text with interpolation can only be given to `print` for now".to_owned();
             }
             Self::Lists => "`list`, `stack` and `view` are",
-            Self::ForEach => return "`for` can only loop over `range` for now".to_owned(),
+            Self::ForEach => {
+                return "`for` can only loop over `range` and arrays for now".to_owned();
+            }
             Self::RangeValues => {
                 return "`range` can only be used directly in a `for` loop for now".to_owned();
             }
@@ -94,7 +92,6 @@ impl Feature {
     fn phase(self) -> u8 {
         match self {
             Self::Floats
-            | Self::Arrays
             | Self::CustomTypes
             | Self::Choices
             | Self::Fields

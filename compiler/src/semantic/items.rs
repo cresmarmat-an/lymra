@@ -132,6 +132,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         let [name] = path.segments.as_slice() else {
             return Err(self.report(Feature::Modules.diagnostic(path.span)));
         };
+        if name.text == "array" {
+            return self.resolve_array_type(arguments, ty.span);
+        }
         if let Some(feature) = Feature::future_type(name.text) {
             return Err(self.report(feature.diagnostic(ty.span)));
         }
@@ -145,6 +148,13 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         };
         match resolved {
             Some(resolved) if arguments.is_empty() => Ok(resolved),
+            Some(_) => {
+                let length = match arguments.as_slice() {
+                    [ast::TypeArgument::Size { value, .. }] => Some(*value),
+                    _ => None,
+                };
+                Err(self.report(errors::sized_scalar(name.text, length, ty.span)))
+            }
             _ if matches!(name.text, "integer" | "unsigned") => {
                 Err(self.report(errors::sizeless_integer(name.text, ty.span)))
             }
@@ -212,9 +222,12 @@ impl<'src, 'ast> Checker<'src, 'ast> {
 
     fn compute_constant(&mut self, binding: &'ast ast::Binding<'src>) -> CheckResult<Value> {
         let declared = binding.ty.as_ref().map(|ty| self.resolve_type(ty));
+        if let (Some(Ok(Type::Array(_))), Some(written)) = (&declared, &binding.ty) {
+            return Err(self.report(errors::array_constant(written.span)));
+        }
         // Constants are computed outside every function, so names resolve to top-level declarations only.
         let function_scope = self.scope.take();
-        let value = self.check_expr(&binding.value, declared.and_then(Result::ok));
+        let value = self.check_against(&binding.value, declared.as_ref().map(Result::as_ref));
         self.scope = function_scope;
         let value = value?;
         match self.known_value(&value) {
@@ -237,7 +250,9 @@ fn runtime_part(expr: &ir::Expr) -> Span {
     match &expr.kind {
         ir::ExprKind::Negate { operand, .. }
         | ir::ExprKind::Not(operand)
-        | ir::ExprKind::Convert { operand, .. } => runtime_part(operand),
+        | ir::ExprKind::Convert { operand, .. }
+        | ir::ExprKind::Length(operand)
+        | ir::ExprKind::Index { array: operand, .. } => runtime_part(operand),
         ir::ExprKind::Arithmetic { left, right, .. }
         | ir::ExprKind::Compare { left, right, .. }
         | ir::ExprKind::Logic { left, right, .. } => {
@@ -253,6 +268,7 @@ fn runtime_part(expr: &ir::Expr) -> Span {
         ir::ExprKind::Literal(_)
         | ir::ExprKind::Constant(_)
         | ir::ExprKind::Local(_)
-        | ir::ExprKind::Call(_) => expr.span,
+        | ir::ExprKind::Call(_)
+        | ir::ExprKind::Fill(_) => expr.span,
     }
 }

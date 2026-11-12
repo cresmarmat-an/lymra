@@ -155,7 +155,7 @@ constant copy_of_name = name        # immutable, type inferred
 
 - `variable` declares a mutable binding.
 - `constant` declares an immutable binding. Changing a constant, a parameter or a loop variable is error `L0208`.
-- A top-level `constant` is computed by the compiler, from literals, operators and other top-level constants. Anything only known at run time, such as a function call, is error `L0210`, and so is a constant that depends on itself.
+- A top-level `constant` is computed by the compiler, from literals, operators and other top-level constants. Anything only known at run time, such as a function call, is error `L0210`, and so is a constant that depends on itself. A top-level constant cannot hold an array either (`L0210`): arrays have no literal form yet (O6), so their elements could not be written one by one.
 - Every declaration starts with one of these two keywords. A type and a name before `=` with no keyword is error `L0203`.
 - Only `constant` may be declared at the top level of a file. A top-level `variable` would be global mutable state, and is error `L0205`.
 - `name = expr` with no keyword always means assignment. Assigning to a name that hasn't been declared is error `L0201`, and the message suggests `variable` or `constant`.
@@ -205,7 +205,7 @@ Type rules:
 
 Any other use is error `L0405`. `and` and `or` only evaluate their right side when the left side does not decide the result already.
 
-The parts of an expression run from left to right: the operands of an operator, the arguments of a call and the values in a text, each finished before the next one starts and before the operation itself. When two parts call functions that print, their lines come out in that order, and when two checks could fail, the one further left stops the program. Every C compiler builds the same order.
+The parts of an expression run from left to right: the operands of an operator, the arguments of a call and the values in a text, each finished before the next one starts and before the operation itself. When two parts call functions that print, their lines come out in that order, and when two checks could fail, the one further left stops the program. Every C compiler builds the same order. In an assignment, the indexes of the target are computed and checked first, from the binding inward, then the value, and the value is stored last.
 
 Division truncates toward zero, and a remainder takes the sign of the dividend: `-7 / 2` is `-3` and `-7 % 2` is `-1`. This matches C.
 
@@ -234,7 +234,7 @@ A custom type's class is the largest class of its fields.
 
 | Type | Class | Meaning |
 |---|---|---|
-| `array[T, N]` | fixed | N elements, N known at compile time |
+| `array[T, N]` | fixed | N elements. N is a number, or a top-level integer constant, of at least 1 (`L0409`). |
 | `list[T]` | growable | Grow-only. `push` adds to the end. |
 | `stack[T]` | growable | Grow and shrink: `push` and `pop`. |
 | `view[T]` | fixed | A read-only window into an array, list, or string. Does not own its data. |
@@ -242,6 +242,17 @@ A custom type's class is the largest class of its fields.
 `list[T]` never moves its elements, because it always sits on top of its data stack (Section 7.2) and grows in place. A reference to an element stays valid for as long as the list exists, no matter how many pushes come after it. C++ `std::vector` and Rust `Vec` reallocate when they grow, which is why they can't make this promise.
 
 `stack[T]` can shrink, so a reference into it could point at a popped slot. Holding a reference into a `stack` past the next `pop` is error `L0702`.
+
+An array is a value, like a number. Assigning it to another binding or passing it to a function gives an independent copy (Section 3.1); the compiler passes an array parameter by address, which no one can tell apart, since the function cannot change it. A `variable` parameter changes the caller's array. An array lives on the call stack, so one array takes at most 1 MiB, its length times the size of an element (`L0410`): a call stack holds a few MiB in all. Larger data belongs in a `list`. Arrays cannot be compared with `==` or put into text; compare or print their elements.
+
+```lymra
+function main()
+    variable array[integer32, 4] scores = array(0)
+    scores[1] = 7
+    variable copy = scores
+    copy[1] = 9
+    print("{scores[1]} {copy[1]} {length(scores)}")
+```
 
 ### 4.5 Nested data stays inline
 
@@ -264,7 +275,7 @@ A list whose elements differ in size also keeps the position of each element in 
 
 A value held directly by a binding keeps each of its growable fields on a data stack of its own, so each can grow (Section 7.2). Putting the value inside another one, such as a list, lays it out as one block, which copies it once. Inside a list, its growable fields no longer grow.
 
-Indexing starts at 0. Every index is bounds-checked. The compiler removes a check when it can prove the index is in range, for example `for index in range(0, length(items))`.
+Indexing starts at 0, and an index can have any integer type. Every index is bounds-checked. One known while compiling that falls outside its array is error `L0411`; any other stops the program when it falls outside, with an error that gives the index and the length. The compiler removes a check when it can prove the index is in range, for example `for index in range(0, length(items))`.
 
 ### 4.6 Custom types
 
@@ -339,6 +350,8 @@ function main()
 |---|---|
 | `print(string text)` | Writes the text and a line break to standard output, as one whole line. The values in the text are computed first, so a call among them that prints writes its own line before this one. |
 | `range(start, end)` | The integers from `start` up to `end`, without `end`. It is only used in a `for` loop for now. |
+| `length(items)` | The number of elements of an array, or of bytes in a `string`, as an `integer64`. An array's length is part of its type, so it is known while compiling. Phase 3 adds lists, stacks and views. |
+| `array(value)` | An array with every element set to `value`. Its type, and so its length, comes from the place it goes: a declared type, a parameter, or a function's return type (`L0412`). |
 | `integer8(value)` to `integer64(value)` | Converts an integer to that signed type |
 | `unsigned8(value)` to `unsigned64(value)` | Converts an integer to that unsigned type |
 
@@ -348,9 +361,7 @@ Later phases add these, and until then the compiler rejects each with `L0309`:
 
 | Function | Does | Phase |
 |---|---|---|
-| `length(items)` | The number of elements of an array, list, stack or view, or of bytes in a `string`, as an `integer64` | 2 |
 | `wrapping_add(left, right)`, `wrapping_subtract`, `wrapping_multiply` | Arithmetic that wraps around instead of stopping the program | 2 |
-| `array(value)` | An array with every element set to `value`; its size comes from the declared type | 2 |
 | `bytes(text)` | The UTF-8 bytes of a `string`, as a `view[unsigned8]` | 3 |
 | `slice(items, start, end)` | The elements from `start` up to `end`, without `end`, as a `view`. A slice of a `string` is a `string` that shares storage (Section 3.1); its ends have to fall between characters. | 3 |
 | `list()`, `stack()` | An empty list or stack | 3 |
@@ -360,7 +371,7 @@ Later phases add these, and until then the compiler rejects each with `L0309`:
 | `filter(items) with name`, `sort(variable items) with left, right` | The elements the block accepts; the elements in the block's order (Section 7.7) | 3 |
 | `pool()`, `insert(variable items, value)`, `remove(variable items, handle)` | An empty pool; a stored value's handle; a freed slot (Section 7.6) | 5 |
 
-The names of built-in functions and types cannot be declared again (`L0207`). No binding or function can be called `print`, `integer32`, `boolean` or `float64`.
+The names of built-in functions and types cannot be declared again (`L0207`). No binding or function can be called `print`, `length`, `integer32`, `boolean`, `array` or `float64`.
 
 ## 6. Control flow
 
@@ -385,6 +396,7 @@ for index in range(0, 10)
 - A condition needs no parentheses, and nothing follows it on its line: no `:`, no `then`, no `{`.
 - A condition is a `boolean`. Lymra has no "truthy" values: write `if count != 0`, not `if count` (`L0402`).
 - `for name in range(start, end)` computes `start`, then `end`, each once, then runs the block with `name` set to each integer from `start` up to `end`, without `end`. The loop variable cannot be changed. Name it `_` when the loop only repeats.
+- `for name in items` over an array runs the block once for each element, in order, with `name` set to a copy of it. The array is computed once, and each element is read when its turn comes, so a change the block makes to a later element is seen. Phase 3 adds loops over lists, stacks and views.
 - `else if` continues a chain. There is no `elif`.
 - `break` and `continue` work in `while` and `for`. Anywhere else they are error `L0601`.
 - A statement after `return`, `break` or `continue`, or after an `if` whose every branch leaves, can never run. It is error `L0602`.
@@ -559,7 +571,7 @@ error: integer overflow
   |                 ^^^^^^^^^
 ```
 
-The checks are integer overflow, division by zero, a conversion whose value does not fit, and `assert`. Calls that nest too deeply, as in recursion that never reaches its end, stop the program the same way with `error: stack overflow`, without a location: on POSIX systems and on Windows a handler catches the overflow when the stack runs out, so calls cost nothing extra for the check. Before the error, the program writes every line it printed. A line appears whole or not at all, so a program that stops in the middle of a `print` leaves no half line behind. Output is UTF-8 text with `\n` line breaks on every system; a Windows console, and a terminal that runs programs in a pseudo console, such as Windows Terminal, show it as the same characters. Output that cannot be written, for example to a full disk, ends the program with exit status 74.
+The checks are integer overflow, division by zero, a conversion whose value does not fit, an index outside its array, and `assert`. Calls that nest too deeply, as in recursion that never reaches its end, stop the program the same way with `error: stack overflow`, without a location: on POSIX systems and on Windows a handler catches the overflow when the stack runs out, so calls cost nothing extra for the check. Before the error, the program writes every line it printed. A line appears whole or not at all, so a program that stops in the middle of a `print` leaves no half line behind. Output is UTF-8 text with `\n` line breaks on every system; a Windows console, and a terminal that runs programs in a pseudo console, such as Windows Terminal, show it as the same characters. Output that cannot be written, for example to a full disk, ends the program with exit status 74.
 
 ## 12. Open questions
 

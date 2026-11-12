@@ -72,21 +72,21 @@ impl<'src, 'ast> Checker<'src, 'ast> {
     pub(super) fn check_expr(
         &mut self,
         expr: &ast::Expr<'src>,
-        expected: Option<Type>,
+        expected: Option<&Type>,
     ) -> CheckResult<ir::Expr> {
         let checked = self.check_expr_with_hint(expr, expected)?;
         match expected {
-            Some(expected) if checked.ty != expected => {
+            Some(expected) if checked.ty != *expected => {
                 // A literal has no type of its own until a context gives it one, so it is just "a number" here.
-                let error = match (expected, checked.ty) {
+                let error = match (expected, &checked.ty) {
                     _ if values::literal_integer(expr).is_some() => {
                         errors::literal_mismatch(expected, expr.span)
                     }
                     (Type::Integer(target), Type::Integer(_)) => {
                         let source = self.text(expr.span);
-                        errors::integer_mismatch(target, checked.ty, expr.span, source)
+                        errors::integer_mismatch(*target, &checked.ty, expr.span, source)
                     }
-                    _ => errors::type_mismatch(expected, checked.ty, expr.span),
+                    _ => errors::type_mismatch(expected, &checked.ty, expr.span),
                 };
                 Err(self.report(error))
             }
@@ -98,7 +98,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
     pub(super) fn check_expr_with_hint(
         &mut self,
         expr: &ast::Expr<'src>,
-        hint: Option<Type>,
+        hint: Option<&Type>,
     ) -> CheckResult<ir::Expr> {
         if let Some(value) = values::literal_integer(expr) {
             return self.integer_literal(expr, value, hint);
@@ -119,17 +119,53 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 left,
                 right,
             } => self.check_binary(*operator, left, right, expr.span),
-            ast::ExprKind::Call(call) => match self.check_call(call, expr.span)? {
+            ast::ExprKind::Call(call) => match self.check_call(call, expr.span, hint)? {
                 CheckedCall::Value(value) => Ok(value),
                 CheckedCall::Effect { function, .. } => {
                     Err(self.report(errors::no_value(function, expr.span)))
                 }
             },
             ast::ExprKind::Field { object, .. } => Err(self.reject_field(object, expr.span)),
-            ast::ExprKind::Index { .. } => {
-                self.mark_reads(expr);
-                Err(self.report(Feature::Arrays.diagnostic(expr.span)))
+            ast::ExprKind::Index { object, index } => self.check_index(object, index, expr.span),
+        }
+    }
+
+    /**
+     * Checks `value` against the type of the place it goes to, if there is
+     * one. When that type failed to resolve, which was reported already, the
+     * value is only checked for mistakes of its own: an `array(value)` there
+     * has no length to take, and saying so would report the same mistake twice.
+     */
+    pub(super) fn check_against(
+        &mut self,
+        value: &ast::Expr<'src>,
+        expected: Option<Result<&Type, &ErrorReported>>,
+    ) -> CheckResult<ir::Expr> {
+        match expected {
+            None => self.check_expr(value, None),
+            Some(Ok(ty)) => self.check_expr(value, Some(ty)),
+            Some(Err(ErrorReported)) => {
+                self.check_untyped(value);
+                Err(ErrorReported)
             }
+        }
+    }
+
+    /// Checks a value whose type failed to resolve for its own mistakes. See `check_against`.
+    pub(super) fn check_untyped(&mut self, value: &ast::Expr<'src>) {
+        match &value.kind {
+            ast::ExprKind::Call(call)
+                if matches!(call.callee.kind, ast::ExprKind::Name("array")) =>
+            {
+                for argument in &call.arguments {
+                    match &argument.kind {
+                        ArgumentKind::Positional(inner)
+                        | ArgumentKind::Mutable(inner)
+                        | ArgumentKind::Named { value: inner, .. } => self.check_untyped(inner),
+                    }
+                }
+            }
+            _ => self.check_for_errors(value),
         }
     }
 
@@ -148,7 +184,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         &mut self,
         expr: &ast::Expr<'src>,
         value: Result<i128, LiteralError>,
-        hint: Option<Type>,
+        hint: Option<&Type>,
     ) -> CheckResult<ir::Expr> {
         let value = match value {
             Ok(value) => value,
@@ -203,7 +239,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     return Err(ErrorReported);
                 };
                 local.read = true;
-                let ty = local.ty?;
+                let ty = local.ty.clone()?;
                 return Ok(ir::Expr {
                     kind: ir::ExprKind::Local(id),
                     ty,
@@ -240,7 +276,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         operator: UnaryOperator,
         operand: &ast::Expr<'src>,
         span: Span,
-        hint: Option<Type>,
+        hint: Option<&Type>,
     ) -> CheckResult<ir::Expr> {
         let operand = self.check_expr_with_hint(operand, hint)?;
         match operator {
@@ -249,7 +285,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     return Err(self.report(errors::operator_type(
                         format!(
                             "`not` works on `boolean` values, but this is {}",
-                            described(operand.ty)
+                            described(&operand.ty)
                         ),
                         operand.span,
                         "not a `boolean`".to_owned(),
@@ -283,28 +319,31 @@ impl<'src, 'ast> Checker<'src, 'ast> {
     }
 
     fn negatable_type(&mut self, operand: &ir::Expr) -> CheckResult<IntegerType> {
-        let (message, help) = match operand.ty {
-            Type::Integer(ty) if ty.is_signed() => return Ok(ty),
+        let (message, help) = match &operand.ty {
+            Type::Integer(ty) if ty.is_signed() => return Ok(*ty),
             Type::Integer(ty) => (
                 format!(
                     "`-` cannot negate an unsigned value, and this is {}",
-                    described(operand.ty)
+                    described(&operand.ty)
                 ),
                 format!(
                     "use a signed type such as `{}` if the value can be negative",
-                    signed_counterpart(ty).name()
+                    signed_counterpart(*ty).name()
                 ),
             ),
             Type::Boolean => (
                 "`-` works on numbers, but this is a `boolean`".to_owned(),
                 "to flip a `boolean`, use `not`".to_owned(),
             ),
-            Type::String => (
-                "`-` works on numbers, but this is a `string`".to_owned(),
+            Type::String | Type::Array(_) => (
+                format!(
+                    "`-` works on numbers, but this is {}",
+                    described(&operand.ty)
+                ),
                 "only numbers can be negated".to_owned(),
             ),
         };
-        let label = format!("this is {}", described(operand.ty));
+        let label = format!("this is {}", described(&operand.ty));
         Err(self.report(errors::operator_type(message, operand.span, label, &help)))
     }
 
@@ -338,13 +377,13 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         let right_is_literal = values::literal_integer(right).is_some();
         if left_is_literal && !right_is_literal {
             let right = self.check_expr_with_hint(right, None);
-            let hint = right.as_ref().ok().map(|right| right.ty);
+            let hint = right.as_ref().ok().map(|right| &right.ty);
             let left = self.check_expr_with_hint(left, hint);
             return Ok((left?, right?));
         }
         let left = self.check_expr_with_hint(left, None);
         let hint = if right_is_literal {
-            left.as_ref().ok().map(|left| left.ty)
+            left.as_ref().ok().map(|left| &left.ty)
         } else {
             None
         };
@@ -366,6 +405,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     Type::String => {
                         "to put text together, interpolate it: `print(\"{first}{second}\")`"
                     }
+                    Type::Array(_) => {
+                        "arithmetic works on single numbers; work on the elements one by one"
+                    }
                     Type::Boolean | Type::Integer(_) => {
                         "arithmetic needs integer types such as `integer64`"
                     }
@@ -373,7 +415,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 self.report(errors::operator_type(
                     format!(
                         "`{symbol}` works on numbers, but this is {}",
-                        described(operand.ty)
+                        described(&operand.ty)
                     ),
                     operand.span,
                     "not a number".to_owned(),
@@ -385,12 +427,12 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         if failed {
             return Err(ErrorReported);
         }
-        match (left.ty, right.ty) {
-            (Type::Integer(shared), Type::Integer(other)) if shared == other => Ok(shared),
+        match (&left.ty, &right.ty) {
+            (Type::Integer(shared), Type::Integer(other)) if shared == other => Ok(*shared),
             _ => Err(self.report(errors::operand_mismatch(
                 symbol,
-                (left.ty, left.span),
-                (right.ty, right.span),
+                (&left.ty, left.span),
+                (&right.ty, right.span),
             ))),
         }
     }
@@ -449,11 +491,11 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         if left.ty != right.ty {
             return Err(self.report(errors::operand_mismatch(
                 symbol,
-                (left.ty, left.span),
-                (right.ty, right.span),
+                (&left.ty, left.span),
+                (&right.ty, right.span),
             )));
         }
-        match left.ty {
+        match &left.ty {
             Type::String => return Err(self.report(Feature::TextComparison.diagnostic(span))),
             Type::Boolean if !operator.is_equality() => {
                 return Err(self.report(errors::operator_type(
@@ -461,6 +503,14 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     span,
                     "comparing `boolean` values".to_owned(),
                     "compare `boolean` values with `==` and `!=`",
+                )));
+            }
+            Type::Array(_) => {
+                return Err(self.report(errors::operator_type(
+                    format!("`{symbol}` compares single values, and these are arrays"),
+                    span,
+                    "comparing arrays".to_owned(),
+                    "compare the elements one by one in a loop",
                 )));
             }
             Type::Integer(_) | Type::Boolean => {}
@@ -500,7 +550,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 self.report(errors::operator_type(
                     format!(
                         "`{symbol}` works on `boolean` values, but this is {}",
-                        described(operand.ty)
+                        described(&operand.ty)
                     ),
                     operand.span,
                     "not a `boolean`".to_owned(),
@@ -530,7 +580,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
     }
 
     /// Reports `object.field`: a field of a value, or a member of a module.
-    fn reject_field(&mut self, object: &ast::Expr<'src>, span: Span) -> ErrorReported {
+    pub(super) fn reject_field(&mut self, object: &ast::Expr<'src>, span: Span) -> ErrorReported {
         if let ast::ExprKind::Name(name) = &object.kind {
             let is_value = self
                 .scope
@@ -545,10 +595,12 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         self.report(Feature::Fields.diagnostic(span))
     }
 
+    /// Checks a call. `hint` is the type the place the result goes to asks for, which `array(value)` needs.
     pub(super) fn check_call(
         &mut self,
         call: &ast::Call<'src>,
         span: Span,
+        hint: Option<&Type>,
     ) -> CheckResult<CheckedCall<'src>> {
         if let Some(block) = &call.block {
             self.mark_argument_reads(&call.arguments);
@@ -569,6 +621,11 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             .as_ref()
             .is_some_and(|scope| scope.lookup(name).is_some())
         {
+            // A local with a built-in name was rejected where it was declared; the call means the built-in.
+            if BuiltIn::of(name).is_some() {
+                self.mark_argument_reads(&call.arguments);
+                return Err(ErrorReported);
+            }
             return Err(self.report(errors::not_a_function(name, callee.span)));
         }
         match self.globals.get(name).copied() {
@@ -576,7 +633,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             Some(Global::Constant(_)) => {
                 Err(self.report(errors::not_a_function(name, callee.span)))
             }
-            None => self.check_undeclared_call(name, call, span),
+            None => self.check_undeclared_call(name, call, span, hint),
         }
     }
 
@@ -590,12 +647,16 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         name: &'src str,
         call: &ast::Call<'src>,
         span: Span,
+        hint: Option<&Type>,
     ) -> CheckResult<CheckedCall<'src>> {
         if let Some(target) = IntegerType::from_name(name) {
             return self.check_conversion(target, name, call, span);
         }
-        if name == "print" {
-            return self.check_print(call, span);
+        match name {
+            "print" => return self.check_print(call, span),
+            "array" => return self.check_fill(call, span, hint),
+            "length" => return self.check_length(call, span),
+            _ => {}
         }
         self.mark_argument_reads(&call.arguments);
         // A `type` or `choice` of a later phase is already reported where it is declared.
@@ -641,25 +702,14 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 arguments,
             )));
         };
-        let value = match &argument.kind {
-            ArgumentKind::Positional(value) => value,
-            ArgumentKind::Mutable(value) => {
-                self.check_for_errors(value);
-                let mark = Span::new(argument.span.start, value.span.start);
-                return Err(self.report(errors::needless_variable_mark("value", mark)));
-            }
-            ArgumentKind::Named { value, .. } => {
-                self.mark_reads(value);
-                return Err(self.report(Feature::NamedArguments.diagnostic(argument.span)));
-            }
-        };
+        let value = self.single_value_argument(argument, "value")?;
         // A literal takes the target type directly, so it is checked against the target's range.
-        let operand = self.check_expr_with_hint(value, Some(Type::Integer(target)))?;
+        let operand = self.check_expr_with_hint(value, Some(&Type::Integer(target)))?;
         let Type::Integer(source) = operand.ty else {
             return Err(self.report(errors::operator_type(
                 format!(
                     "`{name}` converts integers, but this is {}",
-                    described(operand.ty)
+                    described(&operand.ty)
                 ),
                 operand.span,
                 "not an integer".to_owned(),
@@ -690,8 +740,31 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }))
     }
 
+    /**
+     * The value of the one argument of a built-in function, named `parameter`.
+     * It has to be plain: not passed with `variable`, and not named.
+     */
+    pub(super) fn single_value_argument<'argument>(
+        &mut self,
+        argument: &'argument ast::Argument<'src>,
+        parameter: &str,
+    ) -> CheckResult<&'argument ast::Expr<'src>> {
+        match &argument.kind {
+            ArgumentKind::Positional(value) => Ok(value),
+            ArgumentKind::Mutable(value) => {
+                self.check_for_errors(value);
+                let mark = Span::new(argument.span.start, value.span.start);
+                Err(self.report(errors::needless_variable_mark(parameter, mark)))
+            }
+            ArgumentKind::Named { value, .. } => {
+                self.mark_reads(value);
+                Err(self.report(Feature::NamedArguments.diagnostic(argument.span)))
+            }
+        }
+    }
+
     /// Marks what the arguments of a rejected call read, without reporting anything inside them.
-    fn mark_argument_reads(&mut self, arguments: &[ast::Argument<'src>]) {
+    pub(super) fn mark_argument_reads(&mut self, arguments: &[ast::Argument<'src>]) {
         for argument in arguments {
             match &argument.kind {
                 ArgumentKind::Positional(value) | ArgumentKind::Mutable(value) => {
@@ -725,7 +798,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         };
         let declaration = entry.declaration;
         let parameters = entry.parameters.clone();
-        let return_type = entry.return_type;
+        let return_type = entry.return_type.clone();
 
         if call.arguments.len() != parameters.len() {
             self.check_arguments_for_errors(&call.arguments);
@@ -798,7 +871,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 Err(self.report(Feature::NamedArguments.diagnostic(argument.span)))
             }
             (ArgumentKind::Positional(value), false) => self
-                .check_expr(value, parameter.ty.ok())
+                .check_against(value, Some(parameter.ty.as_ref()))
                 .map(ir::Argument::Value),
             (ArgumentKind::Positional(value), true) => {
                 self.check_for_errors(value);
@@ -813,7 +886,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 Err(self.report(errors::needless_variable_mark(parameter.name.text, mark)))
             }
             (ArgumentKind::Mutable(place), true) => self
-                .check_reference(place, parameter.ty)
+                .check_reference(place, parameter.ty.as_ref())
                 .map(ir::Argument::Reference),
         }
     }
@@ -822,7 +895,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
     fn check_reference(
         &mut self,
         place: &ast::Expr<'src>,
-        expected: CheckResult<Type>,
+        expected: Result<&Type, &ErrorReported>,
     ) -> CheckResult<ir::LocalId> {
         let ast::ExprKind::Name(name) = &place.kind else {
             return Err(self.report_unchangeable_place(place));
@@ -841,10 +914,10 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             return Err(self.report(error));
         }
         local.written = true;
-        let ty = local.ty?;
+        let ty = local.ty.clone()?;
         match expected {
-            Ok(expected) if expected != ty => {
-                Err(self.report(errors::type_mismatch(expected, ty, place.span)))
+            Ok(expected) if *expected != ty => {
+                Err(self.report(errors::type_mismatch(expected, &ty, place.span)))
             }
             Ok(_) => Ok(id),
             Err(ErrorReported) => Err(ErrorReported),
@@ -857,7 +930,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             ast::ExprKind::Field { object, .. } => self.reject_field(object, place.span),
             ast::ExprKind::Index { .. } => {
                 self.mark_reads(place);
-                self.report(Feature::Arrays.diagnostic(place.span))
+                self.report(errors::element_reference(place.span))
             }
             _ => self.report(errors::reference_needs_variable(place.span)),
         }
@@ -902,29 +975,23 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 arguments,
             )));
         };
-        let value = match &argument.kind {
-            ArgumentKind::Positional(value) => value,
-            ArgumentKind::Mutable(value) => {
-                self.check_for_errors(value);
-                let mark = Span::new(argument.span.start, value.span.start);
-                return Err(self.report(errors::needless_variable_mark("text", mark)));
-            }
-            ArgumentKind::Named { value, .. } => {
-                self.mark_reads(value);
-                return Err(self.report(Feature::NamedArguments.diagnostic(argument.span)));
-            }
-        };
+        let value = self.single_value_argument(argument, "text")?;
         let parts = match &value.kind {
             ast::ExprKind::Text(parts) => self.check_print_parts(parts)?,
             _ => {
                 let checked = self.check_expr_with_hint(value, None)?;
                 if checked.ty != Type::String {
                     let source = self.text(value.span);
-                    return Err(
-                        self.report(errors::print_needs_text(checked.ty, value.span, source))
-                    );
+                    return Err(self.report(errors::print_needs_text(
+                        &checked.ty,
+                        value.span,
+                        source,
+                    )));
                 }
-                vec![ir::PrintPart::Value(checked)]
+                vec![ir::PrintPart::Value {
+                    value: checked,
+                    form: ir::TextForm::Text,
+                }]
             }
         };
         Ok(CheckedCall::Effect {
@@ -933,7 +1000,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         })
     }
 
-    /// Interpolated values of every type can be printed. Each part is checked even after one fails.
+    /// Interpolated values of every type but arrays can be printed. Each part is checked even after one fails.
     fn check_print_parts(
         &mut self,
         parts: &[ast::TextPart<'src>],
@@ -944,7 +1011,13 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             match part {
                 ast::TextPart::Literal(text) => checked.push(ir::PrintPart::Text(text.clone())),
                 ast::TextPart::Interpolation(expr) => match self.check_expr_with_hint(expr, None) {
-                    Ok(value) => checked.push(ir::PrintPart::Value(value)),
+                    Ok(value) => match ir::TextForm::of(&value.ty) {
+                        Some(form) => checked.push(ir::PrintPart::Value { value, form }),
+                        None => {
+                            self.report(errors::array_in_text(value.span));
+                            failed = true;
+                        }
+                    },
                     Err(ErrorReported) => failed = true,
                 },
             }

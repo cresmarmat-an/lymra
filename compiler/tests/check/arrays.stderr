@@ -1,0 +1,183 @@
+error[L0210]: a top-level constant cannot hold an array
+ --> tests/check/arrays.lym:3:10
+  |
+3 | constant array[integer64, 2] table = array(0)
+  |          ^^^^^^^^^^^^^^^^^^^ an array type
+  |
+help: declare the array inside the function that uses it
+
+error[L0409]: `integer64` takes nothing in brackets
+ --> tests/check/arrays.lym:5:16
+  |
+5 | function sizes(integer64[3] _, array[integer64] _, array[integer64, 0] _, array[integer64, negative] _)
+  |                ^^^^^^^^^^^^ not an array type
+  |
+help: an array of them is written with `array`
+  |
+5 | function sizes(array[integer64, 3] _, array[integer64] _, array[integer64, 0] _, array[integer64, negative] _)
+
+error[L0409]: an array type names its element type and its length
+ --> tests/check/arrays.lym:5:32
+  |
+5 | function sizes(integer64[3] _, array[integer64] _, array[integer64, 0] _, array[integer64, negative] _)
+  |                                ^^^^^^^^^^^^^^^^ expected `array[element type, length]`
+  |
+help: write the type of the elements, then how many there are, as in `array[integer64, 10]`
+
+error[L0409]: an array holds at least one element
+ --> tests/check/arrays.lym:5:69
+  |
+5 | function sizes(integer64[3] _, array[integer64] _, array[integer64, 0] _, array[integer64, negative] _)
+  |                                                                     ^ a length of 0
+  |
+help: give the number of elements the array holds, 1 or more
+
+error[L0409]: an array holds at least one element, but `negative` is -2
+ --> tests/check/arrays.lym:5:92
+  |
+5 | function sizes(integer64[3] _, array[integer64] _, array[integer64, 0] _, array[integer64, negative] _)
+  |                                                                                            ^^^^^^^^ a negative length
+  |
+help: give the number of elements the array holds, 1 or more
+
+error[L0410]: `array[integer64, 1000000]` takes 8000000 bytes, more than an array can hold
+ --> tests/check/arrays.lym:9:14
+  |
+9 |     variable array[integer64, 1000000] huge = array(0)
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^ too large for the call stack
+  |
+help: an array lives on the call stack and holds at most 1048576 bytes (1 MiB); use fewer or smaller elements, or keep the data in a `list`, which phase 3 adds
+
+error[L0411]: index 3 is out of range for an array of length 3
+  --> tests/check/arrays.lym:11:12
+   |
+11 |     values[3] = 1
+   |            ^ the program would stop here every time it ran this line
+   |
+help: the array has 3 elements, at indexes 0 to 2
+
+error[L0411]: index -1 is out of range for an array of length 3
+  --> tests/check/arrays.lym:12:20
+   |
+12 |     print("{values[-1]}")
+   |                    ^^ the program would stop here every time it ran this line
+   |
+help: indexes count up from 0, and there are no negative ones; the last element is at 2
+
+error[L0412]: `array(value)` needs to know which array to build
+  --> tests/check/arrays.lym:13:24
+   |
+13 |     variable unknown = array(0)
+   |                        ^^^^^^^^ its length comes from the type of the place it goes
+   |
+help: write the type where the array goes, as in `variable array[integer64, 10] values = array(0)`
+
+error[L0405]: only arrays can be indexed, and this is an `integer64`
+  --> tests/check/arrays.lym:15:13
+   |
+15 |     print("{number[0]}")
+   |             ^^^^^^ not an array
+   |
+help: index an array, as in `values[0]`
+
+error[L0402]: an index is an integer, but this is a `boolean`
+  --> tests/check/arrays.lym:16:20
+   |
+16 |     print("{values[true]}")
+   |                    ^^^^ not an integer
+   |
+help: index with a whole number from 0 up to the length, without it
+
+error[L0402]: an array cannot be put into text
+  --> tests/check/arrays.lym:17:13
+   |
+17 |     print("{values}")
+   |             ^^^^^^ this is an array
+   |
+help: put its elements in one by one, as in `{values[0]}`, or print them in a loop
+
+error[L0402]: `print` takes text, but this is an `array[integer64, 3]`
+  --> tests/check/arrays.lym:18:11
+   |
+18 |     print(values)
+   |           ^^^^^^ not text
+   |
+help: print its elements one by one, in a loop
+
+error[L0405]: `for` loops over a range or an array, but this is an `integer64`
+  --> tests/check/arrays.lym:19:17
+   |
+19 |     for item in number
+   |                 ^^^^^^ not a range or an array
+   |
+help: to count up to a number, loop over a range
+   |
+19 |     for item in range(0, number)
+
+error[L0309]: `for` can only loop over `range` and arrays for now
+  --> tests/check/arrays.lym:21:22
+   |
+21 |     for character in "text"
+   |                      ^^^^^^ the compiler adds this in roadmap phase 3
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0405]: `length` counts the elements of an array or the bytes of a text, but this is an `integer64`
+  --> tests/check/arrays.lym:23:20
+   |
+23 |     print("{length(number)}")
+   |                    ^^^^^^ has no length
+   |
+help: pass an array or a `string`
+
+error[L0501]: `length` takes 1 argument, but 2 were given
+  --> tests/check/arrays.lym:24:19
+   |
+24 |     print("{length(values, values)}")
+   |                   ^^^^^^^^^^^^^^^^ `length` measures one value
+   |
+help: write `length(value)`
+
+error[L0504]: an element cannot be passed with `variable`
+  --> tests/check/arrays.lym:25:19
+   |
+25 |     take(variable values[0])
+   |                   ^^^^^^^^^ only a whole binding can be
+   |
+help: pass the whole array with `variable`, or copy the element into a `variable`, pass that, and store it back
+
+error[L0308]: only a binding, or an element inside one, can be assigned
+  --> tests/check/arrays.lym:27:5
+   |
+27 |     made()[0] = 1
+   |     ^^^^^^ not a binding
+   |
+help: store the value in a `variable` first, then assign to its elements
+
+error[L0501]: `array` takes 1 argument, but 2 were given
+  --> tests/check/arrays.lym:28:19
+   |
+28 |     values = array(1, 2)
+   |                   ^^^^^^ `array(value)` sets every element to one value
+   |
+help: write `array(value)`; the type where it goes gives the length
+
+error[L0405]: `==` compares single values, and these are arrays
+  --> tests/check/arrays.lym:29:8
+   |
+29 |     if values == values
+   |        ^^^^^^^^^^^^^^^^ comparing arrays
+   |
+help: compare the elements one by one in a loop
+
+error[L0508]: `values` is passed with `variable` and also used elsewhere in the same expression
+  --> tests/check/arrays.lym:31:35
+   |
+31 |     values[values[0]] = take_back(variable values)
+   |                                   ^^^^^^^^^^^^^^^ `take_back` may change `values` here
+   |            ------ `values` is used here too, so the result depends on which runs first
+   |
+help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `values`
+
+found 22 errors in tests/check/arrays.lym
+run `lymra explain L0210` to read why a rule exists and how to fix it

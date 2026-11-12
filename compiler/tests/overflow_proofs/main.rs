@@ -53,15 +53,21 @@ impl CheckCount {
 
     fn statement(&mut self, statement: &Statement) {
         match statement {
+            Statement::Assign { target, value } => {
+                for index in &target.indexes {
+                    self.operation(index.checked);
+                    self.expr(&index.value);
+                }
+                self.expr(value);
+            }
             Statement::Declare { value, .. }
-            | Statement::Assign { value, .. }
             | Statement::Discard(value)
             | Statement::Return(Some(value))
             | Statement::Assert { condition: value } => self.expr(value),
             Statement::Call(call) => self.arguments(call),
             Statement::Print(parts) => {
                 for part in parts {
-                    if let PrintPart::Value(value) = part {
+                    if let PrintPart::Value { value, .. } = part {
                         self.expr(value);
                     }
                 }
@@ -89,6 +95,10 @@ impl CheckCount {
                 self.expr(end);
                 self.block(body);
             }
+            Statement::ForEach { array, body, .. } => {
+                self.expr(array);
+                self.block(body);
+            }
             Statement::Return(None) | Statement::Break | Statement::Continue => {}
         }
     }
@@ -109,7 +119,19 @@ impl CheckCount {
                 self.operation(*checked);
                 self.expr(operand);
             }
-            ExprKind::Not(operand) => self.expr(operand),
+            ExprKind::Index {
+                array,
+                index,
+                checked,
+                ..
+            } => {
+                self.operation(*checked);
+                self.expr(array);
+                self.expr(index);
+            }
+            ExprKind::Not(operand) | ExprKind::Fill(operand) | ExprKind::Length(operand) => {
+                self.expr(operand);
+            }
             ExprKind::Compare { left, right, .. } | ExprKind::Logic { left, right, .. } => {
                 self.expr(left);
                 self.expr(right);

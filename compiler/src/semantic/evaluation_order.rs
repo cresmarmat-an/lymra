@@ -70,10 +70,17 @@ impl<'src> Visitor<'src> for Uses<'src> {
     }
 }
 
-/// The first binding, in source order, that `expr` passes with `variable` and also uses elsewhere.
-pub(super) fn find_conflict<'src>(expr: &ast::Expr<'src>) -> Option<Conflict<'src>> {
+/**
+ * The first binding, in source order, that one of `parts` passes with
+ * `variable` while it or another part uses the binding elsewhere. The parts
+ * run as one: an expression, or the indexes of an assignment's target
+ * together with its value.
+ */
+pub(super) fn find_conflict<'src>(parts: &[&ast::Expr<'src>]) -> Option<Conflict<'src>> {
     let mut uses = Uses::default();
-    uses.visit_expr(expr);
+    for part in parts {
+        uses.visit_expr(part);
+    }
     uses.passed.iter().find_map(|passed| {
         let reads = uses
             .reads

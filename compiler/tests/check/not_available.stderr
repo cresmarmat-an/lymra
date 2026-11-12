@@ -94,27 +94,11 @@ error[L0309]: fields are not available yet
    |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-error[L0309]: arrays and indexing are not available yet
-  --> tests/check/not_available.lym:19:25
-   |
-19 |     print("{frog.name} {numbers[0]} {geometry.area(2.0, 3.0)}")
-   |                         ^^^^^^^^^^ the compiler adds this in roadmap phase 2
-   |
-help: write this part another way for now; the roadmap in the README lists what each phase adds
-
 error[L0309]: modules are not available yet
   --> tests/check/not_available.lym:19:38
    |
 19 |     print("{frog.name} {numbers[0]} {geometry.area(2.0, 3.0)}")
    |                                      ^^^^^^^^^^^^^ the compiler adds this in roadmap phase 4
-   |
-help: write this part another way for now; the roadmap in the README lists what each phase adds
-
-error[L0309]: `for` can only loop over `range` for now
-  --> tests/check/not_available.lym:20:17
-   |
-20 |     for item in numbers
-   |                 ^^^^^^^ the compiler adds this in roadmap phase 3
    |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
@@ -134,14 +118,6 @@ error[L0309]: `with` blocks are not available yet
    |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-error[L0309]: `length` is not available yet
-  --> tests/check/not_available.lym:25:21
-   |
-25 |     constant size = length(text)
-   |                     ^^^^^^ the compiler adds this in roadmap phase 2
-   |
-help: write this part another way for now; the roadmap in the README lists what each phase adds
-
 error[L0309]: choices and `match` are not available yet
   --> tests/check/not_available.lym:26:5
    |
@@ -158,5 +134,5 @@ error[L0309]: `float32` and `float64` are not available yet
    |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-found 20 errors in tests/check/not_available.lym
+found 17 errors in tests/check/not_available.lym
 run `lymra explain L0309` to read why a rule exists and how to fix it

@@ -1,0 +1,24 @@
+exit status 0
+--- standard output
+total 10, doubled total 20
+copy 100, original 1
+doubled in place: 2 2 14 2
+after reset: 3, at an unsigned index 3
+grid 0 9, row 4 9, largest 9
+length 2 by 3
+made
+element 5
+element 6
+element 5
+made
+made
+middle 6, length 3
+live 1
+live 1
+live 3
+hi héllo has 6 bytes
+first set flag at 1
+index
+value
+slots 0 5 0
+--- standard error

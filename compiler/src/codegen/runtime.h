@@ -490,6 +490,54 @@ LYMRA_UNSIGNED_OPERATIONS(unsigned16, uint16_t, UINT16_MAX, LYMRA_UNSIGNED_WIDEN
 LYMRA_UNSIGNED_OPERATIONS(unsigned32, uint32_t, UINT32_MAX, LYMRA_UNSIGNED_WIDENED_PRODUCT)
 LYMRA_UNSIGNED_OPERATIONS(unsigned64, uint64_t, UINT64_MAX, LYMRA_UNSIGNED_64_PRODUCT)
 
+/* Writes `magnitude` in decimal to standard error, after a minus sign when `negative`. */
+LYMRA_UNUSED static void lymra_write_error_number(uint64_t magnitude, bool negative) {
+    /* 20 digits hold the largest `unsigned64`; one more holds the sign, and one ends the text. */
+    char digits[22];
+    size_t start = sizeof digits - 1;
+    digits[start] = '\0';
+    do {
+        digits[--start] = (char)('0' + magnitude % 10);
+        magnitude /= 10;
+    } while (magnitude != 0);
+    if (negative) {
+        digits[--start] = '-';
+    }
+    lymra_write_error(digits + start);
+}
+
+/* Stops the program because an index of `magnitude`, negative or not, lies outside an array of `length` elements. */
+LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap_index(uint64_t magnitude, bool negative, uint64_t length,
+                                                          const char *site) {
+    lymra_write_finished();
+    lymra_write_error("error: index ");
+    lymra_write_error_number(magnitude, negative);
+    lymra_write_error(" is out of range for an array of length ");
+    lymra_write_error_number(length, false);
+    lymra_write_error("\n");
+    lymra_write_error(site);
+    exit(LYMRA_RUNTIME_ERROR_STATUS);
+}
+
+/* Checks a signed index into an array of `length` elements and returns it as a position. */
+LYMRA_UNUSED static inline size_t lymra_index_signed(int64_t index, uint64_t length, const char *site) {
+    if (index < 0) {
+        lymra_trap_index((uint64_t)0 - (uint64_t)index, true, length, site);
+    }
+    if ((uint64_t)index >= length) {
+        lymra_trap_index((uint64_t)index, false, length, site);
+    }
+    return (size_t)index;
+}
+
+/* Checks an unsigned index into an array of `length` elements and returns it as a position. */
+LYMRA_UNUSED static inline size_t lymra_index_unsigned(uint64_t index, uint64_t length, const char *site) {
+    if (index >= length) {
+        lymra_trap_index(index, false, length, site);
+    }
+    return (size_t)index;
+}
+
 /* Checks a conversion from a signed type: the value has to lie within [minimum, maximum]. */
 LYMRA_UNUSED static inline int64_t lymra_check_signed(int64_t value, int64_t minimum, int64_t maximum,
                                                        const char *site) {

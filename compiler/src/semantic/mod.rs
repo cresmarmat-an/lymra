@@ -9,6 +9,7 @@
  * error was found.
  */
 
+mod arrays;
 mod errors;
 mod evaluation_order;
 mod expressions;
@@ -33,10 +34,13 @@ use scope::{FunctionScope, LocalKind};
 type CheckResult<T> = Result<T, ErrorReported>;
 
 /// The built-in functions of phase 1.
-const BUILT_IN_FUNCTIONS: [&str; 2] = ["print", "range"];
+const BUILT_IN_FUNCTIONS: [&str; 3] = ["print", "range", "length"];
 
-/// Built-in types that are not integers. Floating-point types arrive in phase 2, but their names are taken already.
-const OTHER_TYPE_NAMES: [&str; 4] = ["boolean", "string", "float32", "float64"];
+/**
+ * Built-in types that are not integers. Floating-point types arrive later in
+ * phase 2, but their names are taken already. Calling `array` builds one.
+ */
+const OTHER_TYPE_NAMES: [&str; 5] = ["boolean", "string", "array", "float32", "float64"];
 
 /// What a name the language itself defines stands for. No declaration can take such a name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,7 +114,7 @@ enum Global {
 }
 
 /// A parameter with its type resolved.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct Parameter<'src> {
     name: Name<'src>,
     ty: CheckResult<Type>,
@@ -231,7 +235,25 @@ impl<'src, 'ast> Checker<'src, 'ast> {
     ) -> CheckResult<ir::LocalId> {
         if name.text != DISCARD {
             if let Some(built_in) = BuiltIn::of(name.text) {
-                return Err(self.report(errors::built_in_name(name.text, built_in, name.span)));
+                let error = self.report(errors::built_in_name(name.text, built_in, name.span));
+                /*
+                 * The binding still goes in scope, without a type, so the code
+                 * that uses it is checked without the same mistake reported
+                 * again at every use.
+                 */
+                let rejected = scope::Local {
+                    name,
+                    ty: Err(error),
+                    kind,
+                    keyword,
+                    read: false,
+                    written: false,
+                    declaration_failed: true,
+                };
+                if let Some(scope) = self.scope.as_mut() {
+                    scope.declare(rejected);
+                }
+                return Err(error);
             }
             if let Some(previous) = self.visible_declaration(name.text) {
                 return Err(self.report(errors::already_declared(name.text, name.span, previous)));
@@ -319,8 +341,8 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         };
         let declaration = entry.declaration;
         let parameters = entry.parameters.clone();
-        let return_type = entry.return_type;
-        self.scope = Some(FunctionScope::new(declaration.name, return_type));
+        let return_type = entry.return_type.clone();
+        self.scope = Some(FunctionScope::new(declaration.name, return_type.clone()));
 
         let mut parameter_ids = Vec::new();
         let mut parameters_failed = false;
@@ -337,7 +359,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }
 
         let (body, falls_through) = self.check_block(&declaration.body);
-        if let Ok(Some(return_type)) = return_type {
+        if let Ok(Some(return_type)) = &return_type {
             if falls_through {
                 let error = errors::missing_return(
                     declaration.name.text,

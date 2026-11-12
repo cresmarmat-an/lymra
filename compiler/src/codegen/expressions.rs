@@ -5,37 +5,35 @@
  * two sides of `+` or `<`. Lymra runs the parts of an expression from left to
  * right (spec section 4.1), so wherever the order could show, the part that
  * comes first is computed into a temporary before the expression, as a
- * statement of its own.
+ * statement of its own. Only parts with effects need it: no part of an
+ * expression can change a binding another part reads (`L0508`), so the order
+ * of the others never shows.
  */
 
+use super::types::fill_function;
 use super::{Generator, INDENT, Writer, c_syntax, local_access};
 use crate::ir::{
     Argument, ArithmeticOperator, Call, Expr, ExprKind, Function, IntegerType, LogicOperator, Type,
 };
+use crate::source::Span;
 
-/**
- * Whether computing `expr` can be seen from outside it: a call can print or
- * stop the program, and so can a checked operation. Reading values cannot,
- * and no part of an expression can change a binding another part reads
- * (`L0508`), so the order of parts without effects never shows.
- */
-pub(super) fn has_effects(expr: &Expr) -> bool {
+/// What an index is checked against.
+#[derive(Clone, Copy)]
+pub(super) struct Bounds {
+    /// The length of the array.
+    pub length: u64,
+    /// Whether the index can fall outside the array.
+    pub checked: bool,
+    /// Where a failed check points.
+    pub span: Span,
+}
+
+/// Whether `expr` stands for storage C can take the address of: a local, or an element inside one.
+pub(super) fn is_addressable(expr: &Expr) -> bool {
     match &expr.kind {
-        ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) => false,
-        ExprKind::Call(_) => true,
-        ExprKind::Not(operand) => has_effects(operand),
-        ExprKind::Negate { operand, checked } | ExprKind::Convert { operand, checked } => {
-            *checked || has_effects(operand)
-        }
-        ExprKind::Arithmetic {
-            left,
-            right,
-            checked,
-            ..
-        } => *checked || has_effects(left) || has_effects(right),
-        ExprKind::Compare { left, right, .. } | ExprKind::Logic { left, right, .. } => {
-            has_effects(left) || has_effects(right)
-        }
+        ExprKind::Local(_) => true,
+        ExprKind::Index { array, .. } => is_addressable(array),
+        _ => false,
     }
 }
 
@@ -56,10 +54,10 @@ impl Generator<'_, '_> {
                 let operand = self.expr(function, operand, writer);
                 if !checked {
                     // The optimizer proved the operand is not the type's lowest value.
-                    return format!("(({})(-{operand}))", c_syntax::type_name(expr.ty));
+                    return format!("(({})(-{operand}))", self.types.name(&expr.ty));
                 }
                 let site = self.site(expr.span);
-                format!("lymra_negate_{}({operand}, {site})", expr.ty.name())
+                format!("lymra_negate_{}({operand}, {site})", expr.ty)
             }
             ExprKind::Arithmetic {
                 operator,
@@ -76,7 +74,7 @@ impl Generator<'_, '_> {
                      */
                     return format!(
                         "(({})({left} {} {right}))",
-                        c_syntax::type_name(expr.ty),
+                        self.types.name(&expr.ty),
                         operator.symbol()
                     );
                 }
@@ -88,10 +86,7 @@ impl Generator<'_, '_> {
                     ArithmeticOperator::Divide => "divide",
                     ArithmeticOperator::Remainder => "remainder",
                 };
-                format!(
-                    "lymra_{operation}_{}({left}, {right}, {site})",
-                    expr.ty.name()
-                )
+                format!("lymra_{operation}_{}({left}, {right}, {site})", expr.ty)
             }
             ExprKind::Compare { .. } => format!("({})", self.condition(function, expr, writer)),
             ExprKind::Logic {
@@ -103,6 +98,108 @@ impl Generator<'_, '_> {
             ExprKind::Convert { operand, checked } => {
                 self.convert(function, operand, expr, *checked, writer)
             }
+            ExprKind::Index {
+                array,
+                index,
+                length,
+                checked,
+            } => {
+                let bounds = Bounds {
+                    length: *length,
+                    checked: *checked,
+                    span: expr.span,
+                };
+                self.element(function, array, index, bounds, writer)
+            }
+            ExprKind::Fill(value) => {
+                let array = self.types.name(&expr.ty);
+                let value = self.expr(function, value, writer);
+                format!("{}({value})", fill_function(&array))
+            }
+            ExprKind::Length(operand) => {
+                let code = self.expr(function, operand, writer);
+                match &operand.ty {
+                    // The array is computed for its effects; its length is part of its type.
+                    Type::Array(array) => format!("((void)({code}), INT64_C({}))", array.length),
+                    Type::Integer(_) | Type::Boolean | Type::String => {
+                        format!("((int64_t)({code}).length)")
+                    }
+                }
+            }
+        }
+    }
+
+    /// `array[index]`: the array, then the index and its check, in that order.
+    fn element(
+        &mut self,
+        function: &Function<'_>,
+        array: &Expr,
+        index: &Expr,
+        bounds: Bounds,
+        writer: &mut Writer,
+    ) -> String {
+        let code = self.expr(function, array, writer);
+        let code = match (
+            array.has_effects() && (bounds.checked || index.has_effects()),
+            is_addressable(array),
+        ) {
+            // Only where the array is stored has to be worked out first; its elements are not copied.
+            (true, true) => format!("(*{})", self.address(&array.ty, &code, writer)),
+            (true, false) => self.temporary(&array.ty, &code, writer),
+            (false, _) => code,
+        };
+        let position = self.position(function, index, bounds, writer);
+        format!("{code}.elements[{position}]")
+    }
+
+    /// Works out the address of `code`, stored data of type `ty`, into a new constant and returns its name.
+    fn address(&mut self, ty: &Type, code: &str, writer: &mut Writer) -> String {
+        let name = self.helper("address");
+        let ty = self.types.name(ty);
+        writer.line(&format!("const {ty} *{name} = &({code});"));
+        name
+    }
+
+    /// The position `index` selects in an array. A checked index stops the program unless it lies inside the array.
+    pub(super) fn position(
+        &mut self,
+        function: &Function<'_>,
+        index: &Expr,
+        bounds: Bounds,
+        writer: &mut Writer,
+    ) -> String {
+        let code = self.expr(function, index, writer);
+        if !bounds.checked {
+            // The index is known, or proven, to lie inside the array.
+            return format!("(size_t)({code})");
+        }
+        let site = self.site(bounds.span);
+        let length = bounds.length;
+        match index.ty.as_integer() {
+            Some(integer) if integer.is_signed() => {
+                format!("lymra_index_signed((int64_t)({code}), UINT64_C({length}), {site})")
+            }
+            _ => format!("lymra_index_unsigned((uint64_t)({code}), UINT64_C({length}), {site})"),
+        }
+    }
+
+    /// The address of an array argument: where it is stored, or else a temporary that holds it.
+    fn array_address(
+        &mut self,
+        function: &Function<'_>,
+        array: &Expr,
+        hoist: bool,
+        writer: &mut Writer,
+    ) -> String {
+        let code = self.expr(function, array, writer);
+        if !is_addressable(array) {
+            return format!("&{}", self.temporary(&array.ty, &code, writer));
+        }
+        if hoist {
+            // The address is worked out now, with its checks, but the array is not copied.
+            self.address(&array.ty, &code, writer)
+        } else {
+            format!("&({code})")
         }
     }
 
@@ -130,12 +227,10 @@ impl Generator<'_, '_> {
     }
 
     /// Computes `code`, of type `ty`, into a new constant and returns the constant's name.
-    pub(super) fn temporary(&mut self, ty: Type, code: &str, writer: &mut Writer) -> String {
+    pub(super) fn temporary(&mut self, ty: &Type, code: &str, writer: &mut Writer) -> String {
         let name = self.helper("value");
-        writer.line(&format!(
-            "const {} {name} = {code};",
-            c_syntax::type_name(ty)
-        ));
+        let ty = self.types.name(ty);
+        writer.line(&format!("const {ty} {name} = {code};"));
         name
     }
 
@@ -148,8 +243,8 @@ impl Generator<'_, '_> {
         writer: &mut Writer,
     ) -> (String, String) {
         let left_code = self.expr(function, left, writer);
-        let left_code = if has_effects(left) && has_effects(right) {
-            self.temporary(left.ty, &left_code, writer)
+        let left_code = if left.has_effects() && right.has_effects() {
+            self.temporary(&left.ty, &left_code, writer)
         } else {
             left_code
         };
@@ -195,19 +290,23 @@ impl Generator<'_, '_> {
         call: &Call,
         writer: &mut Writer,
     ) -> String {
-        let last_effect = call
-            .arguments
-            .iter()
-            .rposition(|argument| matches!(argument, Argument::Value(value) if has_effects(value)));
+        let last_effect = call.arguments.iter().rposition(
+            |argument| matches!(argument, Argument::Value(value) if value.has_effects()),
+        );
         let arguments: Vec<String> = call
             .arguments
             .iter()
             .enumerate()
             .map(|(position, argument)| match argument {
                 Argument::Value(value) => {
+                    let hoist =
+                        last_effect.is_some_and(|last| position < last) && value.has_effects();
+                    if matches!(value.ty, Type::Array(_)) {
+                        return self.array_address(function, value, hoist, writer);
+                    }
                     let code = self.expr(function, value, writer);
-                    if last_effect.is_some_and(|last| position < last) && has_effects(value) {
-                        self.temporary(value.ty, &code, writer)
+                    if hoist {
+                        self.temporary(&value.ty, &code, writer)
                     } else {
                         code
                     }
@@ -246,9 +345,10 @@ impl Generator<'_, '_> {
         checked: bool,
         writer: &mut Writer,
     ) -> String {
-        let target_type = c_syntax::type_name(target.ty);
+        let target_type = self.types.name(&target.ty);
         let value = self.expr(function, operand, writer);
-        let (Type::Integer(source), Type::Integer(destination)) = (operand.ty, target.ty) else {
+        let (Some(source), Some(destination)) = (operand.ty.as_integer(), target.ty.as_integer())
+        else {
             return format!("(({target_type})({value}))");
         };
         if !checked {

@@ -1,5 +1,14 @@
 //! The wording of every error the semantic checker reports.
 
+mod arrays;
+
+pub(super) use arrays::{
+    array_constant, array_in_text, array_too_large, element_of_value, element_reference,
+    empty_array, fill_argument_count, fill_without_type, index_not_integer, index_out_of_range,
+    length_argument_count, malformed_array_type, negative_length, no_length, not_indexable,
+    not_iterable, sized_scalar,
+};
+
 use super::BuiltIn;
 use super::evaluation_order::Conflict;
 use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
@@ -15,12 +24,13 @@ fn spelling_help(span: Span, suggestion: Option<&str>, fallback: &str) -> Help {
 }
 
 /// The type with its article, as in "an `integer64`" or "a `boolean`".
-pub(super) fn described(ty: Type) -> String {
-    let article = match ty.name().as_bytes().first() {
+pub(super) fn described(ty: &Type) -> String {
+    let name = ty.to_string();
+    let article = match name.as_bytes().first() {
         Some(b'a' | b'e' | b'i' | b'o' | b'u') => "an",
         _ => "a",
     };
-    format!("{article} `{ty}`")
+    format!("{article} `{name}`")
 }
 
 pub(super) fn unknown_name(name: &str, span: Span, suggestion: Option<&str>) -> Diagnostic {
@@ -172,7 +182,7 @@ pub(super) fn depends_on_itself(name: &str, span: Span, declaration: Span) -> Di
     .with_secondary(Label::new(declaration, "declared here"))
 }
 
-pub(super) fn type_mismatch(expected: Type, found: Type, span: Span) -> Diagnostic {
+pub(super) fn type_mismatch(expected: &Type, found: &Type, span: Span) -> Diagnostic {
     Diagnostic::new(
         ErrorCode::L0402,
         format!(
@@ -190,7 +200,7 @@ pub(super) fn type_mismatch(expected: Type, found: Type, span: Span) -> Diagnost
 /// An integer of one type where another integer type is needed, with the conversion as the fix.
 pub(super) fn integer_mismatch(
     expected: IntegerType,
-    found: Type,
+    found: &Type,
     span: Span,
     source: &str,
 ) -> Diagnostic {
@@ -211,7 +221,7 @@ pub(super) fn integer_mismatch(
 }
 
 /// An integer literal where a value of another type is needed.
-pub(super) fn literal_mismatch(expected: Type, span: Span) -> Diagnostic {
+pub(super) fn literal_mismatch(expected: &Type, span: Span) -> Diagnostic {
     Diagnostic::new(
         ErrorCode::L0402,
         format!("expected {}, found a number", described(expected)),
@@ -221,12 +231,14 @@ pub(super) fn literal_mismatch(expected: Type, span: Span) -> Diagnostic {
 }
 
 /// `source` is the condition as written, used to suggest a comparison.
-pub(super) fn condition_not_boolean(found: Type, span: Span, source: &str) -> Diagnostic {
+pub(super) fn condition_not_boolean(found: &Type, span: Span, source: &str) -> Diagnostic {
     let help = match found {
         Type::Integer(_) => {
             Help::replace("compare it with a number", span, format!("{source} != 0"))
         }
-        Type::Boolean | Type::String => Help::text("write a comparison or another `boolean` here"),
+        Type::Boolean | Type::String | Type::Array(_) => {
+            Help::text("write a comparison or another `boolean` here")
+        }
     };
     Diagnostic::new(
         ErrorCode::L0402,
@@ -240,16 +252,20 @@ pub(super) fn condition_not_boolean(found: Type, span: Span, source: &str) -> Di
 }
 
 /// `source` is the argument as written, used to suggest interpolation.
-pub(super) fn print_needs_text(found: Type, span: Span, source: &str) -> Diagnostic {
-    Diagnostic::new(
-        ErrorCode::L0402,
-        format!("`print` takes text, but this is {}", described(found)),
-        Label::new(span, "not text"),
-        Help::replace(
+pub(super) fn print_needs_text(found: &Type, span: Span, source: &str) -> Diagnostic {
+    let help = match found {
+        Type::Array(_) => Help::text("print its elements one by one, in a loop"),
+        Type::Integer(_) | Type::Boolean | Type::String => Help::replace(
             "turn the value into text with interpolation",
             span,
             format!("\"{{{source}}}\""),
         ),
+    };
+    Diagnostic::new(
+        ErrorCode::L0402,
+        format!("`print` takes text, but this is {}", described(found)),
+        Label::new(span, "not text"),
+        help,
     )
 }
 
@@ -266,8 +282,8 @@ pub(super) fn no_value(function: &str, span: Span) -> Diagnostic {
 
 pub(super) fn operand_mismatch(
     operator: &str,
-    left: (Type, Span),
-    right: (Type, Span),
+    left: (&Type, Span),
+    right: (&Type, Span),
 ) -> Diagnostic {
     let (left_type, left_span) = left;
     let (right_type, right_span) = right;
@@ -458,7 +474,7 @@ pub(super) fn range_arguments_plain(arguments: Span) -> Diagnostic {
     )
 }
 
-pub(super) fn missing_return(function: &str, return_type: Type, name: Span) -> Diagnostic {
+pub(super) fn missing_return(function: &str, return_type: &Type, name: Span) -> Diagnostic {
     Diagnostic::new(
         ErrorCode::L0502,
         format!(
@@ -487,7 +503,11 @@ pub(super) fn return_value_without_type(function: &str, value: Span, removal: Sp
     )
 }
 
-pub(super) fn return_without_value(function: &str, return_type: Type, keyword: Span) -> Diagnostic {
+pub(super) fn return_without_value(
+    function: &str,
+    return_type: &Type,
+    keyword: Span,
+) -> Diagnostic {
     Diagnostic::new(
         ErrorCode::L0503,
         format!(

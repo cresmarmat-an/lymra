@@ -24,7 +24,7 @@ use super::interval::Interval;
 use super::loops::{self, Change, Changes, Followed};
 use crate::ir::{
     Argument, ArithmeticOperator, Block, Branch, Call, ComparisonOperator, Expr, ExprKind,
-    Function, IntegerType, Local, LocalId, LogicOperator, PrintPart, Statement, Value,
+    Function, IntegerType, Local, LocalId, LogicOperator, PrintPart, Statement, Type, Value,
 };
 
 /**
@@ -176,11 +176,20 @@ impl Analyzer<'_> {
                 _ => whole_type,
             },
             ExprKind::Convert { operand, .. } => self.range(operand, bounds).unwrap_or(whole_type),
+            ExprKind::Length(operand) => match &operand.ty {
+                Type::Array(array) => Interval::exact(i128::from(array.length)),
+                Type::Integer(_) | Type::Boolean | Type::String => Interval {
+                    low: 0,
+                    high: whole_type.high,
+                },
+            },
             ExprKind::Literal(_)
             | ExprKind::Not(_)
             | ExprKind::Compare { .. }
             | ExprKind::Logic { .. }
-            | ExprKind::Call(_) => whole_type,
+            | ExprKind::Call(_)
+            | ExprKind::Index { .. }
+            | ExprKind::Fill(_) => whole_type,
         };
         // A checked operation that does not stop the program gives a value of its type.
         Some(ideal.clamp(ty))
@@ -200,12 +209,19 @@ impl Analyzer<'_> {
             ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) => {}
             ExprKind::Negate { operand, .. }
             | ExprKind::Not(operand)
-            | ExprKind::Convert { operand, .. } => {
+            | ExprKind::Convert { operand, .. }
+            | ExprKind::Fill(operand)
+            | ExprKind::Length(operand) => {
                 self.remove_checks(operand, bounds);
             }
             ExprKind::Arithmetic { left, right, .. }
             | ExprKind::Compare { left, right, .. }
-            | ExprKind::Logic { left, right, .. } => {
+            | ExprKind::Logic { left, right, .. }
+            | ExprKind::Index {
+                array: left,
+                index: right,
+                ..
+            } => {
                 self.remove_checks(left, bounds);
                 self.remove_checks(right, bounds);
             }
@@ -293,12 +309,19 @@ impl Analyzer<'_> {
                 self.evaluate(value, bounds, changes, mode);
                 bounds.set(*local, range);
             }
-            Statement::Assign { target, value } => {
+            Statement::Assign { target, value } if target.indexes.is_empty() => {
                 let range = self.range(value, bounds);
-                let step = loops::additive_terms(value, *target)
+                let step = loops::additive_terms(value, target.local)
                     .and_then(|terms| self.sum_range(&terms, bounds));
                 self.evaluate(value, bounds, changes, mode);
-                assign(*target, range, step, bounds, changes);
+                assign(target.local, range, step, bounds, changes);
+            }
+            // An element of an array changes, which no bounds the analysis holds describe.
+            Statement::Assign { target, value } => {
+                for index in &mut target.indexes {
+                    self.evaluate(&mut index.value, bounds, changes, mode);
+                }
+                self.evaluate(value, bounds, changes, mode);
             }
             Statement::Discard(value) => self.evaluate(value, bounds, changes, mode),
             Statement::Call(call) => {
@@ -318,7 +341,7 @@ impl Analyzer<'_> {
             }
             Statement::Print(parts) => {
                 for part in parts {
-                    if let PrintPart::Value(value) = part {
+                    if let PrintPart::Value { value, .. } = part {
                         self.evaluate(value, bounds, changes, mode);
                     }
                 }
@@ -338,6 +361,19 @@ impl Analyzer<'_> {
                 end,
                 body,
             } => self.walk_for(*variable, start, end, body, bounds, changes, mode),
+            Statement::ForEach {
+                variable,
+                array,
+                length,
+                body,
+            } => {
+                self.evaluate(array, bounds, changes, mode);
+                // The loop runs once for each element, and its variable can be any value of their type.
+                let trips = i128::from(*length);
+                let changed = loops::changed_outside(body);
+                let element = variable.map(|variable| (variable, None));
+                self.walk_counted(body, element, trips, &changed, bounds, changes, mode);
+            }
             Statement::Assert { condition } => {
                 self.evaluate(condition, bounds, changes, mode);
                 // The program stops when an assertion fails, so after one its condition holds.
@@ -452,15 +488,34 @@ impl Analyzer<'_> {
             return;
         };
         let trips = loops::trip_count(start_range, end_range);
-        if trips == 0 {
-            // The body never runs, so it changes nothing.
-            return;
-        }
         let value = Interval {
             low: start_range.low,
             high: end_range.high - 1,
         };
+        let counter = variable.map(|variable| (variable, Some(value)));
+        self.walk_counted(body, counter, trips, &changed, bounds, changes, mode);
+    }
 
+    /**
+     * A loop that runs at most `trips` times, with a variable that has the
+     * given bounds in every iteration. Each local the body changes gets
+     * bounds that hold however many of the iterations have run.
+     */
+    #[allow(clippy::too_many_arguments)]
+    fn walk_counted(
+        &self,
+        body: &mut Block,
+        variable: Option<(LocalId, Option<Interval>)>,
+        trips: i128,
+        changed: &HashSet<LocalId>,
+        bounds: &mut Bounds,
+        changes: &mut Changes,
+        mode: Mode,
+    ) {
+        if trips == 0 {
+            // The body never runs, so it changes nothing.
+            return;
+        }
         let rounds = if mode == Mode::Remove {
             REFINEMENT_ROUNDS
         } else {
@@ -470,10 +525,10 @@ impl Analyzer<'_> {
             loop_wide,
             entry,
             extents,
-        } = self.loop_bounds(body, variable, value, trips, &changed, bounds, rounds);
+        } = self.loop_bounds(body, variable, trips, changed, bounds, rounds);
 
         // Tell an enclosing loop being probed what this whole loop does to the variables it follows.
-        for local in &changed {
+        for local in changed {
             if let Some(followed) = changes.get_mut(local) {
                 followed.change = match extents
                     .iter()
@@ -488,13 +543,13 @@ impl Analyzer<'_> {
 
         if mode == Mode::Remove {
             let mut inside = entry;
-            if let Some(variable) = variable {
-                inside.set(variable, Some(value));
+            if let Some((variable, value)) = variable {
+                inside.set(variable, value);
             }
             self.walk_block(body, &mut inside, &mut Changes::new(), Mode::Remove);
         }
         // After the loop, every variable it changed is still within its loop-wide bounds.
-        for &local in &changed {
+        for &local in changed {
             let after = match changes.get(&local) {
                 Some(followed) => followed.loop_wide,
                 None => loop_wide.get(local),
@@ -514,8 +569,7 @@ impl Analyzer<'_> {
     fn loop_bounds(
         &self,
         body: &mut Block,
-        variable: Option<LocalId>,
-        value: Interval,
+        variable: Option<(LocalId, Option<Interval>)>,
         trips: i128,
         changed: &HashSet<LocalId>,
         bounds: &Bounds,
@@ -527,8 +581,8 @@ impl Analyzer<'_> {
         let mut extents = Vec::new();
         for _ in 0..rounds {
             let mut probe = entry.clone();
-            if let Some(variable) = variable {
-                probe.set(variable, Some(value));
+            if let Some((variable, value)) = variable {
+                probe.set(variable, value);
             }
             let mut changes: Changes = changed
                 .iter()

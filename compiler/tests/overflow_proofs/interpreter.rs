@@ -7,8 +7,9 @@ use std::fmt::Write as _;
 
 use lymra::ir::{
     Argument, ArithmeticOperator, Block, Call, ComparisonOperator, Expr, ExprKind, FunctionId,
-    IntegerType, LogicOperator, PrintPart, Program, Statement, Value,
+    IntegerType, LocalId, LogicOperator, PlaceIndex, PrintPart, Program, Statement, Value,
 };
+use lymra::source::Span;
 
 /// Statements and loop iterations one run may take before it is stopped.
 const STEP_BUDGET: usize = 5_000;
@@ -64,8 +65,20 @@ enum Slot {
     Integer(i128),
     Boolean(bool),
     Text(String),
+    Array(Vec<Slot>),
     /// A local before its declaration runs, or the result of a function that returns nothing.
     Unset,
+}
+
+/// What a `for` loop over an array reads its elements from.
+enum Elements {
+    /// A local, or an element inside it, at these positions; read as the loop reaches each element.
+    Stored {
+        local: LocalId,
+        positions: Vec<usize>,
+    },
+    /// A value computed once.
+    Computed(Vec<Slot>),
 }
 
 /// Why evaluation stopped before the end of the function.
@@ -160,12 +173,13 @@ impl Interpreter<'_, '_> {
     fn statement(&mut self, statement: &Statement, slots: &mut [Slot]) -> Eval<Flow> {
         self.step()?;
         match statement {
-            Statement::Declare { local, value }
-            | Statement::Assign {
-                target: local,
-                value,
-            } => {
+            Statement::Declare { local, value } => {
                 slots[*local] = self.expr(value, slots)?;
+            }
+            Statement::Assign { target, value } => {
+                let positions = self.positions(&target.indexes, slots)?;
+                let value = self.expr(value, slots)?;
+                *element_mut(&mut slots[target.local], &positions)? = value;
             }
             Statement::Discard(value) => {
                 self.expr(value, slots)?;
@@ -174,15 +188,18 @@ impl Interpreter<'_, '_> {
                 self.call_expr(call, slots)?;
             }
             Statement::Print(parts) => {
+                // Every value is computed before the line starts, as in the C the compiler makes.
+                let mut line = String::new();
                 for part in parts {
                     match part {
-                        PrintPart::Text(text) => self.output.push_str(text),
-                        PrintPart::Value(value) => {
+                        PrintPart::Text(text) => line.push_str(text),
+                        PrintPart::Value { value, .. } => {
                             let value = self.expr(value, slots)?;
-                            let _ = write!(self.output, "{}", describe(&value));
+                            let _ = write!(line, "{}", describe(&value));
                         }
                     }
                 }
+                self.output.push_str(&line);
                 self.output.push('\n');
             }
             Statement::If {
@@ -228,6 +245,39 @@ impl Interpreter<'_, '_> {
                     }
                 }
             }
+            Statement::ForEach {
+                variable,
+                array,
+                length,
+                body,
+            } => {
+                let elements = self.elements(array, slots)?;
+                for position in 0..*length {
+                    self.step()?;
+                    let position = usize::try_from(position)
+                        .map_err(|_| Stop::Unsound("an array longer than memory".to_owned()))?;
+                    let element = match &elements {
+                        Elements::Stored { local, positions } => {
+                            let mut path = positions.clone();
+                            path.push(position);
+                            element_mut(&mut slots[*local], &path)?.clone()
+                        }
+                        Elements::Computed(values) => {
+                            values.get(position).cloned().ok_or_else(|| {
+                                Stop::Unsound("an array shorter than its type".to_owned())
+                            })?
+                        }
+                    };
+                    if let Some(variable) = variable {
+                        slots[*variable] = element;
+                    }
+                    match self.block(body, slots)? {
+                        Flow::Next | Flow::Continue => {}
+                        Flow::Break => break,
+                        flow @ Flow::Return(_) => return Ok(flow),
+                    }
+                }
+            }
             Statement::Return(value) => {
                 let value = match value {
                     Some(value) => Some(self.expr(value, slots)?),
@@ -244,6 +294,34 @@ impl Interpreter<'_, '_> {
             }
         }
         Ok(Flow::Next)
+    }
+
+    /// Computes and checks the indexes of an assignment's target, in order.
+    fn positions(&mut self, indexes: &[PlaceIndex], slots: &mut [Slot]) -> Eval<Vec<usize>> {
+        let mut positions = Vec::with_capacity(indexes.len());
+        for index in indexes {
+            let value = self.integer(&index.value, slots)?;
+            positions.push(check_index(value, index.length, index.checked, index.span)?);
+        }
+        Ok(positions)
+    }
+
+    /// Where a `for` loop over `array` reads its elements: storage when `array` names some, as the C does.
+    fn elements(&mut self, array: &Expr, slots: &mut [Slot]) -> Eval<Elements> {
+        match stored_path(array) {
+            Some((local, indexes)) => {
+                let mut positions = Vec::with_capacity(indexes.len());
+                for (index, length, checked, span) in indexes {
+                    let value = self.integer(index, slots)?;
+                    positions.push(check_index(value, length, checked, span)?);
+                }
+                Ok(Elements::Stored { local, positions })
+            }
+            None => match self.expr(array, slots)? {
+                Slot::Array(values) => Ok(Elements::Computed(values)),
+                other => Err(Stop::Unsound(format!("a loop over {other:?}"))),
+            },
+        }
     }
 
     fn condition(&mut self, expr: &Expr, slots: &mut [Slot]) -> Eval<bool> {
@@ -291,6 +369,38 @@ impl Interpreter<'_, '_> {
                 return Ok(Slot::Boolean(self.condition(right, slots)?));
             }
             ExprKind::Call(call) => return Ok(self.call_expr(call, slots)?.unwrap_or(Slot::Unset)),
+            ExprKind::Index {
+                array,
+                index,
+                length,
+                checked,
+            } => {
+                let array = self.expr(array, slots)?;
+                let index = self.integer(index, slots)?;
+                let position = check_index(index, *length, *checked, expr.span)?;
+                return match array {
+                    Slot::Array(mut values) if position < values.len() => {
+                        Ok(values.swap_remove(position))
+                    }
+                    other => Err(Stop::Unsound(format!("element {position} of {other:?}"))),
+                };
+            }
+            ExprKind::Fill(value) => {
+                let value = self.expr(value, slots)?;
+                let length = expr
+                    .ty
+                    .as_array()
+                    .and_then(|array| usize::try_from(array.length).ok())
+                    .ok_or_else(|| Stop::Unsound("a fill without an array type".to_owned()))?;
+                return Ok(Slot::Array(vec![value; length]));
+            }
+            ExprKind::Length(operand) => {
+                return match self.expr(operand, slots)? {
+                    Slot::Array(values) => Ok(Slot::Integer(values.len() as i128)),
+                    Slot::Text(text) => Ok(Slot::Integer(text.len() as i128)),
+                    other => Err(Stop::Unsound(format!("the length of {other:?}"))),
+                };
+            }
             ExprKind::Negate { operand, checked } => (
                 self.integer(operand, slots)?.checked_neg(),
                 *checked,
@@ -376,6 +486,54 @@ fn arithmetic(
     })
 }
 
+/// The position an index selects, or the trap a checked one causes.
+fn check_index(index: i128, length: u64, checked: bool, span: Span) -> Eval<usize> {
+    if (0..i128::from(length)).contains(&index) {
+        return usize::try_from(index)
+            .map_err(|_| Stop::Unsound("an array longer than memory".to_owned()));
+    }
+    if checked {
+        return Err(Stop::Ended(Ending::Trapped));
+    }
+    Err(Stop::Unsound(format!(
+        "unchecked index {index} at {span:?} is outside an array of length {length}"
+    )))
+}
+
+type StoredIndex<'expr> = (&'expr Expr, u64, bool, Span);
+
+/// The local an array expression names, and the indexes that lead from it to the array, if it names one.
+fn stored_path(expr: &Expr) -> Option<(LocalId, Vec<StoredIndex<'_>>)> {
+    match &expr.kind {
+        ExprKind::Local(local) => Some((*local, Vec::new())),
+        ExprKind::Index {
+            array,
+            index,
+            length,
+            checked,
+        } => {
+            let (local, mut indexes) = stored_path(array)?;
+            indexes.push((index, *length, *checked, expr.span));
+            Some((local, indexes))
+        }
+        _ => None,
+    }
+}
+
+/// The element of `slot` at `positions`, one per level of nesting.
+fn element_mut<'slot>(slot: &'slot mut Slot, positions: &[usize]) -> Eval<&'slot mut Slot> {
+    let Some((&first, rest)) = positions.split_first() else {
+        return Ok(slot);
+    };
+    match slot {
+        Slot::Array(values) => match values.get_mut(first) {
+            Some(element) => element_mut(element, rest),
+            None => Err(Stop::Unsound(format!("element {first} past the end"))),
+        },
+        other => Err(Stop::Unsound(format!("an element of {other:?}"))),
+    }
+}
+
 fn from_value(value: &Value) -> Slot {
     match value {
         Value::Integer { value, .. } => Slot::Integer(*value),
@@ -389,7 +547,7 @@ fn describe(slot: &Slot) -> String {
         Slot::Integer(value) => value.to_string(),
         Slot::Boolean(value) => value.to_string(),
         Slot::Text(text) => text.clone(),
-        Slot::Unset => "?".to_owned(),
+        Slot::Array(_) | Slot::Unset => "?".to_owned(),
     }
 }
 

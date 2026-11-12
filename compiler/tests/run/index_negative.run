@@ -1,0 +1,9 @@
+exit status 70
+--- standard output
+8
+--- standard error
+error: index -1 is out of range for an array of length 3
+ --> tests/run/index_negative.lym:7:12
+  |
+7 |     return values[position - 1]
+  |            ^^^^^^^^^^^^^^^^^^^^

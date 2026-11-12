@@ -148,7 +148,10 @@ fn collect_statement(
             collect_references(value, changed);
         }
         Statement::Assign { target, value } => {
-            changed.insert(*target);
+            changed.insert(target.local);
+            for index in &target.indexes {
+                collect_references(&index.value, changed);
+            }
             collect_references(value, changed);
         }
         Statement::Discard(value)
@@ -159,7 +162,7 @@ fn collect_statement(
         Statement::Call(call) => collect_call_references(&call.arguments, changed),
         Statement::Print(parts) => {
             for part in parts {
-                if let PrintPart::Value(value) = part {
+                if let PrintPart::Value { value, .. } = part {
                     collect_references(value, changed);
                 }
             }
@@ -191,6 +194,16 @@ fn collect_statement(
             collect_references(end, changed);
             collect_block(body, changed, declared);
         }
+        Statement::ForEach {
+            variable,
+            array,
+            body,
+            ..
+        } => {
+            declared.extend(variable);
+            collect_references(array, changed);
+            collect_block(body, changed, declared);
+        }
         Statement::Return(None) | Statement::Break | Statement::Continue => {}
     }
 }
@@ -212,34 +225,23 @@ pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
         ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) => {}
         ExprKind::Negate { operand, .. }
         | ExprKind::Not(operand)
-        | ExprKind::Convert { operand, .. } => {
+        | ExprKind::Convert { operand, .. }
+        | ExprKind::Fill(operand)
+        | ExprKind::Length(operand) => {
             collect_references(operand, changed);
         }
         ExprKind::Arithmetic { left, right, .. }
         | ExprKind::Compare { left, right, .. }
-        | ExprKind::Logic { left, right, .. } => {
+        | ExprKind::Logic { left, right, .. }
+        | ExprKind::Index {
+            array: left,
+            index: right,
+            ..
+        } => {
             collect_references(left, changed);
             collect_references(right, changed);
         }
         ExprKind::Call(call) => collect_call_references(&call.arguments, changed),
-    }
-}
-
-/// True if the expression reads `local` or passes it to a call.
-fn mentions(expr: &Expr, local: LocalId) -> bool {
-    match &expr.kind {
-        ExprKind::Local(id) => *id == local,
-        ExprKind::Literal(_) | ExprKind::Constant(_) => false,
-        ExprKind::Negate { operand, .. }
-        | ExprKind::Not(operand)
-        | ExprKind::Convert { operand, .. } => mentions(operand, local),
-        ExprKind::Arithmetic { left, right, .. }
-        | ExprKind::Compare { left, right, .. }
-        | ExprKind::Logic { left, right, .. } => mentions(left, local) || mentions(right, local),
-        ExprKind::Call(call) => call.arguments.iter().any(|argument| match argument {
-            Argument::Reference(id) => *id == local,
-            Argument::Value(value) => mentions(value, local),
-        }),
     }
 }
 
@@ -295,7 +297,7 @@ fn flatten<'expr>(
             flatten(left, local, positive, terms, found_self)?;
             flatten(right, local, !positive, terms, found_self)
         }
-        _ if mentions(expr, local) => None,
+        _ if expr.mentions(local) => None,
         _ => {
             terms.push(Term { expr, positive });
             Some(())

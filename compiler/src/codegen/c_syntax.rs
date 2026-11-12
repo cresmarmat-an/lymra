@@ -1,6 +1,6 @@
 //! How Lymra types, names and values are written in C.
 
-use crate::ir::{IntegerType, Type, Value};
+use crate::ir::{IntegerType, Value};
 
 pub(super) fn integer_type(ty: IntegerType) -> &'static str {
     match ty {
@@ -12,14 +12,6 @@ pub(super) fn integer_type(ty: IntegerType) -> &'static str {
         IntegerType::Unsigned16 => "uint16_t",
         IntegerType::Unsigned32 => "uint32_t",
         IntegerType::Unsigned64 => "uint64_t",
-    }
-}
-
-pub(super) fn type_name(ty: Type) -> &'static str {
-    match ty {
-        Type::Integer(integer) => integer_type(integer),
-        Type::Boolean => "bool",
-        Type::String => "lymra_string",
     }
 }
 

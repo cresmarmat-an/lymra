@@ -1,0 +1,88 @@
+#[
+    Arrays are values: a copy is independent, a parameter is the caller's
+    value, and a `variable` parameter changes the caller's array. A `for`
+    loop reads each element when its turn comes, and the parts of an
+    assignment run from left to right.
+]#
+
+constant integer64 size = 4
+
+function noted(string name, integer64 value) returns integer64
+    print("{name}")
+    return value
+
+function total(array[integer64, size] values) returns integer64
+    variable integer64 sum = 0
+    for value in values
+        sum = sum + value
+    return sum
+
+function doubled(array[integer64, size] values) returns array[integer64, size]
+    variable result = values
+    for index in range(0, length(values))
+        result[index] = values[index] * 2
+    return result
+
+function reset(variable array[integer64, size] values)
+    values = array(0)
+
+function largest(array[integer32, 3] values) returns integer32
+    variable integer32 best = values[0]
+    for value in values
+        if value > best
+            best = value
+    return best
+
+function made() returns array[integer64, 3]
+    print("made")
+    variable array[integer64, 3] values = array(5)
+    values[1] = 6
+    return values
+
+function main()
+    variable array[integer64, size] numbers = array(1)
+    numbers[2] = 7
+    print("total {total(numbers)}, doubled total {total(doubled(numbers))}")
+
+    variable copy = numbers
+    copy[0] = 100
+    print("copy {copy[0]}, original {numbers[0]}")
+
+    numbers = doubled(numbers)
+    print("doubled in place: {numbers[0]} {numbers[1]} {numbers[2]} {numbers[3]}")
+
+    reset(variable numbers)
+    numbers[1] = 3
+    constant unsigned8 small = 1
+    print("after reset: {total(numbers)}, at an unsigned index {numbers[small]}")
+
+    variable array[array[integer32, 3], 2] grid = array(array(0))
+    grid[1][2] = 9
+    variable row = grid[1]
+    row[0] = 4
+    print("grid {grid[1][0]} {grid[1][2]}, row {row[0]} {row[2]}, largest {largest(grid[1])}")
+    print("length {length(grid)} by {length(grid[0])}")
+
+    for value in made()
+        print("element {value}")
+    print("middle {made()[1]}, length {length(made())}")
+
+    variable array[integer64, 3] live = array(1)
+    for value in live
+        live[2] = live[2] + value
+        print("live {value}")
+
+    variable array[string, 2] words = array("hi")
+    words[1] = "héllo"
+    print("{words[0]} {words[1]} has {length(words[1])} bytes")
+
+    variable array[boolean, 2] flags = array(false)
+    flags[1] = true
+    variable integer64 index = 0
+    while index < length(flags) and not flags[index]
+        index = index + 1
+    print("first set flag at {index}")
+
+    variable array[integer64, 3] slots = array(0)
+    slots[noted("index", 1)] = noted("value", 5)
+    print("slots {slots[0]} {slots[1]} {slots[2]}")

@@ -6,6 +6,7 @@
  * run, and functions that can reach their end without returning a value.
  */
 
+use super::arrays::place_parts;
 use super::expressions::{CheckedCall, immutable_local_error};
 use super::features::Feature;
 use super::scope::{FunctionScope, LocalKind};
@@ -16,6 +17,21 @@ use crate::ir::{self, IntegerType, LocalId, Type};
 use crate::lexer::Keyword;
 use crate::similarity;
 use crate::source::Span;
+
+/// What a `for` loop goes over.
+enum Iteration {
+    Range {
+        start: ir::Expr,
+        end: ir::Expr,
+        ty: IntegerType,
+    },
+    /// The elements of the array that `array` computes.
+    Elements {
+        array: ir::Expr,
+        element: Type,
+        length: u64,
+    },
+}
 
 /// A checked statement, and whether control can continue to the statement after it.
 struct Checked {
@@ -110,18 +126,27 @@ impl<'src, 'ast> Checker<'src, 'ast> {
     /// Checks each expression the statement evaluates on its own, since the conditions of an `if` run one at a time.
     fn check_evaluation_order(&mut self, statement: &ast::Statement<'src>) {
         match &statement.kind {
-            ast::StatementKind::Binding(binding) => self.report_order_conflict(&binding.value),
-            ast::StatementKind::Assignment { value, .. } => self.report_order_conflict(value),
+            ast::StatementKind::Binding(binding) => self.report_order_conflict(&[&binding.value]),
+            ast::StatementKind::Assignment { target, value } => {
+                // The target's own binding is where the value goes, not a use; its indexes are uses.
+                let (_, steps) = place_parts(target);
+                let mut parts: Vec<&ast::Expr<'src>> =
+                    steps.iter().map(|step| step.index).collect();
+                parts.push(value);
+                self.report_order_conflict(&parts);
+            }
             ast::StatementKind::Expression(expr)
             | ast::StatementKind::Assert(expr)
-            | ast::StatementKind::Return(Some(expr)) => self.report_order_conflict(expr),
+            | ast::StatementKind::Return(Some(expr)) => self.report_order_conflict(&[expr]),
             ast::StatementKind::If(statement) => {
                 for branch in &statement.branches {
-                    self.report_order_conflict(&branch.condition);
+                    self.report_order_conflict(&[&branch.condition]);
                 }
             }
-            ast::StatementKind::While { condition, .. } => self.report_order_conflict(condition),
-            ast::StatementKind::For { iterable, .. } => self.report_order_conflict(iterable),
+            ast::StatementKind::While { condition, .. } => {
+                self.report_order_conflict(&[condition]);
+            }
+            ast::StatementKind::For { iterable, .. } => self.report_order_conflict(&[iterable]),
             ast::StatementKind::Match { .. }
             | ast::StatementKind::Return(None)
             | ast::StatementKind::Break
@@ -129,8 +154,8 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }
     }
 
-    fn report_order_conflict(&mut self, expr: &ast::Expr<'src>) {
-        if let Some(conflict) = evaluation_order::find_conflict(expr) {
+    fn report_order_conflict(&mut self, parts: &[&ast::Expr<'src>]) {
+        if let Some(conflict) = evaluation_order::find_conflict(parts) {
             self.report(errors::changed_and_used(&conflict));
         }
     }
@@ -141,7 +166,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         span: Span,
     ) -> CheckResult<ir::Statement> {
         let declared = binding.ty.as_ref().map(|ty| self.resolve_type(ty));
-        let value = self.check_expr(&binding.value, declared.and_then(Result::ok));
+        let value = self.check_against(&binding.value, declared.as_ref().map(Result::as_ref));
         let keyword = match binding.mutability {
             Mutability::Constant => keyword_span(span.start, Keyword::Constant),
             Mutability::Variable => keyword_span(span.start, Keyword::Variable),
@@ -157,7 +182,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
 
         let ty = match (declared, &value) {
             (Some(declared), _) => declared,
-            (None, Ok(value)) => Ok(value.ty),
+            (None, Ok(value)) => Ok(value.ty.clone()),
             (None, Err(error)) => Err(*error),
         };
         let kind = match binding.mutability {
@@ -171,24 +196,26 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         })
     }
 
+    /// Checks `target = value`, where the target is a binding or an element inside one.
     fn check_assignment(
         &mut self,
         target: &ast::Expr<'src>,
         value: &ast::Expr<'src>,
     ) -> CheckResult<ir::Statement> {
-        let ast::ExprKind::Name(name) = &target.kind else {
+        let (root, steps) = place_parts(target);
+        let ast::ExprKind::Name(name) = &root.kind else {
             self.check_for_errors(value);
-            return Err(self.report_unchangeable_place(target));
+            return Err(self.report_unassignable(root));
         };
         let name = *name;
         if name == DISCARD {
             self.check_for_errors(value);
-            return Err(self.report(errors::discard_assigned(target.span)));
+            return Err(self.report(errors::discard_assigned(root.span)));
         }
 
         let Some(id) = self.scope.as_ref().and_then(|scope| scope.lookup(name)) else {
             self.check_for_errors(value);
-            return Err(self.report_assignment_to_unknown(name, target.span));
+            return Err(self.report_assignment_to_unknown(name, root.span));
         };
         let Some(local) = self.scope.as_mut().and_then(|scope| scope.local_mut(id)) else {
             return Err(ErrorReported);
@@ -196,22 +223,37 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         if !local.kind.is_mutable() {
             // The binding is clearly in use; only the change is wrong.
             local.read = true;
-            let error = immutable_local_error(local, target.span);
+            let error = immutable_local_error(local, root.span);
             self.check_for_errors(value);
             return Err(self.report(error));
         }
         local.written = true;
-        let ty = local.ty;
-        match ty {
-            Ok(ty) => {
-                let value = self.check_expr(value, Some(ty))?;
-                Ok(ir::Statement::Assign { target: id, value })
+        let place = local
+            .ty
+            .clone()
+            .and_then(|ty| self.check_place_indexes(ty, &steps));
+        match place {
+            Ok((indexes, ty)) => {
+                let value = self.check_expr(value, Some(&ty))?;
+                Ok(ir::Statement::Assign {
+                    target: ir::Place { local: id, indexes },
+                    value,
+                })
             }
             Err(ErrorReported) => {
-                self.check_for_errors(value);
+                self.check_untyped(value);
                 Err(ErrorReported)
             }
         }
+    }
+
+    /// Reports an assignment target that does not start at a binding, such as `make()[0]`.
+    fn report_unassignable(&mut self, root: &ast::Expr<'src>) -> ErrorReported {
+        if let ast::ExprKind::Field { object, .. } = &root.kind {
+            return self.reject_field(object, root.span);
+        }
+        self.mark_reads(root);
+        self.report(errors::element_of_value(root.span))
     }
 
     /// An assignment to a name that is not a local: undeclared, a top-level constant, or a function.
@@ -243,7 +285,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         span: Span,
     ) -> CheckResult<ir::Statement> {
         if let ast::ExprKind::Call(call) = &expr.kind {
-            return match self.check_call(call, expr.span)? {
+            return match self.check_call(call, expr.span, None)? {
                 CheckedCall::Effect { statement, .. } => Ok(statement),
                 CheckedCall::Value(_) => {
                     let function = self.text(call.callee.span);
@@ -327,17 +369,18 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         iterable: &ast::Expr<'src>,
         body: &ast::Block<'src>,
     ) -> Checked {
-        let range = self.check_range(iterable);
+        let iteration = self.check_iterable(iterable);
         if let Some(scope) = self.scope.as_mut() {
             scope.open_block();
         }
         let local: CheckResult<Option<LocalId>> = if variable.text == DISCARD {
             Ok(None)
         } else {
-            let ty = range
-                .as_ref()
-                .map(|(_, _, ty)| Type::Integer(*ty))
-                .map_err(|error| *error);
+            let ty = match &iteration {
+                Ok(Iteration::Range { ty, .. }) => Ok(Type::Integer(*ty)),
+                Ok(Iteration::Elements { element, .. }) => Ok(element.clone()),
+                Err(error) => Err(*error),
+            };
             self.declare_local(variable, ty, LocalKind::LoopVariable, None, false)
                 .map(Some)
         };
@@ -349,13 +392,23 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             .unwrap_or_default();
         self.report_scope_exit(&closed);
 
-        let statement = match (range, local) {
-            (Ok((start, end, _)), Ok(variable)) => Some(ir::Statement::ForRange {
-                variable,
-                start,
-                end,
-                body,
-            }),
+        let statement = match (iteration, local) {
+            (Ok(Iteration::Range { start, end, .. }), Ok(variable)) => {
+                Some(ir::Statement::ForRange {
+                    variable,
+                    start,
+                    end,
+                    body,
+                })
+            }
+            (Ok(Iteration::Elements { array, length, .. }), Ok(variable)) => {
+                Some(ir::Statement::ForEach {
+                    variable,
+                    array,
+                    length,
+                    body,
+                })
+            }
             _ => None,
         };
         // A range can be empty, so control always reaches the statement after the loop.
@@ -365,44 +418,52 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }
     }
 
-    /// Checks `range(start, end)`, the only thing a `for` loop can iterate over in phase 1.
-    fn check_range(
-        &mut self,
-        iterable: &ast::Expr<'src>,
-    ) -> CheckResult<(ir::Expr, ir::Expr, IntegerType)> {
-        let range_call = match &iterable.kind {
-            ast::ExprKind::Call(call)
-                if matches!(call.callee.kind, ast::ExprKind::Name("range")) =>
-            {
-                call
+    /// Checks what a `for` loop goes over: `range(start, end)`, or the elements of an array.
+    fn check_iterable(&mut self, iterable: &ast::Expr<'src>) -> CheckResult<Iteration> {
+        if let ast::ExprKind::Call(call) = &iterable.kind {
+            if matches!(call.callee.kind, ast::ExprKind::Name("range")) {
+                return self.check_range(call, iterable.span);
             }
-            _ => {
-                self.mark_reads(iterable);
-                return Err(self.report(Feature::ForEach.diagnostic(iterable.span)));
+        }
+        let checked = self.check_expr_with_hint(iterable, None)?;
+        match &checked.ty {
+            Type::Array(array) => Ok(Iteration::Elements {
+                element: array.element.clone(),
+                length: array.length,
+                array: checked,
+            }),
+            Type::String => Err(self.report(Feature::ForEach.diagnostic(iterable.span))),
+            Type::Integer(_) | Type::Boolean => {
+                let source = self.text(iterable.span);
+                Err(self.report(errors::not_iterable(&checked.ty, iterable.span, source)))
             }
-        };
-        if let Some(block) = &range_call.block {
-            self.mark_reads(iterable);
+        }
+    }
+
+    /// Checks `range(start, end)`, which only a `for` loop can go over.
+    fn check_range(&mut self, call: &ast::Call<'src>, span: Span) -> CheckResult<Iteration> {
+        if let Some(block) = &call.block {
+            self.mark_argument_reads(&call.arguments);
             let with = Span::new(block.span.start, block.span.start + "with".len() as u32);
             return Err(self.report(Feature::CodeArguments.diagnostic(with)));
         }
-        let arguments = Span::new(range_call.callee.span.end, iterable.span.end);
-        let [start, end] = range_call.arguments.as_slice() else {
-            self.check_arguments_for_errors(&range_call.arguments);
+        let arguments = Span::new(call.callee.span.end, span.end);
+        let [start, end] = call.arguments.as_slice() else {
+            self.check_arguments_for_errors(&call.arguments);
             return Err(self.report(errors::range_argument_count(
-                range_call.arguments.len(),
+                call.arguments.len(),
                 arguments,
             )));
         };
         let (ArgumentKind::Positional(start), ArgumentKind::Positional(end)) =
             (&start.kind, &end.kind)
         else {
-            self.check_arguments_for_errors(&range_call.arguments);
+            self.check_arguments_for_errors(&call.arguments);
             return Err(self.report(errors::range_arguments_plain(arguments)));
         };
         let (start, end) = self.check_operands(start, end)?;
         let ty = self.shared_integer_type("range", &start, &end)?;
-        Ok((start, end, ty))
+        Ok(Iteration::Range { start, end, ty })
     }
 
     fn check_return(
@@ -415,9 +476,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         };
         let function = scope.function_name.text;
         let keyword = keyword_span(span.start, Keyword::Return);
-        match (value, scope.return_type) {
+        match (value, scope.return_type.clone()) {
             (Some(value), Ok(Some(ty))) => {
-                let value = self.check_expr(value, Some(ty))?;
+                let value = self.check_expr(value, Some(&ty))?;
                 Ok(ir::Statement::Return(Some(value)))
             }
             (Some(value), Ok(None)) => {
@@ -428,12 +489,12 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 )))
             }
             (None, Ok(Some(ty))) => {
-                Err(self.report(errors::return_without_value(function, ty, keyword)))
+                Err(self.report(errors::return_without_value(function, &ty, keyword)))
             }
             (None, Ok(None)) => Ok(ir::Statement::Return(None)),
             (value, Err(ErrorReported)) => {
                 if let Some(value) = value {
-                    self.check_for_errors(value);
+                    self.check_untyped(value);
                 }
                 Err(ErrorReported)
             }
@@ -469,7 +530,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         if checked.ty != Type::Boolean {
             let source = self.text(condition.span);
             return Err(self.report(errors::condition_not_boolean(
-                checked.ty,
+                &checked.ty,
                 condition.span,
                 source,
             )));
@@ -489,7 +550,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             }
             let name = local.name;
             let noun = local.kind.noun();
-            if !local.read {
+            // A `variable` parameter that is only assigned hands its value to the caller.
+            let passed_back = matches!(local.kind, LocalKind::VariableParameter) && local.written;
+            if !local.read && !passed_back {
                 let help = match local.kind {
                     LocalKind::Parameter | LocalKind::VariableParameter => Help::replace(
                         "if the function has to take this parameter, name it `_`",

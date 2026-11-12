@@ -1,0 +1,13 @@
+#[
+    An index below 0 stops the program, and the error says which index and
+    how long the array is. Lymra has no negative indexes from the end.
+]#
+
+function before(array[integer64, 3] values, integer64 position) returns integer64
+    return values[position - 1]
+
+function main()
+    variable array[integer64, 3] values = array(4)
+    values[2] = 8
+    print("{before(values, 3)}")
+    print("{before(values, 0)}")
