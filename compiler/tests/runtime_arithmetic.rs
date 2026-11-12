@@ -4,7 +4,8 @@
  * other compilers, such as MSVC, use. A check that is wrong in either form
  * would let a program continue with a wrong number, so every pair of 8-bit
  * values is tried, and for wider types every pair of values near zero, the
- * limits, each power of two and the square root of the limit.
+ * limits, each power of two and the square root of the limit. Exact 64-bit
+ * results need no 128-bit integer type, so every compiler checks every type.
  */
 
 mod common;
@@ -22,15 +23,20 @@ const HARNESS: &str = r#"
 static unsigned long checks;
 static unsigned long failures;
 
-static void expect(const char *operation, bool overflowed, bool outside, bool same_value, long long left,
-                   long long right) {
+static void require(const char *what, bool holds, long long left, long long right) {
     checks++;
-    if (overflowed != outside || (!overflowed && !same_value)) {
+    if (!holds) {
         if (failures < 10) {
-            printf("wrong: %s of %lld and %lld\n", operation, left, right);
+            printf("wrong: %s of %lld and %lld\n", what, left, right);
         }
         failures++;
     }
+}
+
+/* A check is right when it reports overflow exactly for results outside the type, and otherwise gives the exact result. */
+static void expect(const char *operation, bool overflowed, bool outside, bool same_value, long long left,
+                   long long right) {
+    require(operation, overflowed == outside && (overflowed || same_value), left, right);
 }
 
 static size_t keep(long long *values, size_t count, long long value, long long minimum, long long maximum) {
@@ -87,7 +93,7 @@ static size_t interesting(long long minimum, long long maximum, long long *value
     return count;
 }
 
-/* Exact results of narrow types fit in `long long`; 64-bit types need 128 bits, where the compiler has them. */
+/* Exact results of types up to 32 bits fit in `long long`. */
 #define CHECK_SIGNED(name, type, exact, minimum, maximum)                                                     \
     static void check_##name(void) {                                                                          \
         static long long values[2048];                                                                        \
@@ -148,26 +154,175 @@ CHECK_SIGNED(integer32, int32_t, long long, INT32_MIN, INT32_MAX)
 CHECK_UNSIGNED(unsigned8, uint8_t, unsigned long long, UINT8_MAX, INT8_MAX)
 CHECK_UNSIGNED(unsigned16, uint16_t, unsigned long long, UINT16_MAX, INT16_MAX)
 CHECK_UNSIGNED(unsigned32, uint32_t, unsigned long long, UINT32_MAX, INT32_MAX)
+
+/*
+ * A 64-bit result is held exactly as a sign and a 128-bit magnitude, worked
+ * out with 64-bit arithmetic alone. Compilers without a 128-bit integer
+ * type, such as MSVC and 32-bit GCC, check their 64-bit predicates as fully
+ * as the others do.
+ */
+typedef struct {
+    bool negative;
+    uint64_t high;
+    uint64_t low;
+} exact_128;
+
+static exact_128 exact_from_parts(bool negative, uint64_t high, uint64_t low) {
+    exact_128 value;
+    /* Zero is never negative, so equal values have equal fields. */
+    value.negative = negative && (high != 0 || low != 0);
+    value.high = high;
+    value.low = low;
+    return value;
+}
+
+static exact_128 exact_from_signed(int64_t value) {
+    return exact_from_parts(value < 0, 0, value < 0 ? 0 - (uint64_t)value : (uint64_t)value);
+}
+
+static exact_128 exact_from_unsigned(uint64_t value) {
+    return exact_from_parts(false, 0, value);
+}
+
+static exact_128 exact_negate(exact_128 value) {
+    return exact_from_parts(!value.negative, value.high, value.low);
+}
+
+/* The sum of two values whose magnitudes fit in 64 bits. */
+static exact_128 exact_add(exact_128 left, exact_128 right) {
+    if (left.negative == right.negative) {
+        uint64_t low = left.low + right.low;
+        return exact_from_parts(left.negative, (uint64_t)(low < left.low), low);
+    }
+    if (left.low >= right.low) {
+        return exact_from_parts(left.negative, 0, left.low - right.low);
+    }
+    return exact_from_parts(right.negative, 0, right.low - left.low);
+}
+
+/* The product of two values whose magnitudes fit in 64 bits, multiplied in 32-bit halves. */
+static exact_128 exact_multiply(exact_128 left, exact_128 right) {
+    const uint64_t half = 0xFFFFFFFFu;
+    uint64_t low_low = (left.low & half) * (right.low & half);
+    uint64_t low_high = (left.low & half) * (right.low >> 32);
+    uint64_t high_low = (left.low >> 32) * (right.low & half);
+    uint64_t high_high = (left.low >> 32) * (right.low >> 32);
+    uint64_t middle = (low_low >> 32) + (low_high & half) + (high_low & half);
+    uint64_t high = high_high + (low_high >> 32) + (high_low >> 32) + (middle >> 32);
+    return exact_from_parts(left.negative != right.negative, high, (middle << 32) | (low_low & half));
+}
+
+static bool fits_integer64(exact_128 value) {
+    uint64_t largest = value.negative ? (uint64_t)INT64_MAX + 1 : (uint64_t)INT64_MAX;
+    return value.high == 0 && value.low <= largest;
+}
+
+static bool fits_unsigned64(exact_128 value) {
+    return !value.negative && value.high == 0;
+}
+
+/* The two's complement bits of a value that fits in 64 bits. */
+static uint64_t low_bits(exact_128 value) {
+    return value.negative ? 0 - value.low : value.low;
+}
+
 #if defined(__SIZEOF_INT128__)
 /* `__extension__` tells strict ISO C mode that the 128-bit types are meant. */
-__extension__ typedef __int128 exact_signed_128;
-__extension__ typedef unsigned __int128 exact_unsigned_128;
-CHECK_SIGNED(integer64, int64_t, exact_signed_128, INT64_MIN, INT64_MAX)
-CHECK_UNSIGNED(unsigned64, uint64_t, exact_unsigned_128, UINT64_MAX, INT64_MAX)
+__extension__ typedef __int128 signed_128;
+__extension__ typedef unsigned __int128 unsigned_128;
+
+/* Where a 128-bit integer type exists, it checks the exact values in turn. */
+static bool same_magnitude(exact_128 value, unsigned_128 magnitude) {
+    return value.high == (uint64_t)(magnitude >> 64) && value.low == (uint64_t)magnitude;
+}
+
+static bool same_signed(exact_128 value, signed_128 expected) {
+    unsigned_128 magnitude = expected < 0 ? (unsigned_128)0 - (unsigned_128)expected : (unsigned_128)expected;
+    return value.negative == (expected < 0) && same_magnitude(value, magnitude);
+}
+
+static bool same_unsigned(exact_128 value, unsigned_128 expected) {
+    return !value.negative && same_magnitude(value, expected);
+}
 #endif
+
+static void check_integer64(void) {
+    static long long values[2048];
+    size_t count = interesting(INT64_MIN, INT64_MAX, values);
+    for (size_t i = 0; i < count; i++) {
+        for (size_t j = 0; j < count; j++) {
+            int64_t left = (int64_t)values[i];
+            int64_t right = (int64_t)values[j];
+            exact_128 sum = exact_add(exact_from_signed(left), exact_from_signed(right));
+            exact_128 difference = exact_add(exact_from_signed(left), exact_negate(exact_from_signed(right)));
+            exact_128 product = exact_multiply(exact_from_signed(left), exact_from_signed(right));
+#if defined(__SIZEOF_INT128__)
+            require("exact integer64 sum", same_signed(sum, (signed_128)left + right), values[i], values[j]);
+            require("exact integer64 difference", same_signed(difference, (signed_128)left - right), values[i],
+                    values[j]);
+            require("exact integer64 product", same_signed(product, (signed_128)left * right), values[i],
+                    values[j]);
+#endif
+            int64_t result = 0;
+            bool overflowed = lymra_add_overflows_integer64(left, right, &result);
+            expect("integer64 add", overflowed, !fits_integer64(sum), (uint64_t)result == low_bits(sum), values[i],
+                   values[j]);
+            result = 0;
+            overflowed = lymra_subtract_overflows_integer64(left, right, &result);
+            expect("integer64 subtract", overflowed, !fits_integer64(difference),
+                   (uint64_t)result == low_bits(difference), values[i], values[j]);
+            result = 0;
+            overflowed = lymra_multiply_overflows_integer64(left, right, &result);
+            expect("integer64 multiply", overflowed, !fits_integer64(product), (uint64_t)result == low_bits(product),
+                   values[i], values[j]);
+        }
+    }
+}
+
+/* Unsigned values are drawn from the signed range and shifted up, as for the narrower types. */
+static void check_unsigned64(void) {
+    static long long values[2048];
+    size_t count = interesting(INT64_MIN, INT64_MAX, values);
+    for (size_t i = 0; i < count; i++) {
+        for (size_t j = 0; j < count; j++) {
+            uint64_t left = (uint64_t)values[i] + (uint64_t)INT64_MAX + 1;
+            uint64_t right = (uint64_t)values[j] + (uint64_t)INT64_MAX + 1;
+            exact_128 sum = exact_add(exact_from_unsigned(left), exact_from_unsigned(right));
+            exact_128 difference = exact_add(exact_from_unsigned(left), exact_negate(exact_from_unsigned(right)));
+            exact_128 product = exact_multiply(exact_from_unsigned(left), exact_from_unsigned(right));
+#if defined(__SIZEOF_INT128__)
+            require("exact unsigned64 sum", same_unsigned(sum, (unsigned_128)left + right), (long long)left,
+                    (long long)right);
+            require("exact unsigned64 difference", same_signed(difference, (signed_128)left - (signed_128)right),
+                    (long long)left, (long long)right);
+            require("exact unsigned64 product", same_unsigned(product, (unsigned_128)left * right), (long long)left,
+                    (long long)right);
+#endif
+            uint64_t result = 0;
+            bool overflowed = lymra_add_overflows_unsigned64(left, right, &result);
+            expect("unsigned64 add", overflowed, !fits_unsigned64(sum), result == low_bits(sum), (long long)left,
+                   (long long)right);
+            result = 0;
+            overflowed = lymra_subtract_overflows_unsigned64(left, right, &result);
+            expect("unsigned64 subtract", overflowed, !fits_unsigned64(difference), result == low_bits(difference),
+                   (long long)left, (long long)right);
+            result = 0;
+            overflowed = lymra_multiply_overflows_unsigned64(left, right, &result);
+            expect("unsigned64 multiply", overflowed, !fits_unsigned64(product), result == low_bits(product),
+                   (long long)left, (long long)right);
+        }
+    }
+}
 
 int main(void) {
     check_integer8();
     check_integer16();
     check_integer32();
+    check_integer64();
     check_unsigned8();
     check_unsigned16();
     check_unsigned32();
-#if defined(__SIZEOF_INT128__)
-    check_integer64();
     check_unsigned64();
-    printf("64-bit types checked\n");
-#endif
     if (failures > 0) {
         printf("%lu of %lu checks failed\n", failures, checks);
         return 1;
