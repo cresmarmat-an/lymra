@@ -36,7 +36,7 @@ int main(void) {
     lymra_append(line, sizeof line - 1);
     lymra_end_line();
     lymra_flush();
-    static const wchar_t expected[] = L"héllo → wörld ✓ ñ";
+    static const wchar_t expected[] = L"h\u00e9llo \u2192 w\u00f6rld \u2713 \u00f1";
     DWORD length = (DWORD)(sizeof expected / sizeof expected[0] - 1);
     wchar_t shown[64];
     DWORD read = 0;
