@@ -26,7 +26,7 @@ Every name the language defines is a whole English word: `variable`, `constant`,
 
 ## Try it
 
-The compiler is written in Rust and has no dependencies. It needs Rust 1.85 or newer, and GCC or Clang to build programs. It works on Linux, macOS and Windows, and every change is tested on all three. On Windows, use GCC from MinGW-w64 or Clang; on macOS, the Xcode command line tools provide Clang.
+The compiler is written in Rust and has no dependencies. It needs Rust 1.85 or newer, and GCC, Clang or MSVC to build programs. It works on Linux, macOS, Windows and FreeBSD, on x86-64 and ARM64, and every change is tested on each of them and as 32-bit code. On Windows, use GCC from MinGW-w64, Clang, or MSVC's `cl` from a Visual Studio developer prompt; on macOS, the Xcode command line tools provide Clang.
 
 ```bash
 cargo build --release
@@ -45,7 +45,7 @@ cargo build --release
 | `lymra parse <file.lym>` | Prints the syntax tree of a file |
 | `lymra explain <code>` | Explains an error code: the rule, why it exists, and the fix |
 
-The C compiler is the one in the `CC` environment variable, or else `cc`, `gcc` or `clang`. `#!optimize speed`, `size` or `debug` at the top of a file chooses how it is optimized; the default is `speed`.
+The C compiler is the one in the `CC` environment variable, or else the first of `cc`, `gcc`, `clang` and `cl` that is installed. `#!optimize speed`, `size` or `debug` at the top of a file chooses how it is optimized; the default is `speed`.
 
 An error names the rule, shows the place, and shows the corrected line:
 
@@ -103,7 +103,8 @@ error: integer overflow
 | `compiler/src/diagnostics` | Error codes and how errors are rendered |
 | `compiler/tests/ui` | Golden syntax errors and syntax trees |
 | `compiler/tests/check` | Golden errors about names, types and control flow |
-| `compiler/tests/run` | Programs that are built with GCC and Clang, with and without the optimizer, and run, with their recorded output |
+| `compiler/tests/run` | Programs that are built with every C compiler on the machine, with and without the optimizer, and run, with their recorded output |
+| `compiler/tests/runtime_arithmetic.rs` | The runtime's overflow checks, in both the GCC and Clang form and the portable form, against exact arithmetic |
 | `compiler/tests/overflow_proofs` | Thousands of generated programs run in an exact interpreter, to catch a check removed by a wrong proof |
 | `bench` | The same programs in Lymra, C and Rust, and the runner that times them |
 | `docs/errors` | One page per error code, embedded in the compiler for `lymra explain` |

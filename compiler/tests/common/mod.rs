@@ -6,6 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use lymra::driver::Compiler;
 use lymra::source::SourceFile;
 
 /// When set, golden files are rewritten to match the compiler instead of being compared with it.
@@ -86,4 +87,27 @@ pub fn files_with_extension(directory: &Path, extension: &str) -> Vec<PathBuf> {
     }
     found.sort();
     found
+}
+
+/**
+ * The C compilers the tests build with: GCC, Clang and MSVC's `cl` where they
+ * are installed, and the one in `CC` when it is set, with its arguments, as
+ * in `CC="gcc -m32"`. Programs have to behave the same with every one.
+ */
+pub fn c_compilers() -> Vec<Compiler> {
+    let mut compilers: Vec<Compiler> = ["gcc", "clang", "cl"]
+        .iter()
+        .map(|name| Compiler::named(name))
+        .filter(Compiler::is_available)
+        .collect();
+    if let Some(chosen) = Compiler::from_environment() {
+        if chosen.is_available() && !compilers.contains(&chosen) {
+            compilers.push(chosen);
+        }
+    }
+    assert!(
+        !compilers.is_empty(),
+        "these tests need a C compiler; install GCC, Clang or MSVC"
+    );
+    compilers
 }

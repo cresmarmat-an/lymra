@@ -1,10 +1,10 @@
 /*!
  * The driver: compiles generated C with the system's C compiler, and runs the result.
  *
- * Lymra uses GCC or Clang as its back end, so its programs get the speed of
- * mature optimizers without a code generator of its own. The C compiler is
- * the one named by the `CC` environment variable, or else the first of `cc`,
- * `gcc` and `clang` that can be started.
+ * Lymra uses GCC, Clang or MSVC as its back end, so its programs get the
+ * speed of mature optimizers without a code generator of its own. The C
+ * compiler is the one named by the `CC` environment variable, or else the
+ * first of `cc`, `gcc`, `clang` and `cl` that can be started.
  */
 
 use std::ffi::OsString;
@@ -18,8 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::ast::OptimizeMode;
 
-const COMPILER_CANDIDATES: [&str; 3] = ["cc", "gcc", "clang"];
-const C_STANDARD: &str = "-std=c11";
+const COMPILER_CANDIDATES: [&str; 4] = ["cc", "gcc", "clang", "cl"];
 
 /// How the C compiler treats warnings in the generated code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,24 +65,26 @@ fn io_error(action: impl Into<String>) -> impl FnOnce(io::Error) -> DriverError 
 }
 
 /// A C compiler and the arguments that always come first, as `CC` may hold both.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Compiler {
     program: OsString,
     leading_arguments: Vec<OsString>,
 }
 
+/// How a C compiler takes its options.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Style {
+    /// GCC, Clang, and the compilers that take the same options, such as `cc`.
+    Gnu,
+    /// MSVC's `cl` and Clang's `clang-cl`, which take Windows-style options.
+    Msvc,
+}
+
 impl Compiler {
-    /// The compiler named by `CC`, or the first of `cc`, `gcc` and `clang` that can be started.
+    /// The compiler named by `CC`, or the first of `cc`, `gcc`, `clang` and `cl` that can be started.
     pub fn find() -> Result<Self, DriverError> {
-        if let Some(variable) = std::env::var_os("CC").filter(|value| !value.is_empty()) {
-            let text = variable.to_string_lossy().into_owned();
-            let mut words = text.split_whitespace().map(OsString::from);
-            if let Some(program) = words.next() {
-                return Ok(Self {
-                    program,
-                    leading_arguments: words.collect(),
-                });
-            }
+        if let Some(chosen) = Self::from_environment() {
+            return Ok(chosen);
         }
         COMPILER_CANDIDATES
             .iter()
@@ -97,6 +98,18 @@ impl Compiler {
             })
     }
 
+    /// The compiler `CC` names with its leading arguments, as in `CC="gcc -m32"`, or `None` when `CC` is not set.
+    pub fn from_environment() -> Option<Self> {
+        let variable = std::env::var_os("CC").filter(|value| !value.is_empty())?;
+        let text = variable.to_string_lossy().into_owned();
+        let mut words = text.split_whitespace().map(OsString::from);
+        let program = words.next()?;
+        Some(Self {
+            program,
+            leading_arguments: words.collect(),
+        })
+    }
+
     /// A compiler by name, for callers that want a specific one.
     pub fn named(program: &str) -> Self {
         Self {
@@ -105,8 +118,23 @@ impl Compiler {
         }
     }
 
+    /// The compiler as it would be written in `CC`: the program and its leading arguments.
     pub fn name(&self) -> String {
-        self.program.to_string_lossy().into_owned()
+        std::iter::once(&self.program)
+            .chain(&self.leading_arguments)
+            .map(|word| word.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn style(&self) -> Style {
+        let stem = Path::new(&self.program)
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_ascii_lowercase());
+        match stem.as_deref() {
+            Some("cl" | "clang-cl") => Style::Msvc,
+            _ => Style::Gnu,
+        }
     }
 
     /// True if the compiler can be started at all.
@@ -134,14 +162,31 @@ impl Compiler {
         fs::write(&c_file, c_source).map_err(io_error(format!("write {}", c_file.display())))?;
 
         let mut command = Command::new(&self.program);
-        command
-            .args(&self.leading_arguments)
-            .arg(C_STANDARD)
-            .args(optimization_flags(optimize));
-        if warnings == Warnings::Strict {
-            command.args(["-Wall", "-Wextra", "-Wpedantic", "-Werror"]);
+        command.args(&self.leading_arguments);
+        match self.style() {
+            Style::Gnu => {
+                command.arg("-std=c11").args(optimization_flags(optimize));
+                if warnings == Warnings::Strict {
+                    command.args(["-Wall", "-Wextra", "-Wpedantic", "-Werror"]);
+                }
+                command.arg("-o").arg(executable).arg(&c_file);
+            }
+            Style::Msvc => {
+                // MSVC leaves object files in its working directory, so that is the temporary one.
+                let executable = std::path::absolute(executable)
+                    .map_err(io_error(format!("find {}", executable.display())))?;
+                let mut output = OsString::from("/Fe:");
+                output.push(executable.as_os_str());
+                command
+                    .current_dir(workspace.path())
+                    .args(["/nologo", "/std:c11", "/utf-8"])
+                    .args(msvc_optimization_flags(optimize));
+                if warnings == Warnings::Strict {
+                    command.args(["/W4", "/WX"]);
+                }
+                command.arg(output).arg(&c_file);
+            }
         }
-        command.arg("-o").arg(executable).arg(&c_file);
 
         let output = match command.stdin(Stdio::null()).output() {
             Ok(output) => output,
@@ -169,6 +214,15 @@ fn optimization_flags(mode: Option<OptimizeMode>) -> &'static [&'static str] {
         None | Some(OptimizeMode::Speed) => &["-O2"],
         Some(OptimizeMode::Size) => &["-Os"],
         Some(OptimizeMode::Debug) => &["-O0", "-g"],
+    }
+}
+
+/// The same choices in MSVC's spelling.
+fn msvc_optimization_flags(mode: Option<OptimizeMode>) -> &'static [&'static str] {
+    match mode {
+        None | Some(OptimizeMode::Speed) => &["/O2"],
+        Some(OptimizeMode::Size) => &["/O1"],
+        Some(OptimizeMode::Debug) => &["/Od", "/Zi"],
     }
 }
 
@@ -251,6 +305,22 @@ mod tests {
         assert_eq!(optimization_flags(None), ["-O2"]);
         assert_eq!(optimization_flags(Some(OptimizeMode::Size)), ["-Os"]);
         assert_eq!(optimization_flags(Some(OptimizeMode::Debug)), ["-O0", "-g"]);
+        assert_eq!(msvc_optimization_flags(None), ["/O2"]);
+        assert_eq!(msvc_optimization_flags(Some(OptimizeMode::Size)), ["/O1"]);
+    }
+
+    #[test]
+    fn msvc_options_are_used_for_cl_and_clang_cl_only() {
+        assert_eq!(Compiler::named("cl").style(), Style::Msvc);
+        assert_eq!(
+            Compiler::named("C:/Tools/clang-cl.exe").style(),
+            Style::Msvc
+        );
+        assert_eq!(Compiler::named("clang").style(), Style::Gnu);
+        assert_eq!(
+            Compiler::named("x86_64-w64-mingw32-gcc").style(),
+            Style::Gnu
+        );
     }
 
     #[test]

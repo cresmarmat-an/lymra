@@ -165,7 +165,7 @@ impl Generator<'_, '_> {
             matches!(function.body.statements.last(), Some(Statement::Return(_)));
         if function.return_type.is_some() && !ends_with_return {
             // The checker proved that every path returns, so control never gets here.
-            writer.line("__builtin_unreachable();");
+            writer.line("LYMRA_UNREACHABLE();");
         }
         writer.text.push('}');
         writer.text

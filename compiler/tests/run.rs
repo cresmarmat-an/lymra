@@ -22,8 +22,6 @@ use lymra::driver::{Compiler, TemporaryDirectory, Warnings};
 use lymra::frontend;
 use lymra::optimize;
 
-const COMPILERS: [&str; 2] = ["gcc", "clang"];
-
 /// A program to run, the name it is reported under, and where its recorded result lives.
 struct Case {
     source: PathBuf,
@@ -122,15 +120,7 @@ fn run_case(case: &Case, compilers: &[Compiler]) -> Result<String, String> {
 
 #[test]
 fn every_program_runs_as_recorded() {
-    let compilers: Vec<Compiler> = COMPILERS
-        .iter()
-        .map(|name| Compiler::named(name))
-        .filter(Compiler::is_available)
-        .collect();
-    assert!(
-        !compilers.is_empty(),
-        "these tests need a C compiler; install GCC or Clang"
-    );
+    let compilers = common::c_compilers();
     let cases = cases();
     assert!(!cases.is_empty(), "no programs found under tests/run");
 

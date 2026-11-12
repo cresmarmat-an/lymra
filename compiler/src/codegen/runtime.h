@@ -2,8 +2,8 @@
  * The Lymra runtime for edition 0.1.
  *
  * The compiler puts this text at the top of every C file it generates, so a
- * generated file builds on its own. It needs GCC or Clang, for the builtins
- * that detect integer overflow.
+ * generated file builds on its own. It builds with GCC, Clang and MSVC, on
+ * POSIX systems and on Windows.
  */
 
 /*
@@ -33,14 +33,29 @@
 #include <sys/resource.h>
 #include <unistd.h>
 #elif defined(LYMRA_WINDOWS)
-#include <fcntl.h>
-#include <io.h>
 #include <windows.h>
 #endif
 
-/* Clang in its MSVC mode does not call itself GCC, but it has every extension the runtime uses. */
-#if !defined(__GNUC__) && !defined(__clang__)
-#error "Lymra programs are compiled with GCC or Clang"
+/* What the runtime needs from the C compiler, spelled the way each compiler spells it. */
+#if defined(__GNUC__) || defined(__clang__)
+/* Marks the runtime functions and the program parts a given program may not use, so C compilers do not warn. */
+#define LYMRA_UNUSED __attribute__((unused))
+#define LYMRA_NO_RETURN __attribute__((noreturn, cold, noinline))
+#define LYMRA_NO_INLINE __attribute__((noinline))
+#define LYMRA_UNREACHABLE() __builtin_unreachable()
+/* Keeps the compiler from moving memory accesses across this point, so a signal handler sees them in order. */
+#define LYMRA_SIGNAL_FENCE() __asm__ __volatile__("" ::: "memory")
+#elif defined(_MSC_VER)
+#include <intrin.h>
+#define LYMRA_UNUSED
+#define LYMRA_NO_RETURN __declspec(noreturn) __declspec(noinline)
+#define LYMRA_NO_INLINE __declspec(noinline)
+#define LYMRA_UNREACHABLE() __assume(0)
+#define LYMRA_SIGNAL_FENCE() _ReadWriteBarrier()
+/* MSVC has no attribute for unused functions; a program uses only part of the runtime, so its warning is off. */
+#pragma warning(disable : 4505)
+#else
+#error "Lymra programs are compiled with GCC, Clang or MSVC"
 #endif
 
 /* The exit status of a program stopped by a runtime error. 70 is EX_SOFTWARE in sysexits.h. */
@@ -48,9 +63,6 @@
 
 /* The exit status of a program whose output could not be written. 74 is EX_IOERR in sysexits.h. */
 #define LYMRA_OUTPUT_ERROR_STATUS 74
-
-/* Marks the runtime functions and the program parts a given program may not use, so C compilers do not warn. */
-#define LYMRA_UNUSED __attribute__((unused))
 
 /* Immutable text: a pointer into static data and a length in bytes. */
 typedef struct {
@@ -65,13 +77,101 @@ typedef enum {
     LYMRA_CONVERSION_OUT_OF_RANGE
 } lymra_trap_kind;
 
+/* Where text goes. The values are the POSIX file descriptors. */
+typedef enum { LYMRA_STANDARD_OUTPUT = 1, LYMRA_STANDARD_ERROR = 2 } lymra_stream;
+
+#if defined(LYMRA_WINDOWS)
+/* Whether each stream, by its number, is a console. A console takes UTF-16 text; files and pipes take the bytes. */
+LYMRA_UNUSED static bool lymra_console[3];
+/* Text on its way to a console. UTF-8 never needs more UTF-16 units than it has bytes. */
+LYMRA_UNUSED static wchar_t lymra_console_text[(size_t)1 << 16];
+#endif
+
+/*
+ * The longest start of `data`, at most `length` bytes long, that does not end
+ * inside a UTF-8 character. Text written in pieces then never splits one,
+ * which a console would show as two broken characters.
+ */
+LYMRA_UNUSED static size_t lymra_whole_characters(const char *data, size_t length) {
+    size_t back = 0;
+    while (back < 3 && back < length && ((unsigned char)data[length - 1 - back] & 0xC0) == 0x80) {
+        back++;
+    }
+    if (back == length) {
+        return length;
+    }
+    unsigned char lead = (unsigned char)data[length - 1 - back];
+    size_t size = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
+    return size > back + 1 ? length - 1 - back : length;
+}
+
+/*
+ * Writes some of `data` with one write to the system and returns how many
+ * bytes went out, which is 0 only when writing failed. On POSIX it only
+ * calls `write`, so a signal handler may use it.
+ */
+LYMRA_UNUSED static size_t lymra_write_some(lymra_stream stream, const char *data, size_t length) {
+#if defined(LYMRA_POSIX)
+    for (;;) {
+        ssize_t result = write((int)stream, data, length);
+        if (result > 0) {
+            return (size_t)result;
+        }
+        if (result < 0 && errno == EINTR) {
+            continue;
+        }
+        return 0;
+    }
+#elif defined(LYMRA_WINDOWS)
+    HANDLE handle = GetStdHandle(stream == LYMRA_STANDARD_OUTPUT ? STD_OUTPUT_HANDLE : STD_ERROR_HANDLE);
+    size_t capacity = sizeof lymra_console_text / sizeof lymra_console_text[0];
+    size_t part = length < capacity ? length : capacity;
+    if (!lymra_console[stream]) {
+        /* Files and pipes get the bytes as they are, so a line ends with `\n` as on every other system. */
+        DWORD written = 0;
+        return WriteFile(handle, data, (DWORD)part, &written, NULL) ? written : 0;
+    }
+    size_t whole = lymra_whole_characters(data, part);
+    if (whole > 0) {
+        part = whole;
+    }
+    int units = MultiByteToWideChar(CP_UTF8, 0, data, (int)part, lymra_console_text, (int)capacity);
+    if (units <= 0) {
+        return 0;
+    }
+    for (int start = 0; start < units;) {
+        DWORD done = 0;
+        if (!WriteConsoleW(handle, lymra_console_text + start, (DWORD)(units - start), &done, NULL) || done == 0) {
+            return 0;
+        }
+        start += (int)done;
+    }
+    return part;
+#else
+    FILE *file = stream == LYMRA_STANDARD_OUTPUT ? stdout : stderr;
+    return fwrite(data, 1, length, file) == length && fflush(file) == 0 ? length : 0;
+#endif
+}
+
+/* Writes an error message to standard error, as much of it as the system takes. */
+LYMRA_UNUSED static void lymra_write_error(const char *text) {
+    size_t length = strlen(text);
+    while (length > 0) {
+        size_t taken = lymra_write_some(LYMRA_STANDARD_ERROR, text, length);
+        if (taken == 0) {
+            return;
+        }
+        text += taken;
+        length -= taken;
+    }
+}
+
 /*
  * Output waits in a buffer and goes out in large writes, which is much faster
  * than writing each piece. A line becomes part of the output only when its
  * line break is added, so a program that stops in the middle of a `print`
  * leaves no half line behind. Everything that ends the program writes the
- * finished lines first, the stack overflow handler included, so they are only
- * ever written with `write`, which a signal handler may call.
+ * finished lines first, the stack overflow handler included.
  */
 #define LYMRA_OUTPUT_CAPACITY ((size_t)1 << 16)
 LYMRA_UNUSED static char lymra_output[LYMRA_OUTPUT_CAPACITY];
@@ -87,34 +187,13 @@ LYMRA_UNUSED static bool lymra_output_failed;
 LYMRA_UNUSED static void lymra_write_finished(void) {
     while (lymra_output_written < lymra_output_length) {
         size_t written = lymra_output_written;
-        size_t waiting = lymra_output_length - written;
-#if defined(LYMRA_POSIX)
-        ssize_t result = write(STDOUT_FILENO, lymra_output + written, waiting);
-        if (result < 0 && errno == EINTR) {
-            continue;
-        }
-        if (result <= 0) {
+        size_t taken = lymra_write_some(LYMRA_STANDARD_OUTPUT, lymra_output + written, lymra_output_length - written);
+        if (taken == 0) {
             lymra_output_failed = true;
             lymra_output_written = lymra_output_length;
-            break;
+            return;
         }
-        lymra_output_written = written + (size_t)result;
-#elif defined(LYMRA_WINDOWS)
-        /* Raw bytes, so a line ends with the same line break as on every other system. */
-        DWORD result = 0;
-        if (!WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), lymra_output + written, (DWORD)waiting, &result, NULL) ||
-            result == 0) {
-            lymra_output_failed = true;
-            lymra_output_written = lymra_output_length;
-            break;
-        }
-        lymra_output_written = written + result;
-#else
-        if (fwrite(lymra_output + written, 1, waiting, stdout) != waiting || fflush(stdout) != 0) {
-            lymra_output_failed = true;
-        }
-        lymra_output_written = lymra_output_length;
-#endif
+        lymra_output_written = written + taken;
     }
 }
 
@@ -132,7 +211,7 @@ LYMRA_UNUSED static void lymra_flush(void) {
 /* Makes the bytes before `end` part of the output. */
 LYMRA_UNUSED static inline void lymra_commit(size_t end) {
     /* Keeps the compiler from moving the end of the output past bytes not stored yet. */
-    __asm__ __volatile__("" ::: "memory");
+    LYMRA_SIGNAL_FENCE();
     lymra_output_length = end;
 }
 
@@ -141,8 +220,9 @@ LYMRA_UNUSED static void lymra_append(const char *data, size_t length) {
     while (length > 0) {
         if (lymra_line_end == LYMRA_OUTPUT_CAPACITY) {
             if (lymra_output_length == 0) {
-                /* One line fills the whole buffer. It goes out as it is. */
-                lymra_commit(lymra_line_end);
+                /* One line fills the whole buffer. It goes out as it is, up to its last whole character. */
+                size_t whole = lymra_whole_characters(lymra_output, lymra_line_end);
+                lymra_commit(whole > 0 ? whole : lymra_line_end);
             }
             lymra_flush();
         }
@@ -160,8 +240,7 @@ LYMRA_UNUSED static void lymra_append(const char *data, size_t length) {
  * source, already rendered by the compiler: the location line, then the
  * source line with the failing part underlined.
  */
-LYMRA_UNUSED __attribute__((noreturn, cold, noinline)) static void lymra_trap(lymra_trap_kind kind,
-                                                                                const char *site) {
+LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const char *site) {
     static const char *const messages[] = {
         "integer overflow",
         "division by zero",
@@ -169,103 +248,162 @@ LYMRA_UNUSED __attribute__((noreturn, cold, noinline)) static void lymra_trap(ly
         "conversion out of range",
     };
     lymra_write_finished();
-    fprintf(stderr, "error: %s\n%s", messages[kind], site);
+    lymra_write_error("error: ");
+    lymra_write_error(messages[kind]);
+    lymra_write_error("\n");
+    lymra_write_error(site);
     exit(LYMRA_RUNTIME_ERROR_STATUS);
 }
 
-/* Checked arithmetic for a signed type. `minimum` is its lowest value. */
-#define LYMRA_SIGNED_OPERATIONS(name, type, minimum)                                                     \
-    LYMRA_UNUSED static inline type lymra_add_##name(type left, type right, const char *site) {          \
-        type result;                                                                                     \
-        if (__builtin_add_overflow(left, right, &result)) {                                              \
-            lymra_trap(LYMRA_INTEGER_OVERFLOW, site);                                                    \
-        }                                                                                                \
-        return result;                                                                                   \
-    }                                                                                                    \
-    LYMRA_UNUSED static inline type lymra_subtract_##name(type left, type right, const char *site) {     \
-        type result;                                                                                     \
-        if (__builtin_sub_overflow(left, right, &result)) {                                              \
-            lymra_trap(LYMRA_INTEGER_OVERFLOW, site);                                                    \
-        }                                                                                                \
-        return result;                                                                                   \
-    }                                                                                                    \
-    LYMRA_UNUSED static inline type lymra_multiply_##name(type left, type right, const char *site) {     \
-        type result;                                                                                     \
-        if (__builtin_mul_overflow(left, right, &result)) {                                              \
-            lymra_trap(LYMRA_INTEGER_OVERFLOW, site);                                                    \
-        }                                                                                                \
-        return result;                                                                                   \
-    }                                                                                                    \
-    LYMRA_UNUSED static inline type lymra_divide_##name(type left, type right, const char *site) {       \
-        if (right == 0) {                                                                                \
-            lymra_trap(LYMRA_DIVISION_BY_ZERO, site);                                                    \
-        }                                                                                                \
-        if (left == (minimum) && right == -1) {                                                          \
-            lymra_trap(LYMRA_INTEGER_OVERFLOW, site);                                                    \
-        }                                                                                                \
-        return (type)(left / right);                                                                     \
-    }                                                                                                    \
-    LYMRA_UNUSED static inline type lymra_remainder_##name(type left, type right, const char *site) {    \
-        if (right == 0) {                                                                                \
-            lymra_trap(LYMRA_DIVISION_BY_ZERO, site);                                                    \
-        }                                                                                                \
-        /* The remainder of anything divided by -1 is 0. In C, minimum % -1 is undefined. */             \
-        if (right == -1) {                                                                               \
-            return 0;                                                                                    \
-        }                                                                                                \
-        return (type)(left % right);                                                                     \
-    }                                                                                                    \
-    LYMRA_UNUSED static inline type lymra_negate_##name(type value, const char *site) {                  \
-        if (value == (minimum)) {                                                                        \
-            lymra_trap(LYMRA_INTEGER_OVERFLOW, site);                                                    \
-        }                                                                                                \
-        return (type)(-value);                                                                           \
+/*
+ * Whether `left op right` falls outside the type, and when it does not, its
+ * value in `*result`. GCC and Clang compute this with one instruction and its
+ * overflow flag. The portable version, for other compilers, compares with the
+ * type's limits before it computes anything, so it never overflows itself.
+ * Defining LYMRA_PORTABLE_ARITHMETIC selects it everywhere, which the tests
+ * use to compare the two.
+ */
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(LYMRA_PORTABLE_ARITHMETIC)
+#define LYMRA_OVERFLOW_CHECKS(name, type, minimum, maximum)                                                    \
+    LYMRA_UNUSED static inline bool lymra_add_overflows_##name(type left, type right, type *result) {          \
+        return __builtin_add_overflow(left, right, result);                                                    \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline bool lymra_subtract_overflows_##name(type left, type right, type *result) {     \
+        return __builtin_sub_overflow(left, right, result);                                                    \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline bool lymra_multiply_overflows_##name(type left, type right, type *result) {     \
+        return __builtin_mul_overflow(left, right, result);                                                    \
+    }
+#define LYMRA_SIGNED_OVERFLOW_CHECKS(name, type, minimum, maximum) LYMRA_OVERFLOW_CHECKS(name, type, minimum, maximum)
+#define LYMRA_UNSIGNED_OVERFLOW_CHECKS(name, type, maximum) LYMRA_OVERFLOW_CHECKS(name, type, 0, maximum)
+#else
+#define LYMRA_SIGNED_OVERFLOW_CHECKS(name, type, minimum, maximum)                                             \
+    LYMRA_UNUSED static inline bool lymra_add_overflows_##name(type left, type right, type *result) {          \
+        if ((right > 0 && left > (maximum) - right) || (right < 0 && left < (minimum) - right)) {              \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = (type)(left + right);                                                                        \
+        return false;                                                                                          \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline bool lymra_subtract_overflows_##name(type left, type right, type *result) {     \
+        if ((right < 0 && left > (maximum) + right) || (right > 0 && left < (minimum) + right)) {              \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = (type)(left - right);                                                                        \
+        return false;                                                                                          \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline bool lymra_multiply_overflows_##name(type left, type right, type *result) {     \
+        /* Each case divides a limit by a value that cannot make the division overflow. */                   \
+        if (left > 0 ? (right > 0 ? left > (maximum) / right : right < (minimum) / left)                       \
+                     : (right > 0 ? left < (minimum) / right : left != 0 && right < (maximum) / left)) {       \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = (type)(left * right);                                                                        \
+        return false;                                                                                          \
+    }
+#define LYMRA_UNSIGNED_OVERFLOW_CHECKS(name, type, maximum)                                                    \
+    LYMRA_UNUSED static inline bool lymra_add_overflows_##name(type left, type right, type *result) {          \
+        if (left > (maximum) - right) {                                                                        \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = (type)(left + right);                                                                        \
+        return false;                                                                                          \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline bool lymra_subtract_overflows_##name(type left, type right, type *result) {     \
+        if (left < right) {                                                                                    \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = (type)(left - right);                                                                        \
+        return false;                                                                                          \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline bool lymra_multiply_overflows_##name(type left, type right, type *result) {     \
+        if (left != 0 && right > (maximum) / left) {                                                           \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = (type)(left * right);                                                                        \
+        return false;                                                                                          \
+    }
+#endif
+
+/* The trapping form of each check, which the generated code calls. */
+#define LYMRA_CHECKED_ARITHMETIC(name, type)                                                                   \
+    LYMRA_UNUSED static inline type lymra_add_##name(type left, type right, const char *site) {                \
+        type result = 0;                                                                                       \
+        if (lymra_add_overflows_##name(left, right, &result)) {                                                \
+            lymra_trap(LYMRA_INTEGER_OVERFLOW, site);                                                          \
+        }                                                                                                      \
+        return result;                                                                                         \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline type lymra_subtract_##name(type left, type right, const char *site) {           \
+        type result = 0;                                                                                       \
+        if (lymra_subtract_overflows_##name(left, right, &result)) {                                           \
+            lymra_trap(LYMRA_INTEGER_OVERFLOW, site);                                                          \
+        }                                                                                                      \
+        return result;                                                                                         \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline type lymra_multiply_##name(type left, type right, const char *site) {           \
+        type result = 0;                                                                                       \
+        if (lymra_multiply_overflows_##name(left, right, &result)) {                                           \
+            lymra_trap(LYMRA_INTEGER_OVERFLOW, site);                                                          \
+        }                                                                                                      \
+        return result;                                                                                         \
     }
 
-/* Checked arithmetic for an unsigned type. Lymra has no negation of unsigned values. */
-#define LYMRA_UNSIGNED_OPERATIONS(name, type)                                                            \
-    LYMRA_UNUSED static inline type lymra_add_##name(type left, type right, const char *site) {          \
-        type result;                                                                                     \
-        if (__builtin_add_overflow(left, right, &result)) {                                              \
-            lymra_trap(LYMRA_INTEGER_OVERFLOW, site);                                                    \
-        }                                                                                                \
-        return result;                                                                                   \
-    }                                                                                                    \
-    LYMRA_UNUSED static inline type lymra_subtract_##name(type left, type right, const char *site) {     \
-        type result;                                                                                     \
-        if (__builtin_sub_overflow(left, right, &result)) {                                              \
-            lymra_trap(LYMRA_INTEGER_OVERFLOW, site);                                                    \
-        }                                                                                                \
-        return result;                                                                                   \
-    }                                                                                                    \
-    LYMRA_UNUSED static inline type lymra_multiply_##name(type left, type right, const char *site) {     \
-        type result;                                                                                     \
-        if (__builtin_mul_overflow(left, right, &result)) {                                              \
-            lymra_trap(LYMRA_INTEGER_OVERFLOW, site);                                                    \
-        }                                                                                                \
-        return result;                                                                                   \
-    }                                                                                                    \
-    LYMRA_UNUSED static inline type lymra_divide_##name(type left, type right, const char *site) {       \
-        if (right == 0) {                                                                                \
-            lymra_trap(LYMRA_DIVISION_BY_ZERO, site);                                                    \
-        }                                                                                                \
-        return (type)(left / right);                                                                     \
-    }                                                                                                    \
-    LYMRA_UNUSED static inline type lymra_remainder_##name(type left, type right, const char *site) {    \
-        if (right == 0) {                                                                                \
-            lymra_trap(LYMRA_DIVISION_BY_ZERO, site);                                                    \
-        }                                                                                                \
-        return (type)(left % right);                                                                     \
+/* Checked arithmetic for a signed type, with division and negation. */
+#define LYMRA_SIGNED_OPERATIONS(name, type, minimum, maximum)                                                  \
+    LYMRA_SIGNED_OVERFLOW_CHECKS(name, type, minimum, maximum)                                                 \
+    LYMRA_CHECKED_ARITHMETIC(name, type)                                                                       \
+    LYMRA_UNUSED static inline type lymra_divide_##name(type left, type right, const char *site) {             \
+        if (right == 0) {                                                                                      \
+            lymra_trap(LYMRA_DIVISION_BY_ZERO, site);                                                          \
+        }                                                                                                      \
+        if (left == (minimum) && right == -1) {                                                                \
+            lymra_trap(LYMRA_INTEGER_OVERFLOW, site);                                                          \
+        }                                                                                                      \
+        return (type)(left / right);                                                                           \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline type lymra_remainder_##name(type left, type right, const char *site) {          \
+        if (right == 0) {                                                                                      \
+            lymra_trap(LYMRA_DIVISION_BY_ZERO, site);                                                          \
+        }                                                                                                      \
+        /* The remainder of anything divided by -1 is 0. In C, minimum % -1 is undefined. */                   \
+        if (right == -1) {                                                                                     \
+            return 0;                                                                                          \
+        }                                                                                                      \
+        return (type)(left % right);                                                                           \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline type lymra_negate_##name(type value, const char *site) {                        \
+        if (value == (minimum)) {                                                                              \
+            lymra_trap(LYMRA_INTEGER_OVERFLOW, site);                                                          \
+        }                                                                                                      \
+        return (type)(-value);                                                                                 \
     }
 
-LYMRA_SIGNED_OPERATIONS(integer8, int8_t, INT8_MIN)
-LYMRA_SIGNED_OPERATIONS(integer16, int16_t, INT16_MIN)
-LYMRA_SIGNED_OPERATIONS(integer32, int32_t, INT32_MIN)
-LYMRA_SIGNED_OPERATIONS(integer64, int64_t, INT64_MIN)
-LYMRA_UNSIGNED_OPERATIONS(unsigned8, uint8_t)
-LYMRA_UNSIGNED_OPERATIONS(unsigned16, uint16_t)
-LYMRA_UNSIGNED_OPERATIONS(unsigned32, uint32_t)
-LYMRA_UNSIGNED_OPERATIONS(unsigned64, uint64_t)
+/* Checked arithmetic for an unsigned type, with division. Lymra has no negation of unsigned values. */
+#define LYMRA_UNSIGNED_OPERATIONS(name, type, maximum)                                                         \
+    LYMRA_UNSIGNED_OVERFLOW_CHECKS(name, type, maximum)                                                        \
+    LYMRA_CHECKED_ARITHMETIC(name, type)                                                                       \
+    LYMRA_UNUSED static inline type lymra_divide_##name(type left, type right, const char *site) {             \
+        if (right == 0) {                                                                                      \
+            lymra_trap(LYMRA_DIVISION_BY_ZERO, site);                                                          \
+        }                                                                                                      \
+        return (type)(left / right);                                                                           \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline type lymra_remainder_##name(type left, type right, const char *site) {          \
+        if (right == 0) {                                                                                      \
+            lymra_trap(LYMRA_DIVISION_BY_ZERO, site);                                                          \
+        }                                                                                                      \
+        return (type)(left % right);                                                                           \
+    }
+
+LYMRA_SIGNED_OPERATIONS(integer8, int8_t, INT8_MIN, INT8_MAX)
+LYMRA_SIGNED_OPERATIONS(integer16, int16_t, INT16_MIN, INT16_MAX)
+LYMRA_SIGNED_OPERATIONS(integer32, int32_t, INT32_MIN, INT32_MAX)
+LYMRA_SIGNED_OPERATIONS(integer64, int64_t, INT64_MIN, INT64_MAX)
+LYMRA_UNSIGNED_OPERATIONS(unsigned8, uint8_t, UINT8_MAX)
+LYMRA_UNSIGNED_OPERATIONS(unsigned16, uint16_t, UINT16_MAX)
+LYMRA_UNSIGNED_OPERATIONS(unsigned32, uint32_t, UINT32_MAX)
+LYMRA_UNSIGNED_OPERATIONS(unsigned64, uint64_t, UINT64_MAX)
 
 /* Checks a conversion from a signed type: the value has to lie within [minimum, maximum]. */
 LYMRA_UNUSED static inline int64_t lymra_check_signed(int64_t value, int64_t minimum, int64_t maximum,
@@ -364,8 +502,7 @@ LYMRA_UNUSED static void lymra_on_fault(int signal_number, siginfo_t *details, v
     /* A positive code means the program's own memory access caused the signal; another process can send one too. */
     bool caused_by_access = details->si_code > 0;
     if (caused_by_access && address < lymra_stack_top && lymra_stack_top - address <= lymra_stack_reach) {
-        ssize_t written = write(STDERR_FILENO, lymra_stack_overflow_message, sizeof lymra_stack_overflow_message - 1);
-        (void)written;
+        lymra_write_error(lymra_stack_overflow_message);
         _exit(LYMRA_RUNTIME_ERROR_STATUS);
     }
     /* Any other signal ends the program the way it would without this handler. */
@@ -422,9 +559,7 @@ LYMRA_UNUSED static LONG WINAPI lymra_on_exception(EXCEPTION_POINTERS *exception
         return EXCEPTION_CONTINUE_SEARCH;
     }
     lymra_write_finished();
-    DWORD written = 0;
-    WriteFile(GetStdHandle(STD_ERROR_HANDLE), lymra_stack_overflow_message,
-              (DWORD)(sizeof lymra_stack_overflow_message - 1), &written, NULL);
+    lymra_write_error(lymra_stack_overflow_message);
     /* Ends the process at once: an orderly exit would run code that needs more stack. */
     TerminateProcess(GetCurrentProcess(), LYMRA_RUNTIME_ERROR_STATUS);
     return EXCEPTION_CONTINUE_SEARCH;
@@ -440,12 +575,13 @@ LYMRA_UNUSED static void lymra_catch_stack_overflow(void) {
 #endif
 
 /* Prepares the program to run. The C `main` calls it before anything else. */
-LYMRA_UNUSED __attribute__((noinline)) static void lymra_start(void) {
+LYMRA_UNUSED LYMRA_NO_INLINE static void lymra_start(void) {
 #if defined(LYMRA_POSIX)
     lymra_catch_stack_overflow();
 #elif defined(LYMRA_WINDOWS)
-    /* Error messages go out byte for byte too, with the same line breaks as everywhere else. */
-    _setmode(_fileno(stderr), _O_BINARY);
+    DWORD mode = 0;
+    lymra_console[LYMRA_STANDARD_OUTPUT] = GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &mode) != 0;
+    lymra_console[LYMRA_STANDARD_ERROR] = GetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), &mode) != 0;
     lymra_catch_stack_overflow();
 #endif
 }
@@ -454,7 +590,7 @@ LYMRA_UNUSED __attribute__((noinline)) static void lymra_start(void) {
 LYMRA_UNUSED static inline int lymra_finish(void) {
     lymra_flush();
     if (lymra_output_failed) {
-        fputs("error: the output could not be written\n", stderr);
+        lymra_write_error("error: the output could not be written\n");
         return LYMRA_OUTPUT_ERROR_STATUS;
     }
     return 0;
