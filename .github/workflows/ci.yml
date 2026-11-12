@@ -51,7 +51,6 @@ jobs:
     env:
       CC: ${{ matrix.cc }}
       LYMRA_TEST_COMPILERS: ${{ matrix.compilers }}
-      TARGET_OPTION: ${{ matrix.target && format('--target={0}', matrix.target) || '' }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -102,12 +101,11 @@ jobs:
           gcc --version || echo "gcc is not installed"
           clang --version || echo "clang is not installed"
           if command -v cl > /dev/null; then cl 2>&1 | head -n 1 || true; else echo "cl is not installed"; fi
+      # The default shell, as Git Bash on Windows puts its own `link` ahead of MSVC's linker.
       - name: Lint
-        shell: bash
-        run: cargo clippy --all-targets $TARGET_OPTION -- -D warnings
+        run: cargo clippy --all-targets ${{ matrix.target && format('--target={0}', matrix.target) || '' }} -- -D warnings
       - name: Test
-        shell: bash
-        run: cargo test $TARGET_OPTION
+        run: cargo test ${{ matrix.target && format('--target={0}', matrix.target) || '' }}
 
   thirty-two-bit:
     name: Test 32-bit programs on Linux
