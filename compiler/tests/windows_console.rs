@@ -22,6 +22,12 @@ int main(void) {
     if (!AllocConsole()) {
         return 2;
     }
+    /* A process started with its output redirected keeps it after AllocConsole, so the console becomes standard output here, as it is for a program run in a console window. */
+    HANDLE console = CreateFileW(L"CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                                 OPEN_EXISTING, 0, NULL);
+    if (console == INVALID_HANDLE_VALUE || !SetStdHandle(STD_OUTPUT_HANDLE, console)) {
+        return 2;
+    }
     lymra_start();
     if (!lymra_console[LYMRA_STANDARD_OUTPUT]) {
         return 3;
@@ -35,7 +41,7 @@ int main(void) {
     wchar_t shown[64];
     DWORD read = 0;
     COORD origin = {0, 0};
-    if (!ReadConsoleOutputCharacterW(GetStdHandle(STD_OUTPUT_HANDLE), shown, length, origin, &read)) {
+    if (!ReadConsoleOutputCharacterW(console, shown, length, origin, &read)) {
         return 4;
     }
     return read == length && wmemcmp(shown, expected, length) == 0 ? 0 : 1;
