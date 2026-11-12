@@ -1,0 +1,30 @@
+#!edition 0.1
+
+#[
+    Edits a row of cells, recording each edit, then undoes all but the
+    first three.
+
+    Memory: `history` is a `stack`, the one collection that shrinks. `pop`
+    gives back the edit as a value, a copy of fixed size, so nothing points
+    into the slot it frees. Holding a reference into a stack past the next
+    `pop` is error L0702.
+]#
+
+type Edit
+    integer64 position
+    integer32 before
+
+function main()
+    variable list[integer32] cells = list()
+    for _ in range(0, 5)
+        push(variable cells, 0)
+    variable stack[Edit] history = stack()
+    for step in range(0, 8)
+        constant position = step % 5
+        push(variable history, Edit(position = position, before = cells[position]))
+        cells[position] = cells[position] + integer32(step)
+    while length(history) > 3
+        constant edit = pop(variable history)
+        cells[edit.position] = edit.before
+    for cell in cells
+        print("{cell}")

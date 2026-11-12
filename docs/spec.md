@@ -185,7 +185,7 @@ The compiler doesn't have to copy bytes to give you this guarantee. If neither b
 | `boolean` | `true` or `false` |
 | `string` | Immutable UTF-8 text |
 
-Integer literals default to `integer64`. Float literals default to `float64`.
+Integer literals default to `integer64`. Float literals default to `float64`. The defaults are the same on every target, 32-bit ones included, so a program computes the same numbers and overflows at the same point everywhere. `length` returns an `integer64`, and an index can be any integer type: a negative or too large index fails its bounds check.
 
 The names are whole words (Section 2.5), and a number type always states its size in bits. There is no plain `integer` or `float`, because a second spelling of the same type would break Goal 4.
 
@@ -233,7 +233,7 @@ A custom type's class is the largest class of its fields.
 | Type | Class | Meaning |
 |---|---|---|
 | `array[T, N]` | fixed | N elements, N known at compile time |
-| `list[T]` | growable | Grow-only. `push` adds to the end and returns a reference to the new element. |
+| `list[T]` | growable | Grow-only. `push` adds to the end. |
 | `stack[T]` | growable | Grow and shrink: `push` and `pop`. |
 | `view[T]` | fixed | A read-only window into an array, list, or string. Does not own its data. |
 
@@ -256,7 +256,11 @@ type Order
     list[Item] items
 ```
 
-One `Order` with two items is a single block on a data stack. Reading a `list[Order]` streams through memory in order, which is what CPU caches are built for. The cost: a list whose elements have different sizes can be iterated but not indexed by position (Section 7.5).
+One `Order` with two items is a single block on a data stack. Reading a `list[Order]` streams through memory in order, which is what CPU caches are built for.
+
+A list whose elements differ in size also keeps the position of each element in a second list beside it, so `orders[index]` costs one more read. Its elements can't be replaced, because a replacement could have another size (`L0407`). Iterating reads the elements in order and never uses the positions.
+
+A value held directly by a binding keeps each of its growable fields on a data stack of its own, so each can grow (Section 7.2). Putting the value inside another one, such as a list, lays it out as one block, which copies it once. Inside a list, its growable fields no longer grow.
 
 Indexing starts at 0. Every index is bounds-checked. The compiler removes a check when it can prove the index is in range, for example `for index in range(0, length(items))`.
 
@@ -293,7 +297,7 @@ function area(Shape shape) returns float64
 
 - A `match` has to cover every variant. A missing variant is error `L0401`, and the message lists the missing cases.
 - A plain `Shape` reserves room for its largest variant, so a `list[Shape]` can be indexed and its elements can be overwritten.
-- A `packed Shape` takes exactly the size of the variant it holds. In the example above, a `list[packed Shape]` stores a `Dot` in 1 byte instead of 17. The trade is that a packed list can be iterated but not indexed, and a packed value can't change its variant after it is built.
+- A `packed Shape` takes exactly the size of the variant it holds. In the example above, a `list[packed Shape]` stores a `Dot` in 1 byte instead of 17. The trade is that a packed list can be iterated but not indexed (`L0408`), since it keeps no element positions, and a packed value can't change its variant after it is built.
 
 ## 5. Functions
 
@@ -323,7 +327,7 @@ function main()
     add_item(variable numbers, 7)
 ```
 
-- Return values are built directly in the caller's storage. Returning a `list` never copies it.
+- Return values are built directly in the caller's storage. Returning a `list` never copies it. When the call still reads that storage through an argument, as in `board = step(board)`, the value is built in a temporary first and then copied, so the call never reads its own half-built result.
 - `main` is the entry point. Top-level code can only contain declarations, so the order of program startup is never ambiguous.
 - In edition 0.1, `main` takes no parameters and returns nothing (`L0506`). A program exits with status 0, or 70 when it stops on a runtime error.
 
@@ -337,6 +341,22 @@ function main()
 | `unsigned8(value)` to `unsigned64(value)` | Converts an integer to that unsigned type |
 
 Calling an integer type converts a value to it. A conversion stops the program if the value does not fit the target type. When the value is known while compiling, a value that does not fit is error `L0404` instead. `boolean` and `string` convert nothing: compare a number to get a `boolean`, and interpolate it to get text.
+
+Later phases add these, and until then the compiler rejects each with `L0309`:
+
+| Function | Does | Phase |
+|---|---|---|
+| `length(items)` | The number of elements of an array, list, stack or view, or of bytes in a `string`, as an `integer64` | 2 |
+| `wrapping_add(left, right)`, `wrapping_subtract`, `wrapping_multiply` | Arithmetic that wraps around instead of stopping the program | 2 |
+| `array(value)` | An array with every element set to `value`; its size comes from the declared type | 2 |
+| `bytes(text)` | The UTF-8 bytes of a `string`, as a `view[unsigned8]` | 3 |
+| `slice(items, start, end)` | The elements from `start` up to `end`, without `end`, as a `view`. A slice of a `string` is a `string` that shares storage (Section 3.1); its ends have to fall between characters. | 3 |
+| `list()`, `stack()` | An empty list or stack | 3 |
+| `push(variable items, value)` | Adds `value` to the end of a list or the top of a stack | 3 |
+| `pop(variable items)` | Removes the top of a stack and returns it | 3 |
+| `top(items)` | The top of a stack, left in place | 3 |
+| `filter(items) with name`, `sort(variable items) with left, right` | The elements the block accepts; the elements in the block's order (Section 7.7) | 3 |
+| `pool()`, `insert(variable items, value)`, `remove(variable items, handle)` | An empty pool; a stored value's handle; a freed slot (Section 7.6) | 5 |
 
 The names of built-in functions and types cannot be declared again (`L0207`). No binding or function can be called `print`, `integer32`, `boolean` or `float64`.
 
@@ -372,7 +392,7 @@ for index in range(0, 10)
 
 ## 7. Memory model
 
-This section is the core of the language. Everything else depends on it.
+This section is the core of the language. Everything else depends on it. [The memory model study](memory/README.md) tests it against twelve programs; the rules below include what that study changed.
 
 ### 7.1 Where memory lives
 
@@ -392,7 +412,9 @@ There is no `malloc`, no `new`, and no `free`.
 - When a scope ends, all of its growable values are freed by resetting the bump pointer. That costs one store instruction, whether the scope held one integer list or a million nested orders. There are no destructors and nothing walks the data to free it.
 - Each data stack is reserved as address space up front, and the operating system commits pages only when they are first touched. Unused reservation costs no physical memory.
 - The end of each reservation is a guard page. A program that outgrows its data stack hits the guard page and stops with a clear error. It never overwrites other memory.
-- The compiler assigns stacks statically: two growable values that are live at the same time never share a stack, and values with separate lifetimes reuse one. The runtime only tracks the bump pointers.
+- A growable value grows only while it is on top of its data stack. A `push` to a value that another value may sit above at that point is error `L0704`, and the message names the value above it.
+- The compiler assigns stacks statically: two growable values that are live at the same time never share a stack, and values with separate lifetimes reuse one. The copies of one binding at different depths of a recursion share a data stack, each above the copy of the call before it; a call frees its own before it returns, so the one below is on top again when it grows. A list whose elements differ in size keeps their positions on a data stack of its own (Section 4.5). The runtime only tracks the bump pointers.
+- A data stack reserves address space, not memory. On a 64-bit system each reserves up to 64 GiB. On a 32-bit system, where a process has 2 to 3 GiB in all, a program's data stacks share 1 GiB. The runtime reserves one region for all of them, halving its request until the system grants it, and splits it evenly. A value that outgrows its data stack stops the program with `error: data stack full`.
 
 ### 7.3 When memory is freed
 
@@ -409,14 +431,15 @@ Values on the call stack (integers, floats, fixed arrays) aren't "freed" at all.
 - A `view[T]`, or any other reference, has a **root**: the binding that owns the data it points to. The compiler infers the root. You never write it.
 - A reference can't outlive its root. If it would (by being returned from the root's scope, or stored in something that outlives the root), the program is rejected with error `L0701`. The message names the root and the place the reference escapes to.
 - Functions are specialized based on the roots of their arguments, which is why no lifetime annotations are needed.
-- This is the only reference rule. There are no exclusivity rules: two mutable references to the same data may exist at once. That is safe here because memory never moves while a reference to it lives (Section 4.4) and nothing is freed while its root is in scope.
+- A value can't be replaced while a reference into it is still used, when the replacement could change what its bytes mean: assigning a choice, which can change its variant, assigning a growable value, whose storage is released (Section 7.9), or removing a pool slot. Each is error `L0703`, and the message names the reference and where it is used next. Holding a reference into a `stack` past the next `pop` is the same mistake, `L0702`.
+- These are the only reference rules. There are no exclusivity rules: two mutable references to the same data may exist at once. That is safe because memory never moves while a reference to it lives (Section 4.4), nothing is freed while its root is in scope, and no value changes layout under a reference. Threads share nothing (Section 9), so two references never race.
 
 ### 7.5 Known limitations of this model
 
 These are the costs of having no heap. They are intentional.
 
-- A recursive function can't keep a growable value alive across its own recursive call.
-- A `list` of variable-size elements can be iterated but not indexed.
+- A value can't grow while another value sits above it on its data stack (`L0704`), so nested lists are built in order: an earlier element's list can't take an item that arrives later. Group the input first, or keep the items in one flat list, as `docs/memory/routes.lym` does.
+- The elements of a list whose elements differ in size can't be replaced (`L0407`), and a `packed` list can't be indexed (`L0408`).
 - No closures that escape their defining scope. No function pointers.
 - Whole-program compilation only. No separately compiled libraries in 0.1.
 
@@ -425,15 +448,17 @@ These are the costs of having no heap. They are intentional.
 For graphs, trees, and anything else whose lifetime isn't tied to a scope, use `pool[T]`:
 
 ```lymra
-variable pool[Frog] frogs = pool()
-constant handle = insert(variable frogs, Frog(name = "Kero", age = 3))
-remove(variable frogs, handle)
-get(frogs, handle)   # traps: the handle is stale
+variable pool[Creature] creatures = pool()
+constant handle = insert(variable creatures, Creature(position = 0, health = 3))
+creatures[handle].health = 2
+remove(variable creatures, handle)
+print("{creatures[handle].health}")   # traps: the handle is stale
 ```
 
-- A `handle[T]` is a slot index plus a generation counter.
-- `remove` increments the slot's generation number.
-- `get` compares the handle's generation against the slot's. If they don't match, the program traps.
+- A `handle[T]` is a slot index plus a generation counter. Its root is the pool it came from (Section 7.4): using it with another pool is error `L0705`, and keeping it after its pool ends is `L0701`.
+- `creatures[handle]` reads or changes a slot, as `items[index]` does for a list. Every access checks that the slot exists and that the handle's generation matches the slot's. If not, the program traps.
+- `remove` increments the slot's generation number. Removing a slot while a reference into it is still used is error `L0703`.
+- A pool holds fixed-size values, so every slot has the same size (`L0706`). Text that belongs to pool values goes in a list, and the values keep positions into it.
 
 Without the generation check, a stale handle would silently read whatever value got put into the slot afterward: the right type, the wrong data. Lymra spends one integer comparison per access to turn that silent bug into an immediate, reported failure.
 
@@ -460,6 +485,14 @@ A normal reference is a full 8-byte address. A `link[T, unsigned32]` stores the 
 - Offsets don't depend on where the list sits in memory, so the whole structure can be written to a file in one write and read back in one read.
 - Loading bytes from outside goes through `from_bytes`, which checks every length, variant tag, and link before the data becomes a value. Corrupt or hostile input produces an error, never a wild reference.
 
+### 7.9 Replacing a growable value
+
+`items = new_value` frees the old value and puts the new one in its place.
+
+- When the new value is built from the old one, as in `slots = grown(slots)`, both are alive while it is built. The new value goes on a second data stack and is then moved into place with one copy.
+- When it isn't, as in `pending = list()`, the old value is freed first and the new one is built where it was, with no copy.
+- No reference into the old value can still be used at that point (`L0703`).
+
 ## 8. Errors (open)
 
 Lymra has no exceptions and no stack unwinding. 0.1 hasn't settled the design for recoverable errors. The candidates:
@@ -471,7 +504,7 @@ Option 2 removes the boilerplate that makes people skip error handling. It is al
 
 ## 9. Concurrency (planned, not in 0.1)
 
-Threads share nothing. Each thread has its own data stacks. Threads communicate through typed queues of values that contain no references, so sending a value is a single memory copy. This gets rid of data races by construction, because there's no shared mutable memory in the first place.
+Threads share nothing. Each thread has its own data stacks and its own pools. Threads communicate through typed queues of values that contain no references, and a handle counts as one, so sending a value is a single memory copy. This gets rid of data races by construction, because there's no shared mutable memory in the first place.
 
 ## 10. Modules
 
@@ -533,11 +566,11 @@ The checks are integer overflow, division by zero, a conversion whose value does
 | O1 | Recoverable error handling | Prototype both options in Section 8, then pick using real programs |
 | O2 | Generics syntax for user functions | `function first[Item](view[Item] items) returns Item` |
 | O3 | `match` on `packed` values: can a case bind a reference into the payload? | Yes, read-only |
-| O5 | Integer type defaults on 32-bit targets | Undecided |
 | O6 | Literal syntax for `array` and `list` values | `[1, 2, 3]` |
 | O7 | Bitwise operations | Functions with whole-word names such as `bit_and` and `shift_left`, not symbols |
 | O8 | Calling C: the syntax and rules of `external` declarations | `external function hypot(float64 x, float64 y) returns float64` |
 | O10 | Reading the command line and choosing an exit status | Parameters of `main` and a `returns` type, once the needed types exist |
+| O12 | Reading files and standard input. Every program in the memory model study had to take its input from constants. | Functions in a standard module, settled together with O1, since reading can fail |
 | O11 | Removing the overflow checks that stay. The compiler removes every check its interval analysis proves can never fail. Measured in `bench/results.md`: where that covers a whole loop, Lymra runs at C's speed, and a loop that GCC and Clang turn into a formula finishes in a millisecond instead of 0.6 seconds. The checks that stay, on variables a `while` loop changes and on results of calls, cost up to 1.7 times C's time, about what Rust with overflow checks costs. | Bound `while` loops by repeating the analysis until it settles, and carry facts about parameters and results across calls |
 
 ## 13. Where speed comes from

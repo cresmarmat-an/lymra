@@ -1,0 +1,39 @@
+#!edition 0.1
+
+#[
+    Ranks players by points and prints a numbered report.
+
+    Memory: a `Score` holds its name inline, so `scores` and `lines` hold
+    elements of different sizes. Rule M1 of the study keeps a table of
+    element positions beside such a list, so `scores[left]` and `lines[0]`
+    are allowed, but an element can't be replaced: a replacement could
+    have another size. The scores are therefore never moved; the program
+    sorts a list of positions instead, with a `with` block that reads
+    `scores` from the enclosing function, which a block may do because it
+    can't outlive it.
+]#
+
+type Score
+    string name
+    integer32 points
+
+function main()
+    variable list[Score] scores = list()
+    push(variable scores, Score(name = "Ana", points = 31))
+    push(variable scores, Score(name = "Bo", points = 47))
+    push(variable scores, Score(name = "Cy", points = 12))
+    push(variable scores, Score(name = "Dee", points = 47))
+
+    variable list[integer64] ranking = list()
+    for index in range(0, length(scores))
+        push(variable ranking, index)
+    sort(variable ranking) with left, right
+        scores[left].points > scores[right].points
+
+    variable list[string] lines = list()
+    for place in range(0, length(ranking))
+        constant score = scores[ranking[place]]
+        push(variable lines, "{place + 1}. {score.name}: {score.points}")
+    for line in lines
+        print(line)
+    print("winner: {lines[0]}")

@@ -1,0 +1,53 @@
+#!edition 0.1
+
+#[
+    Shrinks a list of shapes for a few rounds and reports their total area.
+
+    Memory: a plain `Shape` reserves room for its largest variant, so
+    `shapes` holds fixed-size elements that can be indexed and overwritten.
+    Overwriting an element can change its variant. While a `match` case
+    holds a reference into the payload of one variant, overwriting the
+    element with another variant would let that reference read the bytes
+    of the new variant as the old one's fields: memory that never moved and
+    was never freed, read as the wrong type. Rule M3 of the study rejects
+    that with L0703. Here every replacement is computed first and assigned
+    after the `match` has ended, which is the shape M3 asks for.
+]#
+
+choice Shape
+    Circle(float64 radius)
+    Rect(float64 width, float64 height)
+    Dot
+
+function area(Shape shape) returns float64
+    match shape
+        case Circle(radius)
+            return 3.14159 * radius * radius
+        case Rect(width, height)
+            return width * height
+        case Dot
+            return 0.0
+
+function shrunk(Shape shape) returns Shape
+    match shape
+        case Circle(radius)
+            if radius < 1.0
+                return Dot
+            return Circle(radius = radius / 2.0)
+        case Rect(width, height)
+            return Rect(width = width / 2.0, height = height / 2.0)
+        case Dot
+            return Dot
+
+function main()
+    variable list[Shape] shapes = list()
+    push(variable shapes, Circle(radius = 1.5))
+    push(variable shapes, Rect(width = 4.0, height = 2.0))
+    push(variable shapes, Dot)
+    for round in range(0, 3)
+        for index in range(0, length(shapes))
+            shapes[index] = shrunk(shapes[index])
+        variable float64 total = 0.0
+        for shape in shapes
+            total = total + area(shape)
+        print("round {round}: total area {total}")

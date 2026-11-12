@@ -1,0 +1,53 @@
+#!edition 0.1
+
+#[
+    Reads a nested list such as `(1(23)4(5(67)))` into a tree and prints
+    it depth first, one node per line.
+
+    Memory: nodes live in one list and name each other by position: first
+    child, next sibling, last child. A tree of any shape fits in a list of
+    fixed-size records, and the positions stay valid because the list
+    never moves. The groups still open while reading sit on a `stack`,
+    which is the only value that shrinks. Printing recurses, but keeps no
+    growable value alive across its calls, so it fits today's rules.
+]#
+
+constant string source = "(1(23)4(5(67)))"
+
+type Node
+    integer64 label
+    integer64 first_child
+    integer64 last_child
+    integer64 next_sibling
+
+function attach(variable list[Node] nodes, integer64 parent, integer64 child)
+    if nodes[parent].first_child == -1
+        nodes[parent].first_child = child
+    else
+        nodes[nodes[parent].last_child].next_sibling = child
+    nodes[parent].last_child = child
+
+function show(list[Node] nodes, integer64 index, integer64 depth)
+    print("depth {depth}: {nodes[index].label}")
+    variable child = nodes[index].first_child
+    while child != -1
+        show(nodes, child, depth + 1)
+        child = nodes[child].next_sibling
+
+function main()
+    variable list[Node] nodes = list()
+    variable stack[integer64] open = stack()
+    for character in bytes(source)
+        if character == 41
+            constant _ = pop(variable open)
+        else
+            variable integer64 label = 0
+            if character != 40
+                label = integer64(character) - 48
+            push(variable nodes, Node(label = label, first_child = -1, last_child = -1, next_sibling = -1))
+            constant created = length(nodes) - 1
+            if length(open) > 0
+                attach(variable nodes, top(open), created)
+            if character == 40
+                push(variable open, created)
+    show(nodes, 0, 0)

@@ -1,0 +1,33 @@
+#!edition 0.1
+
+#[
+    Computes the mean, the spread and the extremes of a series of samples.
+
+    Memory: one list of fixed-size numbers, read in order. This is the
+    common case, and the model costs it nothing: the list grows by moving
+    a pointer, is read straight through the cache, and is freed by one
+    store when `main` ends.
+]#
+
+function main()
+    variable list[float64] samples = list()
+    variable float64 value = 0.5
+    for _ in range(0, 1000)
+        value = value * 3.7 * (1.0 - value)
+        push(variable samples, value)
+
+    variable float64 sum = 0.0
+    variable float64 smallest = samples[0]
+    variable float64 largest = samples[0]
+    for sample in samples
+        sum = sum + sample
+        if sample < smallest
+            smallest = sample
+        if sample > largest
+            largest = sample
+    constant mean = sum / 1000.0
+
+    variable float64 squares = 0.0
+    for sample in samples
+        squares = squares + (sample - mean) * (sample - mean)
+    print("mean {mean}, variance {squares / 1000.0}, from {smallest} to {largest}")

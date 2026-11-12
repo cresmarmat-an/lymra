@@ -1,0 +1,57 @@
+#!edition 0.1
+
+#[
+    Splits a line of arithmetic into tokens.
+
+    Memory: `source` is static data and never moves. `tokens` is the only
+    growable value, so it grows at the top of its own data stack. A token
+    records where its text lies in `source` instead of holding a copy, so
+    every token has the same size and the list can be indexed.
+]#
+
+constant string source = "total = (price + 12) * count - 3"
+
+choice Kind
+    Number
+    Word
+    Symbol
+
+type Token
+    Kind kind
+    integer64 start
+    integer64 end
+
+function is_digit(unsigned8 character) returns boolean
+    return character >= 48 and character <= 57
+
+function is_letter(unsigned8 character) returns boolean
+    return (character >= 97 and character <= 122) or character == 95
+
+function tokenize(view[unsigned8] text) returns list[Token]
+    variable list[Token] tokens = list()
+    variable integer64 index = 0
+    while index < length(text)
+        constant character = text[index]
+        if character == 32
+            index = index + 1
+        else if is_digit(character)
+            constant start = index
+            while index < length(text) and is_digit(text[index])
+                index = index + 1
+            push(variable tokens, Token(kind = Number, start = start, end = index))
+        else if is_letter(character)
+            constant start = index
+            while index < length(text) and is_letter(text[index])
+                index = index + 1
+            push(variable tokens, Token(kind = Word, start = start, end = index))
+        else
+            push(variable tokens, Token(kind = Symbol, start = index, end = index + 1))
+            index = index + 1
+    return tokens
+
+function main()
+    constant tokens = tokenize(bytes(source))
+    for token in tokens
+        print("{token.start} to {token.end}: {slice(source, token.start, token.end)}")
+    constant third = tokens[2]
+    print("{length(tokens)} tokens; the third is {slice(source, third.start, third.end)}")

@@ -1,0 +1,45 @@
+#!edition 0.1
+
+#[
+    Runs Conway's Game of Life on a small board that wraps at its edges.
+
+    Memory: the board is a fixed-size array of arrays, so it lives on the
+    call stack and costs nothing to free. `board = step(board)` reads the
+    old board while the new one is built. The compiler builds a returned
+    value directly in the caller's storage, so here it has to build into a
+    temporary first: building over `board` while `step` still reads it
+    would mix old and new cells (finding H3 of the study). A board many
+    times larger would give `step` a frame bigger than the stack's guard
+    page, which is why phase 2 adds stack probes together with arrays.
+]#
+
+function step(array[array[boolean, 16], 8] board) returns array[array[boolean, 16], 8]
+    variable array[array[boolean, 16], 8] next = board
+    for row in range(0, 8)
+        for column in range(0, 16)
+            variable integer32 neighbours = 0
+            for row_offset in range(-1, 2)
+                for column_offset in range(-1, 2)
+                    if row_offset != 0 or column_offset != 0
+                        constant near_row = (row + row_offset + 8) % 8
+                        constant near_column = (column + column_offset + 16) % 16
+                        if board[near_row][near_column]
+                            neighbours = neighbours + 1
+            next[row][column] = neighbours == 3 or (board[row][column] and neighbours == 2)
+    return next
+
+function main()
+    variable array[array[boolean, 16], 8] board = array(array(false))
+    board[1][2] = true
+    board[2][3] = true
+    board[3][1] = true
+    board[3][2] = true
+    board[3][3] = true
+    for _ in range(0, 4)
+        board = step(board)
+    variable integer32 alive = 0
+    for row in board
+        for cell in row
+            if cell
+                alive = alive + 1
+    print("{alive} cells alive after 4 generations")

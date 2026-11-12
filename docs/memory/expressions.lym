@@ -1,0 +1,101 @@
+#!edition 0.1
+
+#[
+    Parses arithmetic with calls, such as `m(1,2*3,(4+5)-2)+6`, into a tree
+    kept in one list, then evaluates it. A call `m(...)` takes the largest
+    of its arguments.
+
+    Memory: the tree lives in `nodes`, a list that only grows, and a node
+    names its children by their position in it. Positions stay valid
+    because the list never moves. `parse_atom` keeps the arguments it has
+    found in `found` while it parses the next one, which calls `parse_sum`
+    and so `parse_atom` again: a growable value alive across a recursive
+    call. Today's section 7.5 forbids that. Rule M2 of the study allows it,
+    because the inner calls have freed their own lists before the outer
+    list grows again.
+]#
+
+constant string source = "m(1,2*3,(4+5)-2)+6"
+
+choice Node
+    Number(integer64 value)
+    Binary(unsigned8 operator, integer64 left, integer64 right)
+    Call(integer64 first_argument, integer64 argument_count)
+
+function expect(view[unsigned8] text, variable integer64 position, unsigned8 wanted)
+    assert text[position] == wanted
+    position = position + 1
+
+function parse_atom(view[unsigned8] text, variable integer64 position, variable list[Node] nodes, variable list[integer64] arguments) returns integer64
+    constant character = text[position]
+    position = position + 1
+    if character >= 48 and character <= 57
+        push(variable nodes, Number(value = integer64(character) - 48))
+        return length(nodes) - 1
+    if character == 40
+        constant inner = parse_sum(text, variable position, variable nodes, variable arguments)
+        expect(text, variable position, 41)
+        return inner
+    expect(text, variable position, 40)
+    variable list[integer64] found = list()
+    push(variable found, parse_sum(text, variable position, variable nodes, variable arguments))
+    while text[position] == 44
+        position = position + 1
+        push(variable found, parse_sum(text, variable position, variable nodes, variable arguments))
+    expect(text, variable position, 41)
+    constant first = length(arguments)
+    for argument in found
+        push(variable arguments, argument)
+    push(variable nodes, Call(first_argument = first, argument_count = length(found)))
+    return length(nodes) - 1
+
+function parse_product(view[unsigned8] text, variable integer64 position, variable list[Node] nodes, variable list[integer64] arguments) returns integer64
+    variable left = parse_atom(text, variable position, variable nodes, variable arguments)
+    while position < length(text) and (text[position] == 42 or text[position] == 47)
+        constant operator = text[position]
+        position = position + 1
+        constant right = parse_atom(text, variable position, variable nodes, variable arguments)
+        push(variable nodes, Binary(operator = operator, left = left, right = right))
+        left = length(nodes) - 1
+    return left
+
+function parse_sum(view[unsigned8] text, variable integer64 position, variable list[Node] nodes, variable list[integer64] arguments) returns integer64
+    variable left = parse_product(text, variable position, variable nodes, variable arguments)
+    while position < length(text) and (text[position] == 43 or text[position] == 45)
+        constant operator = text[position]
+        position = position + 1
+        constant right = parse_product(text, variable position, variable nodes, variable arguments)
+        push(variable nodes, Binary(operator = operator, left = left, right = right))
+        left = length(nodes) - 1
+    return left
+
+function evaluate(list[Node] nodes, list[integer64] arguments, integer64 index) returns integer64
+    match nodes[index]
+        case Number(value)
+            return value
+        case Binary(operator, left, right)
+            constant first = evaluate(nodes, arguments, left)
+            constant second = evaluate(nodes, arguments, right)
+            if operator == 43
+                return first + second
+            if operator == 45
+                return first - second
+            if operator == 42
+                return first * second
+            return first / second
+        case Call(first_argument, argument_count)
+            variable largest = evaluate(nodes, arguments, arguments[first_argument])
+            for offset in range(1, argument_count)
+                constant value = evaluate(nodes, arguments, arguments[first_argument + offset])
+                if value > largest
+                    largest = value
+            return largest
+
+function main()
+    constant text = bytes(source)
+    variable list[Node] nodes = list()
+    variable list[integer64] arguments = list()
+    variable integer64 position = 0
+    constant root = parse_sum(text, variable position, variable nodes, variable arguments)
+    assert position == length(text)
+    print("{length(nodes)} nodes, value {evaluate(nodes, arguments, root)}")

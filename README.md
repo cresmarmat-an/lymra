@@ -93,6 +93,7 @@ error: integer overflow
 ## Documents
 
 - [Language specification](docs/spec.md)
+- [Memory model study](docs/memory/README.md): the memory model tested against twelve programs
 - [Error codes](docs/errors/README.md)
 - Examples: [hello](examples/hello.lym), [overflow](examples/overflow.lym)
 - [Brand assets](branding/README.md)
@@ -119,6 +120,7 @@ error: integer overflow
 | `compiler/tests/overflow_proofs` | Thousands of generated programs run in an exact interpreter, to catch a check removed by a wrong proof |
 | `bench` | The same programs in Lymra, C and Rust, and the runner that times them |
 | `docs/errors` | One page per error code, embedded in the compiler for `lymra explain` |
+| `docs/memory` | The memory model study: twelve programs written against the spec, and what they changed in it |
 
 ## Development
 

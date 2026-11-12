@@ -1,0 +1,69 @@
+#!edition 0.1
+
+#[
+    Counts how often each word appears in a text.
+
+    Memory: the spec has no map type, so the table is written here: open
+    addressing over a list of fixed-size slots. A slot names its word by
+    position in `text`, which is static data and outlives the table. When
+    the table gets too full, `slots = grown(slots)` builds a bigger table
+    from the old one. The old table is still read while the new one is
+    built, so the two sit on two data stacks, and the assignment moves the
+    new table into place with one copy (rule M5 of the study). No reference
+    into `slots` is alive at that moment, which rule M3 requires.
+]#
+
+constant string text = "the cat and the dog and the bird saw the cat"
+
+type Slot
+    boolean used
+    integer64 start
+    integer64 end
+    integer64 count
+
+function hash(view[unsigned8] word) returns unsigned64
+    variable unsigned64 value = 0
+    for character in word
+        value = wrapping_add(wrapping_multiply(value, 31), unsigned64(character))
+    return value
+
+# Where the word `text[start..end]` sits in `slots`, or the empty slot where it belongs.
+function slot_for(list[Slot] slots, integer64 start, integer64 end) returns integer64
+    constant word = slice(text, start, end)
+    variable index = integer64(hash(bytes(word)) % unsigned64(length(slots)))
+    while slots[index].used and slice(text, slots[index].start, slots[index].end) != word
+        index = (index + 1) % length(slots)
+    return index
+
+function empty_table(integer64 size) returns list[Slot]
+    variable list[Slot] slots = list()
+    for _ in range(0, size)
+        push(variable slots, Slot(used = false, start = 0, end = 0, count = 0))
+    return slots
+
+function grown(list[Slot] slots) returns list[Slot]
+    variable list[Slot] bigger = empty_table(length(slots) * 2)
+    for slot in slots
+        if slot.used
+            bigger[slot_for(bigger, slot.start, slot.end)] = slot
+    return bigger
+
+function main()
+    constant characters = bytes(text)
+    variable list[Slot] slots = empty_table(4)
+    variable integer64 used = 0
+    variable integer64 start = 0
+    for position in range(0, length(characters) + 1)
+        if position == length(characters) or characters[position] == 32
+            if position > start
+                if (used + 1) * 4 > length(slots) * 3
+                    slots = grown(slots)
+                constant index = slot_for(slots, start, position)
+                if not slots[index].used
+                    slots[index] = Slot(used = true, start = start, end = position, count = 0)
+                    used = used + 1
+                slots[index].count = slots[index].count + 1
+            start = position + 1
+    for slot in slots
+        if slot.used
+            print("{slice(text, slot.start, slot.end)}: {slot.count}")

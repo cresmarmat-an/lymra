@@ -1,0 +1,52 @@
+#!edition 0.1
+
+#[
+    Moves creatures along a line for a few frames. Creatures that meet
+    lose health, the ones without health left are removed, and the rest
+    carry on.
+
+    Memory: creatures live in a pool, because they leave in any order. A
+    handle names a slot, and every access compares the handle's generation
+    with the slot's, so a handle to a removed creature traps instead of
+    reading whatever took its slot. Under rule M4 of the study a handle is
+    rooted in its pool like a reference, so it can't be used with another
+    pool. Each frame's `hits` and `survivors` sit on data stacks and are
+    freed by one store when the frame ends. `living = survivors` replaces a
+    growable value, which costs one copy of the handles (rule M5).
+]#
+
+type Creature
+    integer32 position
+    integer32 speed
+    integer32 health
+
+type Hit
+    handle[Creature] first
+    handle[Creature] second
+
+function main()
+    variable pool[Creature] creatures = pool()
+    variable list[handle[Creature]] living = list()
+    for index in range(0, 6)
+        constant start = integer32(index) * 10
+        constant speed = 3 - integer32(index % 3)
+        push(variable living, insert(variable creatures, Creature(position = start, speed = speed, health = 2)))
+    for frame in range(0, 5)
+        for creature in living
+            creatures[creature].position = creatures[creature].position + creatures[creature].speed
+        variable list[Hit] hits = list()
+        for first in range(0, length(living))
+            for second in range(first + 1, length(living))
+                if creatures[living[first]].position == creatures[living[second]].position
+                    push(variable hits, Hit(first = living[first], second = living[second]))
+        for hit in hits
+            creatures[hit.first].health = creatures[hit.first].health - 1
+            creatures[hit.second].health = creatures[hit.second].health - 1
+        variable list[handle[Creature]] survivors = list()
+        for creature in living
+            if creatures[creature].health > 0
+                push(variable survivors, creature)
+            else
+                remove(variable creatures, creature)
+        living = survivors
+        print("frame {frame}: {length(hits)} hits, {length(living)} creatures left")

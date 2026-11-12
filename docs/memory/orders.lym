@@ -1,0 +1,70 @@
+#!edition 0.1
+
+#[
+    Groups order lines into orders and reports the order with the most
+    items.
+
+    Memory: an `Order` holds its customer's name and its items inline, so
+    `orders` is one block of bytes that streams through the cache. Each
+    order's items are gathered in `pending` and copied into the order once
+    it is complete: only the newest value on a data stack can grow, so an
+    earlier order's items can't take a late arrival. The lines therefore
+    come sorted by order number. Lines in any order would need the flat
+    layout of `routes.lym`.
+
+    `orders[index]` indexes a list whose elements differ in size. Today's
+    spec forbids it (section 4.5). Rule M1 of the study allows it through
+    a table of element positions kept beside the list.
+]#
+
+type Item
+    string sku
+    unsigned32 quantity
+
+type Order
+    unsigned64 id
+    string customer
+    list[Item] items
+
+type Line
+    unsigned64 order
+    string customer
+    string sku
+    unsigned32 quantity
+
+function group(list[Line] lines) returns list[Order]
+    variable list[Order] orders = list()
+    variable list[Item] pending = list()
+    variable unsigned64 current = 0
+    variable string customer = ""
+    for line in lines
+        if line.order != current and length(pending) > 0
+            push(variable orders, Order(id = current, customer = customer, items = pending))
+            pending = list()
+        current = line.order
+        customer = line.customer
+        push(variable pending, Item(sku = line.sku, quantity = line.quantity))
+    if length(pending) > 0
+        push(variable orders, Order(id = current, customer = customer, items = pending))
+    return orders
+
+function quantity_of(Order order) returns unsigned32
+    variable unsigned32 total = 0
+    for item in order.items
+        total = total + item.quantity
+    return total
+
+function main()
+    variable list[Line] lines = list()
+    push(variable lines, Line(order = 1, customer = "Ana", sku = "pen", quantity = 3))
+    push(variable lines, Line(order = 1, customer = "Ana", sku = "ink", quantity = 1))
+    push(variable lines, Line(order = 2, customer = "Bo", sku = "paper", quantity = 12))
+    push(variable lines, Line(order = 3, customer = "Cy", sku = "pen", quantity = 2))
+    push(variable lines, Line(order = 3, customer = "Cy", sku = "clip", quantity = 9))
+    constant orders = group(lines)
+    variable integer64 largest = 0
+    for index in range(1, length(orders))
+        if quantity_of(orders[index]) > quantity_of(orders[largest])
+            largest = index
+    constant winner = orders[largest]
+    print("order {winner.id} from {winner.customer} has {quantity_of(winner)} items")

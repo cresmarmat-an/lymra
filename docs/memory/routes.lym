@@ -1,0 +1,70 @@
+#!edition 0.1
+
+#[
+    Finds the fewest hops from one stop of a network to every other, from
+    a list of connections given in any order.
+
+    Memory: a list of lists, one inner list per stop, would have to be
+    built stop by stop, because only the newest inner list sits on top of
+    its data stack and can grow. The connections arrive in any order, so
+    the program counts each stop's connections first and then fills one
+    flat list in place. Graph libraries call this layout compressed sparse
+    rows, and it is the fastest one to search anyway. Every list here holds
+    fixed-size numbers, so all of them can be indexed.
+]#
+
+constant integer64 stop_count = 6
+
+type Connection
+    integer64 source
+    integer64 target
+
+function connect(variable list[Connection] connections, integer64 first, integer64 second)
+    push(variable connections, Connection(source = first, target = second))
+    push(variable connections, Connection(source = second, target = first))
+
+function main()
+    variable list[Connection] connections = list()
+    connect(variable connections, 4, 5)
+    connect(variable connections, 0, 1)
+    connect(variable connections, 2, 4)
+    connect(variable connections, 1, 2)
+    connect(variable connections, 0, 3)
+    connect(variable connections, 3, 4)
+
+    # Where the neighbours of each stop begin in `neighbours`, with one more entry for the end.
+    variable list[integer64] starts = list()
+    for _ in range(0, stop_count + 1)
+        push(variable starts, 0)
+    for connection in connections
+        starts[connection.source + 1] = starts[connection.source + 1] + 1
+    for stop in range(1, stop_count + 1)
+        starts[stop] = starts[stop] + starts[stop - 1]
+
+    variable list[integer64] neighbours = list()
+    variable list[integer64] filled = list()
+    for _ in range(0, length(connections))
+        push(variable neighbours, 0)
+    for stop in range(0, stop_count)
+        push(variable filled, starts[stop])
+    for connection in connections
+        neighbours[filled[connection.source]] = connection.target
+        filled[connection.source] = filled[connection.source] + 1
+
+    variable list[integer64] hops = list()
+    for _ in range(0, stop_count)
+        push(variable hops, -1)
+    variable list[integer64] queue = list()
+    push(variable queue, 0)
+    hops[0] = 0
+    variable integer64 head = 0
+    while head < length(queue)
+        constant stop = queue[head]
+        head = head + 1
+        for slot in range(starts[stop], starts[stop + 1])
+            constant next = neighbours[slot]
+            if hops[next] == -1
+                hops[next] = hops[stop] + 1
+                push(variable queue, next)
+    for stop in range(0, stop_count)
+        print("stop {stop}: {hops[stop]} hops")
