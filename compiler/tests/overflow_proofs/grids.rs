@@ -171,13 +171,13 @@ fn accumulation_program(
     let name = ty.name();
     let body = match shape {
         LoopShape::Plain => format!(
-            "    for _ in range(to_{name}(0), {trips})\n        total = total {arithmetic} {step}\n"
+            "    for _ in range({name}(0), {trips})\n        total = total {arithmetic} {step}\n"
         ),
         LoopShape::Continue => format!(
-            "    for index in range(to_{name}(0), {trips})\n        if index < {trips}\n            total = total {arithmetic} {step}\n            continue\n        total = total {arithmetic} 1\n"
+            "    for index in range({name}(0), {trips})\n        if index < {trips}\n            total = total {arithmetic} {step}\n            continue\n        total = total {arithmetic} 1\n"
         ),
         LoopShape::Break => format!(
-            "    for index in range(to_{name}(0), {trips})\n        total = total {arithmetic} 1\n        if index == {}\n            total = total {arithmetic} {step}\n            break\n",
+            "    for index in range({name}(0), {trips})\n        total = total {arithmetic} 1\n        if index == {}\n            total = total {arithmetic} {step}\n            break\n",
             trips - 1
         ),
     };
@@ -207,7 +207,7 @@ pub fn counted_by_input() -> Vec<Probe> {
                     "\
 function {PROBE}({name} input)
     variable {name} total = {}
-    for _ in range(to_{name}(0), input)
+    for _ in range({name}(0), input)
         total = total {arithmetic} 1
     print(\"{{total}}\")
 

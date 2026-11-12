@@ -216,7 +216,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
 
     /// An assignment to a name that is not a local: undeclared, a top-level constant, or a function.
     fn report_assignment_to_unknown(&mut self, name: &'src str, span: Span) -> ErrorReported {
-        if self.globals.contains_key(name) || super::BUILT_IN_FUNCTIONS.contains(&name) {
+        if self.globals.contains_key(name) || super::BuiltIn::of(name).is_some() {
             return self.report_change_to_global(name, span);
         }
         let candidates: Vec<&str> = self

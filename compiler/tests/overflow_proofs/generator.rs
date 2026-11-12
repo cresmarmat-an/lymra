@@ -322,7 +322,7 @@ impl Writer {
         };
         // The conversion gives the range the program's type; two plain literals would make it `integer64`.
         let ty = self.ty.name();
-        self.line(&format!("for {name} in range(to_{ty}({start}), {end})"));
+        self.line(&format!("for {name} in range({ty}({start}), {end})"));
         self.depth += 1;
         // Read the loop variable first, so it is never unused.
         let target = self.random.pick(&self.variables).clone();

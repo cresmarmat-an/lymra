@@ -32,23 +32,37 @@ use scope::{FunctionScope, LocalKind};
 
 type CheckResult<T> = Result<T, ErrorReported>;
 
-/// The built-in functions of phase 1. Their names cannot be declared again.
-const BUILT_IN_FUNCTIONS: [&str; 10] = [
-    "print",
-    "range",
-    "to_integer8",
-    "to_integer16",
-    "to_integer32",
-    "to_integer64",
-    "to_unsigned8",
-    "to_unsigned16",
-    "to_unsigned32",
-    "to_unsigned64",
-];
+/// The built-in functions of phase 1.
+const BUILT_IN_FUNCTIONS: [&str; 2] = ["print", "range"];
 
-/// The integer type a conversion function such as `to_integer32` converts to.
-fn conversion_target(name: &str) -> Option<IntegerType> {
-    name.strip_prefix("to_").and_then(IntegerType::from_name)
+/// Built-in types that are not integers. Floating-point types arrive in phase 2, but their names are taken already.
+const OTHER_TYPE_NAMES: [&str; 4] = ["boolean", "string", "float32", "float64"];
+
+/// What a name the language itself defines stands for. No declaration can take such a name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BuiltIn {
+    Function,
+    /// A type. Calling an integer type, as in `integer32(count)`, converts a value to it.
+    Type,
+}
+
+impl BuiltIn {
+    fn of(name: &str) -> Option<BuiltIn> {
+        if BUILT_IN_FUNCTIONS.contains(&name) {
+            Some(BuiltIn::Function)
+        } else if IntegerType::from_name(name).is_some() || OTHER_TYPE_NAMES.contains(&name) {
+            Some(BuiltIn::Type)
+        } else {
+            None
+        }
+    }
+
+    fn noun(self) -> &'static str {
+        match self {
+            BuiltIn::Function => "function",
+            BuiltIn::Type => "type",
+        }
+    }
 }
 
 /// The name that declares a binding nobody reads.
@@ -216,8 +230,8 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         declaration_failed: bool,
     ) -> CheckResult<ir::LocalId> {
         if name.text != DISCARD {
-            if BUILT_IN_FUNCTIONS.contains(&name.text) {
-                return Err(self.report(errors::built_in_name(name.text, name.span)));
+            if let Some(built_in) = BuiltIn::of(name.text) {
+                return Err(self.report(errors::built_in_name(name.text, built_in, name.span)));
             }
             if let Some(previous) = self.visible_declaration(name.text) {
                 return Err(self.report(errors::already_declared(name.text, name.span, previous)));
@@ -244,10 +258,21 @@ impl<'src, 'ast> Checker<'src, 'ast> {
      * not also make it look unused.
      */
     fn report_unknown_name(&mut self, name: &str, span: Span) -> ErrorReported {
+        self.report_unknown(name, span, &[])
+    }
+
+    /// Reports a called name that resolves to nothing. Calling an integer type converts to it, so those are suggested too.
+    fn report_unknown_callee(&mut self, name: &str, span: Span) -> ErrorReported {
+        self.report_unknown(name, span, &IntegerType::ALL.map(IntegerType::name))
+    }
+
+    /// Reports an unknown name, suggesting the closest of the visible names, the built-in functions and `more`.
+    fn report_unknown(&mut self, name: &str, span: Span, more: &[&'src str]) -> ErrorReported {
         let locals = self.scope.iter().flat_map(|scope| scope.visible_names());
         let candidates = locals
             .chain(self.globals.keys().copied())
-            .chain(BUILT_IN_FUNCTIONS);
+            .chain(BUILT_IN_FUNCTIONS)
+            .chain(more.iter().copied());
         let suggestion = similarity::closest_match(name, candidates);
         if let Some(intended) = suggestion {
             self.mark_name_read(intended);

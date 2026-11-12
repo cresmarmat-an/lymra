@@ -9,11 +9,13 @@
 
 use super::errors::{self, described};
 use super::features::Feature;
+use super::items::is_sized_integer_name;
 use super::scope::{Local, LocalKind};
 use super::values::{self, FoldError, LiteralError};
-use super::{BUILT_IN_FUNCTIONS, CheckResult, Checker, DISCARD, Global, conversion_target};
+use super::{BuiltIn, CheckResult, Checker, DISCARD, Global};
 use crate::ast::{self, ArgumentKind, BinaryOperator, UnaryOperator};
 use crate::diagnostics::{Diagnostic, ErrorReported, Help};
+use crate::foreign_types::translate_type;
 use crate::ir::{
     self, ArithmeticOperator, ComparisonOperator, IntegerType, LogicOperator, Type, Value,
 };
@@ -222,12 +224,13 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 })
             }
             Some(Global::Function(_)) => Err(self.report(errors::function_as_value(name, span))),
-            None if BUILT_IN_FUNCTIONS.contains(&name) => {
-                Err(self.report(errors::function_as_value(name, span)))
-            }
-            None => match Feature::future_function(name) {
-                Some(feature) => Err(self.report(feature.diagnostic(span))),
-                None => Err(self.report_unknown_name(name, span)),
+            None => match BuiltIn::of(name) {
+                Some(BuiltIn::Function) => Err(self.report(errors::function_as_value(name, span))),
+                Some(BuiltIn::Type) => Err(self.report(errors::type_as_value(name, span))),
+                None => match Feature::future_function(name) {
+                    Some(feature) => Err(self.report(feature.diagnostic(span))),
+                    None => Err(self.report_unknown_name(name, span)),
+                },
             },
         }
     }
@@ -573,34 +576,52 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             Some(Global::Constant(_)) => {
                 Err(self.report(errors::not_a_function(name, callee.span)))
             }
-            None if conversion_target(name).is_some() => {
-                let target = conversion_target(name).ok_or(ErrorReported)?;
-                self.check_conversion(target, name, call, span)
-            }
-            None => match name {
-                "print" => self.check_print(call, span),
-                "range" => {
-                    self.mark_argument_reads(&call.arguments);
-                    Err(self.report(Feature::RangeValues.diagnostic(span)))
-                }
-                // A `type` or `choice` of a later phase is already reported where it is declared.
-                _ if self.unavailable_types.contains(name) => {
-                    self.mark_argument_reads(&call.arguments);
-                    Err(ErrorReported)
-                }
-                _ => {
-                    self.mark_argument_reads(&call.arguments);
-                    match Feature::future_function(name) {
-                        Some(feature) => Err(self.report(feature.diagnostic(callee.span))),
-                        None => Err(self.report_unknown_name(name, callee.span)),
-                    }
-                }
-            },
+            None => self.check_undeclared_call(name, call, span),
         }
     }
 
     /**
-     * Checks a conversion such as `to_unsigned8(count)`. It is checked at
+     * A call to a name the file does not declare: a built-in function, a
+     * conversion such as `integer32(count)`, or a mistake that gets the
+     * spelling it most likely meant.
+     */
+    fn check_undeclared_call(
+        &mut self,
+        name: &'src str,
+        call: &ast::Call<'src>,
+        span: Span,
+    ) -> CheckResult<CheckedCall<'src>> {
+        if let Some(target) = IntegerType::from_name(name) {
+            return self.check_conversion(target, name, call, span);
+        }
+        if name == "print" {
+            return self.check_print(call, span);
+        }
+        self.mark_argument_reads(&call.arguments);
+        // A `type` or `choice` of a later phase is already reported where it is declared.
+        if self.unavailable_types.contains(name) {
+            return Err(ErrorReported);
+        }
+        let callee = call.callee.span;
+        let diagnostic = match name {
+            "range" => Feature::RangeValues.diagnostic(span),
+            "boolean" | "string" => errors::no_conversion(name, callee),
+            "integer" | "unsigned" => errors::sizeless_integer(name, callee),
+            _ if is_sized_integer_name(name) => errors::unsupported_integer_size(name, callee),
+            _ => {
+                let later = Feature::future_function(name).or_else(|| Feature::future_type(name));
+                match (later, translate_type(name)) {
+                    (Some(feature), _) => feature.diagnostic(callee),
+                    (None, Some(translation)) => translation.diagnostic(name, callee),
+                    (None, None) => return Err(self.report_unknown_callee(name, callee)),
+                }
+            }
+        };
+        Err(self.report(diagnostic))
+    }
+
+    /**
+     * Checks a conversion such as `unsigned8(count)`. It is checked at
      * run time only when some value of the operand's type does not fit the
      * target type; a known value is converted now.
      */
@@ -858,11 +879,13 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     help,
                 ))
             }
-            Some(Global::Function(_)) => self.report(errors::function_assigned(name, span)),
-            None if BUILT_IN_FUNCTIONS.contains(&name) => {
-                self.report(errors::function_assigned(name, span))
+            Some(Global::Function(_)) => {
+                self.report(errors::not_assignable(name, "function", span))
             }
-            None => self.report_unknown_name(name, span),
+            None => match BuiltIn::of(name) {
+                Some(built_in) => self.report(errors::not_assignable(name, built_in.noun(), span)),
+                None => self.report_unknown_name(name, span),
+            },
         }
     }
 

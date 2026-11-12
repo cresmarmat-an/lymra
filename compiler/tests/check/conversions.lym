@@ -1,16 +1,25 @@
 constant integer64 large = 1_000
 
-function to_integer32()
+function integer32()
     return
 
 function main()
     constant integer64 count = 3
     constant unsigned8 small = count
     constant boolean flag = true
-    print("{to_integer32()} {to_integer32(1, 2)}")
-    print("{to_unsigned8(flag)}")
-    print("{to_unsigned8(300)}")
-    print("{to_unsigned8(large)}")
-    print("{to_unsigned8(variable count)}")
+    print("{integer32()} {integer32(1, 2)}")
+    print("{unsigned8(flag)}")
+    print("{unsigned8(300)}")
+    print("{unsigned8(large)}")
+    print("{unsigned8(variable count)}")
     constant mixed = small + count
     print("{mixed}")
+
+    # A type is not a value, and only integer types convert one.
+    constant size = integer32
+    print("{boolean(count)} {string(count)}")
+    print("{integer(count)} {integer128(count)} {float64(count)}")
+    print("{int(count)} {i32(count)} {integr32(count)}")
+    variable integer64 boolean = 1
+    integer32 = 5
+    print("{size}")

@@ -1,11 +1,40 @@
 //! Type names from other languages, and the Lymra type each one stands for.
 
+use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
+use crate::source::Span;
+
 /// The Lymra type a foreign type name stands for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Translation {
     pub lymra: &'static str,
     /// False for a name such as `int`, whose size depends on the language it comes from.
     pub is_exact: bool,
+}
+
+impl Translation {
+    /// The error for `found`, a foreign spelling of this type, with the Lymra spelling as the fix.
+    pub(crate) fn diagnostic(self, found: &str, span: Span) -> Diagnostic {
+        let lymra = self.lymra;
+        let (label, help) = if self.is_exact {
+            (
+                format!("Lymra spells this `{lymra}`"),
+                format!("write `{lymra}`"),
+            )
+        } else {
+            // Every default translation is the 64-bit type, so the 32-bit one is the other size to name.
+            let other_size = lymra.replace("64", "32");
+            (
+                "a Lymra number type states its size".to_owned(),
+                format!("write `{lymra}`, or another size such as `{other_size}`"),
+            )
+        };
+        Diagnostic::new(
+            ErrorCode::L0305,
+            format!("`{found}` is not a Lymra type"),
+            Label::new(span, label),
+            Help::replace(help, span, lymra),
+        )
+    }
 }
 
 /**

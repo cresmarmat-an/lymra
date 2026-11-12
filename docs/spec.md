@@ -191,7 +191,7 @@ The names are whole words (Section 2.5), and a number type always states its siz
 
 Type rules:
 
-- **No conversions behind your back.** A value never changes type by itself. Mixing `integer64` and `unsigned8` in one operation, passing one where the other is expected, or using a number as a condition is error `L0402`. Convert explicitly with `to_unsigned8(count)` and its siblings (Section 5.1). A conversion that could lose the value is checked: if the value does not fit, the program stops with a runtime error. A conversion that cannot fail, such as `unsigned8` to `integer64`, costs nothing.
+- **No conversions behind your back.** A value never changes type by itself. Mixing `integer64` and `unsigned8` in one operation, passing one where the other is expected, or using a number as a condition is error `L0402`. Convert explicitly by calling the type, as in `unsigned8(count)` (Section 5.1). Unlike a cast in C or a conversion in Go, a conversion never cuts a value down to fit: if the value does not fit, the program stops with a runtime error. A conversion that cannot fail, such as `unsigned8` to `integer64`, costs nothing.
 - **Literals take the type of their place.** An integer literal has no type of its own. It takes the type its context asks for, such as a declared type or the other side of an operator, and `integer64` when nothing asks. It has to fit (`L0404`). Arithmetic on literals is exact and happens while compiling, so `constant unsigned8 small = 300 - 100` is fine.
 - **Text is printed through interpolation.** `print` takes a `string`. Other values are turned into text by interpolating them: `print("{count}")`.
 
@@ -333,12 +333,12 @@ function main()
 |---|---|
 | `print(string text)` | Writes the text and a line break to standard output |
 | `range(start, end)` | The integers from `start` up to `end`, without `end`. It is only used in a `for` loop for now. |
-| `to_integer8(value)` to `to_integer64(value)` | Converts an integer to that signed type |
-| `to_unsigned8(value)` to `to_unsigned64(value)` | Converts an integer to that unsigned type |
+| `integer8(value)` to `integer64(value)` | Converts an integer to that signed type |
+| `unsigned8(value)` to `unsigned64(value)` | Converts an integer to that unsigned type |
 
-A conversion stops the program if the value does not fit the target type. When the value is known while compiling, a value that does not fit is error `L0404` instead.
+Calling an integer type converts a value to it. A conversion stops the program if the value does not fit the target type. When the value is known while compiling, a value that does not fit is error `L0404` instead. `boolean` and `string` convert nothing: compare a number to get a `boolean`, and interpolate it to get text.
 
-The names of built-in functions cannot be declared again (`L0207`).
+The names of built-in functions and types cannot be declared again (`L0207`). No binding or function can be called `print`, `integer32`, `boolean` or `float64`.
 
 ## 6. Control flow
 
