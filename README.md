@@ -26,7 +26,7 @@ Every name the language defines is a whole English word: `variable`, `constant`,
 
 ## Try it
 
-The compiler is written in Rust and has no dependencies. It needs Rust 1.85 or newer, and GCC, Clang or MSVC to build programs. It works on Linux, macOS, Windows and FreeBSD, on x86-64 and ARM64, and every change is tested on each of them and as 32-bit code. On Windows, use GCC from MinGW-w64, Clang, or MSVC's `cl` from a Visual Studio developer prompt; on macOS, the Xcode command line tools provide Clang.
+The compiler is written in Rust and has no dependencies. It needs Rust 1.85 or newer, and GCC, Clang or MSVC to build programs. Every change is tested on x86-64 and ARM64 under Linux, macOS and Windows, on x86-64 under FreeBSD, and as 32-bit x86 code under Linux. On Windows, use GCC from MinGW-w64, Clang, or MSVC's `cl` from a Visual Studio developer prompt; on macOS, the Xcode command line tools provide Clang.
 
 ```bash
 cargo build --release
