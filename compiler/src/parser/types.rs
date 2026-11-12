@@ -24,7 +24,7 @@ impl<'src> Parser<'src, '_> {
         let path = self.parse_path("a type")?;
         if let [name] = path.segments.as_slice() {
             if let Some(translation) = translate_type(name.text) {
-                self.record(errors::foreign_type(name.span, name.text, translation));
+                self.record(translation.diagnostic(name.text, name.span));
             }
         }
         let mut span = path.span;

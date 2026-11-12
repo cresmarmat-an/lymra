@@ -2,8 +2,8 @@
 
 use super::features::Feature;
 use super::{
-    BUILT_IN_FUNCTIONS, CheckResult, Checker, ConstantEntry, ConstantState, DISCARD, FunctionEntry,
-    Global, Parameter, errors,
+    BuiltIn, CheckResult, Checker, ConstantEntry, ConstantState, DISCARD, FunctionEntry, Global,
+    Parameter, errors,
 };
 use crate::ast::{self, Mutability, Name, Visibility};
 use crate::diagnostics::ErrorReported;
@@ -66,8 +66,8 @@ impl<'src, 'ast> Checker<'src, 'ast> {
     }
 
     fn declare_global(&mut self, name: Name<'src>, global: Global) {
-        if BUILT_IN_FUNCTIONS.contains(&name.text) {
-            self.report(errors::built_in_name(name.text, name.span));
+        if let Some(built_in) = BuiltIn::of(name.text) {
+            self.report(errors::built_in_name(name.text, built_in, name.span));
             return;
         }
         if let Some(&previous) = self.globals.get(name.text) {
@@ -225,7 +225,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
 }
 
 /// True for a name such as `integer128` or `unsigned7`: an integer type with a size Lymra lacks.
-fn is_sized_integer_name(name: &str) -> bool {
+pub(super) fn is_sized_integer_name(name: &str) -> bool {
     ["integer", "unsigned"].iter().any(|prefix| {
         name.strip_prefix(prefix)
             .is_some_and(|size| !size.is_empty() && size.bytes().all(|byte| byte.is_ascii_digit()))

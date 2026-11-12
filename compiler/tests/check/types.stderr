@@ -37,7 +37,7 @@ error[L0402]: the two sides of `+` have different types
    |                              ^^^^^ this is an `unsigned8`
    |                      ----- this is an `integer64`
    |
-help: convert one side, for example with `to_integer64`; the program stops if the value does not fit
+help: convert one side, for example with `integer64(...)`; the program stops if the value does not fit
 
 error[L0402]: expected an integer of type `unsigned8`, found an `integer64`
   --> tests/check/types.lym:12:39
@@ -45,9 +45,9 @@ error[L0402]: expected an integer of type `unsigned8`, found an `integer64`
 12 |     constant also_mixed = takes_small(count)
    |                                       ^^^^^ this is an `integer64`
    |
-help: convert it with `to_unsigned8`; the program stops if the value does not fit
+help: convert it with `unsigned8(...)`; the program stops if the value does not fit
    |
-12 |     constant also_mixed = takes_small(to_unsigned8(count))
+12 |     constant also_mixed = takes_small(unsigned8(count))
 
 error[L0402]: the two sides of `==` have different types
   --> tests/check/types.lym:13:34

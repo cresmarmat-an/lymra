@@ -1,8 +1,8 @@
-error[L0207]: `to_integer32` is the name of a built-in function
+error[L0207]: `integer32` is the name of a built-in type
  --> tests/check/conversions.lym:3:10
   |
-3 | function to_integer32()
-  |          ^^^^^^^^^^^^ this name is taken
+3 | function integer32()
+  |          ^^^^^^^^^ this name is taken
   |
 help: choose another name
 
@@ -12,59 +12,59 @@ error[L0402]: expected an integer of type `unsigned8`, found an `integer64`
 8 |     constant unsigned8 small = count
   |                                ^^^^^ this is an `integer64`
   |
-help: convert it with `to_unsigned8`; the program stops if the value does not fit
+help: convert it with `unsigned8(...)`; the program stops if the value does not fit
   |
-8 |     constant unsigned8 small = to_unsigned8(count)
+8 |     constant unsigned8 small = unsigned8(count)
 
-error[L0501]: `to_integer32` takes 1 argument, but 0 were given
-  --> tests/check/conversions.lym:10:25
+error[L0501]: `integer32` takes 1 argument, but 0 were given
+  --> tests/check/conversions.lym:10:22
    |
-10 |     print("{to_integer32()} {to_integer32(1, 2)}")
-   |                         ^^ a conversion takes the one value it converts
+10 |     print("{integer32()} {integer32(1, 2)}")
+   |                      ^^ a conversion takes the one value it converts
    |
-help: write `to_integer32(value)`
+help: write `integer32(value)`
 
-error[L0501]: `to_integer32` takes 1 argument, but 2 were given
-  --> tests/check/conversions.lym:10:42
+error[L0501]: `integer32` takes 1 argument, but 2 were given
+  --> tests/check/conversions.lym:10:36
    |
-10 |     print("{to_integer32()} {to_integer32(1, 2)}")
-   |                                          ^^^^^^ a conversion takes the one value it converts
+10 |     print("{integer32()} {integer32(1, 2)}")
+   |                                    ^^^^^^ a conversion takes the one value it converts
    |
-help: write `to_integer32(value)`
+help: write `integer32(value)`
 
-error[L0405]: `to_unsigned8` converts integers, but this is a `boolean`
-  --> tests/check/conversions.lym:11:26
+error[L0405]: `unsigned8` converts integers, but this is a `boolean`
+  --> tests/check/conversions.lym:11:23
    |
-11 |     print("{to_unsigned8(flag)}")
-   |                          ^^^^ not an integer
+11 |     print("{unsigned8(flag)}")
+   |                       ^^^^ not an integer
    |
 help: only integers can be converted between integer types
 
 error[L0404]: `300` does not fit in `unsigned8`
-  --> tests/check/conversions.lym:12:26
+  --> tests/check/conversions.lym:12:23
    |
-12 |     print("{to_unsigned8(300)}")
-   |                          ^^^ outside the range of `unsigned8`
+12 |     print("{unsigned8(300)}")
+   |                       ^^^ outside the range of `unsigned8`
    |
 help: `unsigned8` holds 0 to 255; use a value in that range or a wider type
 
 error[L0404]: `large`, which is 1000, does not fit in `unsigned8`
-  --> tests/check/conversions.lym:13:26
+  --> tests/check/conversions.lym:13:23
    |
-13 |     print("{to_unsigned8(large)}")
-   |                          ^^^^^ outside the range of `unsigned8`
+13 |     print("{unsigned8(large)}")
+   |                       ^^^^^ outside the range of `unsigned8`
    |
 help: `unsigned8` holds 0 to 255; use a value in that range or a wider type
 
 error[L0504]: the parameter `value` is not `variable`, so the call cannot change this argument
-  --> tests/check/conversions.lym:14:26
+  --> tests/check/conversions.lym:14:23
    |
-14 |     print("{to_unsigned8(variable count)}")
-   |                          ^^^^^^^^^ marked as changeable here
+14 |     print("{unsigned8(variable count)}")
+   |                       ^^^^^^^^^ marked as changeable here
    |
 help: remove `variable`
    |
-14 |     print("{to_unsigned8(count)}")
+14 |     print("{unsigned8(count)}")
 
 error[L0402]: the two sides of `+` have different types
   --> tests/check/conversions.lym:15:30
@@ -73,7 +73,103 @@ error[L0402]: the two sides of `+` have different types
    |                              ^^^^^ this is an `integer64`
    |                      ----- this is an `unsigned8`
    |
-help: convert one side, for example with `to_unsigned8`; the program stops if the value does not fit
+help: convert one side, for example with `unsigned8(...)`; the program stops if the value does not fit
 
-found 9 errors in tests/check/conversions.lym
+error[L0507]: `integer32` is a type, not a value
+  --> tests/check/conversions.lym:19:21
+   |
+19 |     constant size = integer32
+   |                     ^^^^^^^^^ used as a value here
+   |
+help: to convert a value to `integer32`, call it: `integer32(value)`
+
+error[L0507]: no value converts to `boolean`
+  --> tests/check/conversions.lym:20:13
+   |
+20 |     print("{boolean(count)} {string(count)}")
+   |             ^^^^^^^ only integer types convert values
+   |
+help: compare the value instead, as in `count != 0`
+
+error[L0507]: no value converts to `string`
+  --> tests/check/conversions.lym:20:30
+   |
+20 |     print("{boolean(count)} {string(count)}")
+   |                              ^^^^^^ only integer types convert values
+   |
+help: to show a value as text, interpolate it: `print("{value}")`
+
+error[L0403]: `integer` is not a type: a Lymra integer type states its size
+  --> tests/check/conversions.lym:21:13
+   |
+21 |     print("{integer(count)} {integer128(count)} {float64(count)}")
+   |             ^^^^^^^ no size given
+   |
+help: write `integer64`, or another size such as `integer32`
+   |
+21 |     print("{integer64(count)} {integer128(count)} {float64(count)}")
+
+error[L0403]: unknown type `integer128`
+  --> tests/check/conversions.lym:21:30
+   |
+21 |     print("{integer(count)} {integer128(count)} {float64(count)}")
+   |                              ^^^^^^^^^^ no integer type has this size
+   |
+help: integer types have 8, 16, 32 or 64 bits: `integer8` to `integer64`, `unsigned8` to `unsigned64`
+
+error[L0309]: `float32` and `float64` are not available yet
+  --> tests/check/conversions.lym:21:50
+   |
+21 |     print("{integer(count)} {integer128(count)} {float64(count)}")
+   |                                                  ^^^^^^^ the compiler adds this in roadmap phase 2
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0305]: `int` is not a Lymra type
+  --> tests/check/conversions.lym:22:13
+   |
+22 |     print("{int(count)} {i32(count)} {integr32(count)}")
+   |             ^^^ a Lymra number type states its size
+   |
+help: write `integer64`, or another size such as `integer32`
+   |
+22 |     print("{integer64(count)} {i32(count)} {integr32(count)}")
+
+error[L0305]: `i32` is not a Lymra type
+  --> tests/check/conversions.lym:22:26
+   |
+22 |     print("{int(count)} {i32(count)} {integr32(count)}")
+   |                          ^^^ Lymra spells this `integer32`
+   |
+help: write `integer32`
+   |
+22 |     print("{int(count)} {integer32(count)} {integr32(count)}")
+
+error[L0206]: unknown name `integr32`
+  --> tests/check/conversions.lym:22:39
+   |
+22 |     print("{int(count)} {i32(count)} {integr32(count)}")
+   |                                       ^^^^^^^^ nothing with this name is visible here
+   |
+help: did you mean `integer32`?
+   |
+22 |     print("{int(count)} {i32(count)} {integer32(count)}")
+
+error[L0207]: `boolean` is the name of a built-in type
+  --> tests/check/conversions.lym:23:24
+   |
+23 |     variable integer64 boolean = 1
+   |                        ^^^^^^^ this name is taken
+   |
+help: choose another name
+
+error[L0507]: `integer32` is a type, so nothing can be assigned to it
+  --> tests/check/conversions.lym:24:5
+   |
+24 |     integer32 = 5
+   |     ^^^^^^^^^ assigned here
+   |
+help: assign to a `variable` instead
+
+found 20 errors in tests/check/conversions.lym
 run `lymra explain L0207` to read why a rule exists and how to fix it

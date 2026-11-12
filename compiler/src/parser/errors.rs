@@ -2,7 +2,6 @@
 
 use super::MAX_NESTING;
 use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
-use crate::foreign_types::Translation;
 use crate::source::Span;
 
 const KNOWN_DIRECTIVES: &str = "`#!edition 0.1`, `#!optimize speed`, `#!optimize size`, `#!optimize debug` and `#!prove bounds`";
@@ -273,29 +272,6 @@ pub(super) fn missing_type(role: &str, name: &str, span: Span) -> Diagnostic {
 }
 
 /// Reports a type name from another language, such as `i64` for `integer64`.
-pub(super) fn foreign_type(span: Span, found: &str, translation: Translation) -> Diagnostic {
-    let lymra = translation.lymra;
-    let (label, help) = if translation.is_exact {
-        (
-            format!("Lymra spells this `{lymra}`"),
-            format!("write `{lymra}`"),
-        )
-    } else {
-        // Every default translation is the 64-bit type, so the 32-bit one is the other size to name.
-        let other_size = lymra.replace("64", "32");
-        (
-            "a Lymra number type states its size".to_owned(),
-            format!("write `{lymra}`, or another size such as `{other_size}`"),
-        )
-    };
-    Diagnostic::new(
-        ErrorCode::L0305,
-        format!("`{found}` is not a Lymra type"),
-        Label::new(span, label),
-        Help::replace(help, span, lymra),
-    )
-}
-
 pub(super) fn foreign_keyword(span: Span, found: &str, lymra: &str) -> Diagnostic {
     Diagnostic::new(
         ErrorCode::L0305,

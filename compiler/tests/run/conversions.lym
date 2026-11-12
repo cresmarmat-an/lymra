@@ -5,22 +5,22 @@
 
 function main()
     constant unsigned8 small = 200
-    constant integer64 widened = to_integer64(small)
+    constant integer64 widened = integer64(small)
     print("widened {widened}")
 
     constant integer64 count = 1_000
-    constant unsigned16 narrowed = to_unsigned16(count)
+    constant unsigned16 narrowed = unsigned16(count)
     print("narrowed {narrowed}")
 
     constant integer8 negative = -5
-    constant integer32 signed_widened = to_integer32(negative)
+    constant integer32 signed_widened = integer32(negative)
     print("signed {signed_widened}")
 
     constant unsigned64 big = 4_000_000_000
-    constant integer64 from_unsigned = to_integer64(big)
-    constant unsigned32 fits = to_unsigned32(big)
+    constant integer64 from_unsigned = integer64(big)
+    constant unsigned32 fits = unsigned32(big)
     print("unsigned {from_unsigned} {fits}")
 
-    constant total = widened + to_integer64(narrowed)
+    constant total = widened + integer64(narrowed)
     print("total {total}")
-    print("known {to_unsigned8(255)} {to_integer8(-128)}")
+    print("known {unsigned8(255)} {integer8(-128)}")

@@ -1,5 +1,6 @@
 //! The wording of every error the semantic checker reports.
 
+use super::BuiltIn;
 use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
 use crate::ir::{IntegerType, Type};
 use crate::source::Span;
@@ -84,10 +85,10 @@ pub(super) fn already_declared(name: &str, span: Span, previous: Span) -> Diagno
     .with_secondary(Label::new(previous, "first declared here"))
 }
 
-pub(super) fn built_in_name(name: &str, span: Span) -> Diagnostic {
+pub(super) fn built_in_name(name: &str, built_in: BuiltIn, span: Span) -> Diagnostic {
     Diagnostic::new(
         ErrorCode::L0207,
-        format!("`{name}` is the name of a built-in function"),
+        format!("`{name}` is the name of a built-in {}", built_in.noun()),
         Label::new(span, "this name is taken"),
         Help::text("choose another name"),
     )
@@ -201,9 +202,9 @@ pub(super) fn integer_mismatch(
         ),
         Label::new(span, format!("this is {}", described(found))),
         Help::replace(
-            format!("convert it with `to_{target}`; the program stops if the value does not fit"),
+            format!("convert it with `{target}(...)`; the program stops if the value does not fit"),
             span,
-            format!("to_{target}({source})"),
+            format!("{target}({source})"),
         ),
     )
 }
@@ -271,7 +272,7 @@ pub(super) fn operand_mismatch(
     let (right_type, right_span) = right;
     let help = match (left_type, right_type) {
         (Type::Integer(left_integer), Type::Integer(_)) => Help::text(format!(
-            "convert one side, for example with `to_{}`; the program stops if the value does not fit",
+            "convert one side, for example with `{}(...)`; the program stops if the value does not fit",
             left_integer.name()
         )),
         _ => Help::text(
@@ -603,12 +604,46 @@ pub(super) fn not_callable(span: Span) -> Diagnostic {
     )
 }
 
-pub(super) fn function_assigned(name: &str, span: Span) -> Diagnostic {
+/// An assignment to the name of a function or a type. `noun` says which.
+pub(super) fn not_assignable(name: &str, noun: &str, span: Span) -> Diagnostic {
     Diagnostic::new(
         ErrorCode::L0507,
-        format!("`{name}` is a function, so nothing can be assigned to it"),
+        format!("`{name}` is a {noun}, so nothing can be assigned to it"),
         Label::new(span, "assigned here"),
         Help::text("assign to a `variable` instead"),
+    )
+}
+
+/// A built-in type's name where a value belongs, as in `constant size = integer32`.
+pub(super) fn type_as_value(name: &str, span: Span) -> Diagnostic {
+    let help = match name {
+        "boolean" => Help::replace("write a value instead, such as `true`", span, "true"),
+        "string" => Help::text("write text in quotes instead, as in `\"Kero\"`"),
+        _ if IntegerType::from_name(name).is_some() => Help::text(format!(
+            "to convert a value to `{name}`, call it: `{name}(value)`"
+        )),
+        _ => Help::text("write a value of the type here"),
+    };
+    Diagnostic::new(
+        ErrorCode::L0507,
+        format!("`{name}` is a type, not a value"),
+        Label::new(span, "used as a value here"),
+        help,
+    )
+}
+
+/// A call to a built-in type that nothing converts to, as in `boolean(count)`.
+pub(super) fn no_conversion(name: &str, span: Span) -> Diagnostic {
+    let help = if name == "boolean" {
+        "compare the value instead, as in `count != 0`"
+    } else {
+        "to show a value as text, interpolate it: `print(\"{value}\")`"
+    };
+    Diagnostic::new(
+        ErrorCode::L0507,
+        format!("no value converts to `{name}`"),
+        Label::new(span, "only integer types convert values"),
+        Help::text(help),
     )
 }
 
