@@ -1,0 +1,14 @@
+#[
+    The left argument is computed before the right one fails, so its line is
+    printed before the program stops, whichever C compiler built it.
+]#
+
+function noted(string name, integer64 value) returns integer64
+    print("{name}")
+    return value
+
+function sum(integer64 left, integer64 right) returns integer64
+    return left + right
+
+function main()
+    print("{sum(noted("left", 1), 1 / noted("divisor", 0))}")

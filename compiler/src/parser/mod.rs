@@ -32,6 +32,14 @@ use crate::source::{SourceFile, Span};
 /// How deeply expressions, types and blocks may nest. Bounds the parser's recursion.
 pub(crate) const MAX_NESTING: u32 = 64;
 
+/**
+ * How many binary operators, calls, indexes and field accesses one expression
+ * may hold. Each makes the expression a level deeper without the parser
+ * recursing, so `MAX_NESTING` alone would not bound how deep the later
+ * stages, which follow expressions recursively, have to go.
+ */
+pub const MAX_OPERATIONS: u32 = 1000;
+
 type ParseResult<T> = Result<T, ErrorReported>;
 
 /// The syntax tree of one file. It holds every declaration that parsed, even when others failed.
@@ -47,6 +55,7 @@ pub fn parse<'src>(source: &'src SourceFile, tokens: &[Token]) -> Parsed<'src> {
         position: 0,
         diagnostics: Vec::new(),
         nesting: 0,
+        operations: None,
         body_not_indented: false,
     };
     let module = parser.parse_module();
@@ -63,6 +72,8 @@ struct Parser<'src, 'tokens> {
     diagnostics: Vec<Diagnostic>,
     /// Current depth of nested expressions, types and blocks.
     nesting: u32,
+    /// The operations counted toward `MAX_OPERATIONS` in the outermost expression being parsed, while there is one.
+    operations: Option<u32>,
     /**
      * Set when a top-level declaration has no indented block. Its lines then
      * sit at the top level, where each would be reported as a stray statement
@@ -228,6 +239,19 @@ impl<'src> Parser<'src, '_> {
         let result = parse(self);
         self.nesting -= 1;
         result
+    }
+
+    /// Counts one operation toward `MAX_OPERATIONS`, or fails if the expression already holds that many.
+    fn count_operation(&mut self) -> ParseResult<()> {
+        let Some(operations) = self.operations.as_mut() else {
+            return Ok(());
+        };
+        *operations += 1;
+        if *operations > MAX_OPERATIONS {
+            let span = self.current().span;
+            return Err(self.report(errors::expression_too_long(span)));
+        }
+        Ok(())
     }
 
     /**

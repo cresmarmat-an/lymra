@@ -16,6 +16,7 @@ use lymra::codegen;
 use lymra::diagnostics::{Diagnostic, render_report};
 use lymra::frontend::{self, analyze};
 use lymra::optimize;
+use lymra::parser::MAX_OPERATIONS;
 use lymra::source::Span;
 
 const MUTATIONS_PER_FILE: usize = 400;
@@ -104,6 +105,18 @@ fn assert_diagnostics_are_valid(diagnostics: &[Diagnostic], text: &str, context:
     }
 }
 
+/// Runs `test` on a thread with the stack the compiler's stages are documented to need.
+fn on_compiler_stack(test: impl FnOnce() + Send) {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .stack_size(lymra::STACK_SIZE)
+            .spawn_scoped(scope, test)
+            .expect("the system starts a thread with the compiler's stack")
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+    });
+}
+
 fn check_survives(name: &str, text: &str) {
     let source = common::source(name, text);
     let context = format!("--- source ({name}):\n{text}\n---");
@@ -145,6 +158,10 @@ fn check_survives(name: &str, text: &str) {
 
 #[test]
 fn corrupted_sources_never_crash_the_compiler() {
+    on_compiler_stack(check_corrupted_sources);
+}
+
+fn check_corrupted_sources() {
     let tests_directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let files = common::files_with_extension(&tests_directory, "lym");
     assert!(!files.is_empty());
@@ -170,6 +187,11 @@ fn corrupted_sources_never_crash_the_compiler() {
 
 #[test]
 fn pathological_inputs_are_handled() {
+    on_compiler_stack(check_pathological_inputs);
+}
+
+fn check_pathological_inputs() {
+    let longest_expression = usize::try_from(MAX_OPERATIONS).expect("the limit fits a usize") + 1;
     let cases = [
         String::new(),
         "\n".repeat(10_000),
@@ -200,6 +222,19 @@ fn pathological_inputs_are_handled() {
         "0x".repeat(1000),
         "1.".repeat(1000),
         "1e+".repeat(1000),
+        // The longest expressions the parser accepts, through every stage that follows them recursively.
+        format!(
+            "function total(integer64 value) returns integer64\n    return {}\n\nfunction main()\n    print(\"{{total(1)}}\")\n",
+            vec!["value"; longest_expression].join(" + ")
+        ),
+        format!(
+            "function main()\n    constant total = {}\n    print(\"{{total}}\")\n",
+            vec!["1"; longest_expression].join(" - ")
+        ),
+        format!(
+            "function main()\n    print(\"{{{}}}\")\n",
+            vec!["true"; longest_expression].join(" and ")
+        ),
     ];
     for (index, case) in cases.iter().enumerate() {
         check_survives(&format!("pathological case {index}"), case);

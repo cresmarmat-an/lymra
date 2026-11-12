@@ -55,7 +55,14 @@ fn precedence(operator: BinaryOperator) -> u8 {
 
 impl<'src> Parser<'src, '_> {
     pub(super) fn parse_expression(&mut self) -> ParseResult<Expr<'src>> {
-        self.nested(|parser| parser.parse_binary(0))
+        if self.operations.is_some() {
+            return self.nested(|parser| parser.parse_binary(0));
+        }
+        // An outermost expression starts a new count of operations, which ends with it.
+        self.operations = Some(0);
+        let expression = self.nested(|parser| parser.parse_binary(0));
+        self.operations = None;
+        expression
     }
 
     /// Parses operators that bind at least as tightly as `minimum`.
@@ -68,6 +75,7 @@ impl<'src> Parser<'src, '_> {
             if binding < minimum {
                 break;
             }
+            self.count_operation()?;
             let operator_token = self.advance();
             // One level tighter on the right makes operators of equal precedence group to the left.
             let right = self.parse_binary(binding + 1)?;
@@ -143,12 +151,14 @@ impl<'src> Parser<'src, '_> {
     fn parse_postfix(&mut self) -> ParseResult<Expr<'src>> {
         let mut expr = self.parse_primary()?;
         loop {
-            expr = match self.current().kind {
-                TokenKind::LeftParen => self.parse_call(expr)?,
-                TokenKind::LeftBracket => self.parse_index(expr)?,
-                TokenKind::Dot => self.parse_field_access(expr)?,
+            let parse = match self.current().kind {
+                TokenKind::LeftParen => Self::parse_call,
+                TokenKind::LeftBracket => Self::parse_index,
+                TokenKind::Dot => Self::parse_field_access,
                 _ => return Ok(expr),
             };
+            self.count_operation()?;
+            expr = parse(self, expr)?;
         }
     }
 

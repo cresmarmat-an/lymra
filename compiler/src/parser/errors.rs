@@ -1,6 +1,6 @@
 //! The wording of every error the parser reports.
 
-use super::MAX_NESTING;
+use super::{MAX_NESTING, MAX_OPERATIONS};
 use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
 use crate::source::Span;
 
@@ -102,6 +102,20 @@ pub(super) fn nesting_too_deep(span: Span) -> Diagnostic {
         "this code is nested too deeply",
         Label::new(span, format!("more than {MAX_NESTING} levels of nesting")),
         Help::text("move the inner part into its own function or constant"),
+    )
+}
+
+pub(super) fn expression_too_long(span: Span) -> Diagnostic {
+    Diagnostic::new(
+        ErrorCode::L0310,
+        "this expression is too long",
+        Label::new(
+            span,
+            format!(
+                "more than {MAX_OPERATIONS} operators, calls, indexes and fields in one expression"
+            ),
+        ),
+        Help::text("split it up: compute parts of it into constants, then combine them"),
     )
 }
 

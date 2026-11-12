@@ -142,7 +142,7 @@ From the loosest binding to the tightest:
 
 - `not` covers a whole comparison: `not a == b` means `not (a == b)`.
 - Comparisons do not chain. `a < b < c` is error `L0306`; write `a < b and b < c`. In C the chain compiles and compares the result of the first comparison with `c`, which is almost never what was meant.
-- Parentheses group. Expressions, types and blocks may nest 64 levels deep (`L0310`).
+- Parentheses group. Expressions, types and blocks may nest 64 levels deep, and one expression holds at most 1000 operators, calls, indexes and field accesses (`L0310`).
 
 ## 3. Bindings
 
@@ -204,6 +204,8 @@ Type rules:
 | `and` `or` `not` | `boolean` values | `boolean` |
 
 Any other use is error `L0405`. `and` and `or` only evaluate their right side when the left side does not decide the result already.
+
+The parts of an expression run from left to right: the operands of an operator, the arguments of a call and the values in a text, each finished before the next one starts and before the operation itself. When two parts call functions that print, their lines come out in that order, and when two checks could fail, the one further left stops the program. Every C compiler builds the same order.
 
 Division truncates toward zero, and a remainder takes the sign of the dividend: `-7 / 2` is `-3` and `-7 % 2` is `-1`. This matches C.
 
@@ -335,7 +337,7 @@ function main()
 
 | Function | Does |
 |---|---|
-| `print(string text)` | Writes the text and a line break to standard output, as one whole line |
+| `print(string text)` | Writes the text and a line break to standard output, as one whole line. The values in the text are computed first, so a call among them that prints writes its own line before this one. |
 | `range(start, end)` | The integers from `start` up to `end`, without `end`. It is only used in a `for` loop for now. |
 | `integer8(value)` to `integer64(value)` | Converts an integer to that signed type |
 | `unsigned8(value)` to `unsigned64(value)` | Converts an integer to that unsigned type |
@@ -382,7 +384,7 @@ for index in range(0, 10)
 
 - A condition needs no parentheses, and nothing follows it on its line: no `:`, no `then`, no `{`.
 - A condition is a `boolean`. Lymra has no "truthy" values: write `if count != 0`, not `if count` (`L0402`).
-- `for name in range(start, end)` computes `start` and `end` once, then runs the block with `name` set to each integer from `start` up to `end`, without `end`. The loop variable cannot be changed. Name it `_` when the loop only repeats.
+- `for name in range(start, end)` computes `start`, then `end`, each once, then runs the block with `name` set to each integer from `start` up to `end`, without `end`. The loop variable cannot be changed. Name it `_` when the loop only repeats.
 - `else if` continues a chain. There is no `elif`.
 - `break` and `continue` work in `while` and `for`. Anywhere else they are error `L0601`.
 - A statement after `return`, `break` or `continue`, or after an `if` whose every branch leaves, can never run. It is error `L0602`.

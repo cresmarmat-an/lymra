@@ -1,0 +1,38 @@
+exit status 0
+--- standard output
+a
+b
+arguments: 3
+c
+d
+operands: 12
+e
+f
+comparison: true
+start
+end
+index 0
+index 1
+bound
+count
+loop 1
+bound
+count
+bound
+count
+loop 3
+bound
+count
+first
+second
+third
+fourth
+second branch
+left
+g
+h
+i
+and ran its right side
+left
+or decided by its left side
+--- standard error

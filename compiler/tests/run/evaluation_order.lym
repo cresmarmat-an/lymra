@@ -1,0 +1,39 @@
+#[
+    The parts of an expression run from left to right, whichever C compiler
+    builds the program. Every call to `noted` prints its name, so the output
+    shows the order. The `while`, `else if` and `and` conditions each hold two
+    calls, so their order needs statements of its own in C, which may only
+    run when the condition itself does.
+]#
+
+function noted(string name, integer64 value) returns integer64
+    print("{name}")
+    return value
+
+function sum(integer64 left, integer64 right) returns integer64
+    return left + right
+
+function main()
+    print("arguments: {sum(noted("a", 1), noted("b", 2))}")
+    print("operands: {noted("c", 3) * noted("d", 4)}")
+    print("comparison: {noted("e", 5) < noted("f", 6)}")
+    for index in range(noted("start", 0), noted("end", 2))
+        print("index {index}")
+    variable integer64 count = 0
+    while noted("bound", 3) > noted("count", count)
+        count = count + 1
+        if count == 2
+            continue
+        print("loop {count}")
+    if noted("first", 1) > noted("second", 2)
+        print("not taken")
+    else if noted("third", 3) > noted("fourth", 0)
+        print("second branch")
+    else if noted("never", 1) > noted("never", 0)
+        print("not taken")
+    if noted("left", 0) == 1 and noted("never", 1) == noted("never", 1)
+        print("not taken")
+    if noted("g", 1) == 1 and noted("h", 2) < noted("i", 3)
+        print("and ran its right side")
+    if noted("left", 1) == 1 or noted("never", 1) == noted("never", 1)
+        print("or decided by its left side")

@@ -1,8 +1,9 @@
 /*!
  * One expression may not change a binding through a `variable` argument and
- * also use that binding anywhere else. Which comes first would depend on the
- * order the parts of the expression run in. That order is easy to misread,
- * and in the C that Lymra compiles to, the C compiler often picks it.
+ * also use that binding anywhere else. The parts of an expression run from
+ * left to right, but which part changes what another reads is easy to
+ * misread. The rule also lets code generation keep only the order of the
+ * parts with effects, since no part can change what another part reads.
  */
 
 use crate::ast::visit::{self, Visitor};

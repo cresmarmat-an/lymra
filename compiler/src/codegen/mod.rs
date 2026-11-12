@@ -13,12 +13,11 @@
  */
 
 mod c_syntax;
+mod expressions;
+mod statements;
 
 use crate::diagnostics::render_location;
-use crate::ir::{
-    Argument, ArithmeticOperator, Block, Call, Expr, ExprKind, Function, IntegerType,
-    LogicOperator, PrintPart, Program, Statement, Type,
-};
+use crate::ir::{Function, Program, Statement};
 use crate::source::{SourceFile, Span};
 
 const RUNTIME: &str = include_str!("runtime.h");
@@ -138,10 +137,27 @@ struct Writer {
 }
 
 impl Writer {
+    /// An empty writer whose lines start `depth` levels in.
+    const fn at(depth: usize) -> Self {
+        Self {
+            text: String::new(),
+            depth,
+        }
+    }
+
     fn line(&mut self, line: &str) {
         self.text.push_str(&INDENT.repeat(self.depth));
         self.text.push_str(line);
         self.text.push('\n');
+    }
+
+    fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
+
+    /// Adds the lines of `other`, which keep their own indentation.
+    fn append(&mut self, other: Writer) {
+        self.text.push_str(&other.text);
     }
 }
 
@@ -182,298 +198,11 @@ impl Generator<'_, '_> {
         name
     }
 
-    fn block_contents(&mut self, function: &Function<'_>, block: &Block, writer: &mut Writer) {
-        for statement in &block.statements {
-            self.statement(function, statement, writer);
-        }
-    }
-
-    fn nested_block(&mut self, function: &Function<'_>, block: &Block, writer: &mut Writer) {
-        writer.depth += 1;
-        self.block_contents(function, block, writer);
-        writer.depth -= 1;
-    }
-
-    fn statement(&mut self, function: &Function<'_>, statement: &Statement, writer: &mut Writer) {
-        match statement {
-            Statement::Declare { local, value } => {
-                let declared = &function.locals[*local];
-                let constness = if declared.mutable { "" } else { "const " };
-                let value = self.expr(function, value);
-                writer.line(&format!(
-                    "{constness}{} {} = {value};",
-                    c_syntax::type_name(declared.ty),
-                    c_syntax::local_name(declared.name)
-                ));
-            }
-            Statement::Discard(value) => {
-                let value = self.expr(function, value);
-                writer.line(&format!("(void)({value});"));
-            }
-            Statement::Assign { target, value } => {
-                let value = self.expr(function, value);
-                writer.line(&format!("{} = {value};", local_access(function, *target)));
-            }
-            Statement::Call(call) => {
-                let call = self.call(function, call);
-                writer.line(&format!("{call};"));
-            }
-            Statement::Print(parts) => self.print(function, parts, writer),
-            Statement::If {
-                branches,
-                otherwise,
-            } => {
-                for (index, branch) in branches.iter().enumerate() {
-                    let condition = self.expr(function, &branch.condition);
-                    let opening = if index == 0 {
-                        format!("if ({condition}) {{")
-                    } else {
-                        format!("}} else if ({condition}) {{")
-                    };
-                    writer.line(&opening);
-                    self.nested_block(function, &branch.body, writer);
-                }
-                if let Some(otherwise) = otherwise {
-                    writer.line("} else {");
-                    self.nested_block(function, otherwise, writer);
-                }
-                writer.line("}");
-            }
-            Statement::While { condition, body } => {
-                let condition = self.expr(function, condition);
-                writer.line(&format!("while ({condition}) {{"));
-                self.nested_block(function, body, writer);
-                writer.line("}");
-            }
-            Statement::ForRange {
-                variable,
-                start,
-                end,
-                body,
-            } => self.for_range(function, *variable, start, end, body, writer),
-            Statement::Return(Some(value)) => {
-                let value = self.expr(function, value);
-                writer.line(&format!("return {value};"));
-            }
-            Statement::Return(None) => writer.line("return;"),
-            Statement::Break => writer.line("break;"),
-            Statement::Continue => writer.line("continue;"),
-            Statement::Assert { condition } => {
-                let site = self.site(condition.span);
-                let condition = self.expr(function, condition);
-                writer.line(&format!("if (!({condition})) {{"));
-                writer.line(&format!(
-                    "{INDENT}lymra_trap(LYMRA_ASSERTION_FAILED, {site});"
-                ));
-                writer.line("}");
-            }
-        }
-    }
-
-    /**
-     * `for variable in range(start, end)`: both bounds are computed once, and
-     * the counter only counts up while it is below the end, so it cannot overflow.
-     */
-    fn for_range(
-        &mut self,
-        function: &Function<'_>,
-        variable: Option<usize>,
-        start: &Expr,
-        end: &Expr,
-        body: &Block,
-        writer: &mut Writer,
-    ) {
-        let helper = self.helpers;
+    /// A new name for a helper variable, made of `role` and a number no other helper has.
+    fn helper(&mut self, role: &str) -> String {
+        let name = format!("{role}_{}", self.helpers);
         self.helpers += 1;
-        let ty = c_syntax::type_name(start.ty);
-        let (limit, counter) = (
-            format!("range_end_{helper}"),
-            format!("range_next_{helper}"),
-        );
-        let start = self.expr(function, start);
-        let end = self.expr(function, end);
-        writer.line("{");
-        writer.depth += 1;
-        writer.line(&format!("const {ty} {limit} = {end};"));
-        writer.line(&format!(
-            "for ({ty} {counter} = {start}; {counter} < {limit}; ++{counter}) {{"
-        ));
-        writer.depth += 1;
-        if let Some(variable) = variable {
-            let name = c_syntax::local_name(function.locals[variable].name);
-            writer.line(&format!("const {ty} {name} = {counter};"));
-        }
-        self.block_contents(function, body, writer);
-        writer.depth -= 1;
-        writer.line("}");
-        writer.depth -= 1;
-        writer.line("}");
-    }
-
-    fn print(&mut self, function: &Function<'_>, parts: &[PrintPart], writer: &mut Writer) {
-        for part in parts {
-            let write = match part {
-                PrintPart::Text(text) if text.is_empty() => continue,
-                PrintPart::Text(text) => {
-                    format!("lymra_write_text({})", c_syntax::text_value(text))
-                }
-                PrintPart::Value(value) => {
-                    let ty = value.ty;
-                    let value = self.expr(function, value);
-                    match ty {
-                        Type::String => format!("lymra_write_text({value})"),
-                        Type::Boolean => format!("lymra_write_boolean({value})"),
-                        Type::Integer(integer) if integer.is_signed() => {
-                            format!("lymra_write_signed((int64_t)({value}))")
-                        }
-                        Type::Integer(_) => format!("lymra_write_unsigned((uint64_t)({value}))"),
-                    }
-                }
-            };
-            writer.line(&format!("{write};"));
-        }
-        writer.line("lymra_end_line();");
-    }
-
-    fn expr(&mut self, function: &Function<'_>, expr: &Expr) -> String {
-        match &expr.kind {
-            ExprKind::Literal(value) => c_syntax::value(value),
-            ExprKind::Local(id) => local_access(function, *id),
-            ExprKind::Constant(id) => c_syntax::constant_name(self.program.constants[*id].name),
-            ExprKind::Not(operand) => format!("(!{})", self.expr(function, operand)),
-            ExprKind::Negate { operand, checked } => {
-                let operand = self.expr(function, operand);
-                if !checked {
-                    // The optimizer proved the operand is not the type's lowest value.
-                    return format!("(({})(-{operand}))", c_syntax::type_name(expr.ty));
-                }
-                let site = self.site(expr.span);
-                format!("lymra_negate_{}({operand}, {site})", expr.ty.name())
-            }
-            ExprKind::Arithmetic {
-                operator,
-                left,
-                right,
-                checked,
-            } => {
-                let left = self.expr(function, left);
-                let right = self.expr(function, right);
-                if !checked {
-                    /*
-                     * The optimizer proved the result fits the type and no divisor is
-                     * zero. C computes small types in `int`, which holds every value
-                     * of them, so the cast back loses nothing.
-                     */
-                    return format!(
-                        "(({})({left} {} {right}))",
-                        c_syntax::type_name(expr.ty),
-                        operator.symbol()
-                    );
-                }
-                let site = self.site(expr.span);
-                let operation = match operator {
-                    ArithmeticOperator::Add => "add",
-                    ArithmeticOperator::Subtract => "subtract",
-                    ArithmeticOperator::Multiply => "multiply",
-                    ArithmeticOperator::Divide => "divide",
-                    ArithmeticOperator::Remainder => "remainder",
-                };
-                format!(
-                    "lymra_{operation}_{}({left}, {right}, {site})",
-                    expr.ty.name()
-                )
-            }
-            ExprKind::Compare {
-                operator,
-                left,
-                right,
-            } => {
-                let left = self.expr(function, left);
-                let right = self.expr(function, right);
-                format!("({left} {} {right})", operator.symbol())
-            }
-            ExprKind::Logic {
-                operator,
-                left,
-                right,
-            } => {
-                let left = self.expr(function, left);
-                let right = self.expr(function, right);
-                let symbol = match operator {
-                    LogicOperator::And => "&&",
-                    LogicOperator::Or => "||",
-                };
-                format!("({left} {symbol} {right})")
-            }
-            ExprKind::Call(call) => self.call(function, call),
-            ExprKind::Convert { operand, checked } => {
-                self.convert(function, operand, expr, *checked)
-            }
-        }
-    }
-
-    /**
-     * A conversion to `target.ty`. An unchecked one is a plain cast. A checked
-     * one first tests the value against the part of the target's range that
-     * the source type can reach, in the source's signedness, so no comparison
-     * mixes signed and unsigned values.
-     */
-    fn convert(
-        &mut self,
-        function: &Function<'_>,
-        operand: &Expr,
-        target: &Expr,
-        checked: bool,
-    ) -> String {
-        let target_type = c_syntax::type_name(target.ty);
-        let value = self.expr(function, operand);
-        let (Type::Integer(source), Type::Integer(destination)) = (operand.ty, target.ty) else {
-            return format!("(({target_type})({value}))");
-        };
-        if !checked {
-            return format!("(({target_type})({value}))");
-        }
-        let site = self.site(target.span);
-        let maximum = destination.maximum().min(source.maximum());
-        if source.is_signed() {
-            let minimum = destination.minimum().max(source.minimum());
-            format!(
-                "(({target_type})lymra_check_signed((int64_t)({value}), {}, {}, {site}))",
-                c_syntax::integer_literal(minimum, IntegerType::Integer64),
-                c_syntax::integer_literal(maximum, IntegerType::Integer64)
-            )
-        } else {
-            format!(
-                "(({target_type})lymra_check_unsigned((uint64_t)({value}), {}, {site}))",
-                c_syntax::integer_literal(maximum, IntegerType::Unsigned64)
-            )
-        }
-    }
-
-    fn call(&mut self, function: &Function<'_>, call: &Call) -> String {
-        let callee = &self.program.functions[call.function];
-        let arguments: Vec<String> = call
-            .arguments
-            .iter()
-            .map(|argument| match argument {
-                Argument::Value(value) => self.expr(function, value),
-                Argument::Reference(id) => {
-                    let local = &function.locals[*id];
-                    let name = c_syntax::local_name(local.name);
-                    // A `variable` parameter is already a pointer to the caller's binding.
-                    if local.by_reference {
-                        name
-                    } else {
-                        format!("&{name}")
-                    }
-                }
-            })
-            .collect();
-        format!(
-            "{}({})",
-            c_syntax::function_name(callee.name),
-            arguments.join(", ")
-        )
+        name
     }
 }
 

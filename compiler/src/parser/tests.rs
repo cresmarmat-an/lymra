@@ -1,5 +1,6 @@
 //! Parser tests. Trees are compared in the outline form that `ast::print_module` produces.
 
+use super::MAX_OPERATIONS;
 use crate::ast::print_module;
 use crate::diagnostics::ErrorCode;
 use crate::frontend::analyze;
@@ -402,4 +403,36 @@ fn nesting_past_the_limit_is_an_error_not_a_crash() {
     assert_eq!(body_codes(&negations), [ErrorCode::L0310]);
     let shallow = format!("{}1{}", "(".repeat(40), ")".repeat(40));
     assert_eq!(expr(&shallow), "1");
+}
+
+#[test]
+fn an_expression_past_the_operation_limit_is_an_error_not_a_crash() {
+    std::thread::Builder::new()
+        .stack_size(crate::STACK_SIZE)
+        .spawn(check_operation_limit)
+        .expect("the system starts a thread with the compiler's stack")
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+}
+
+fn check_operation_limit() {
+    let limit = usize::try_from(MAX_OPERATIONS).expect("the limit fits a usize");
+    let sum = |operators: usize| vec!["1"; operators + 1].join(" + ");
+    assert_eq!(body_codes(&format!("x = {}", sum(limit))), []);
+    assert_eq!(
+        body_codes(&format!("x = {}", sum(limit + 1))),
+        [ErrorCode::L0310]
+    );
+    let calls = format!("x = f{}", "()".repeat(limit + 1));
+    assert_eq!(body_codes(&calls), [ErrorCode::L0310]);
+    let indexes = format!("x = items{}", "[0]".repeat(limit + 1));
+    assert_eq!(body_codes(&indexes), [ErrorCode::L0310]);
+    let fields = format!("x = item{}", ".part".repeat(limit + 1));
+    assert_eq!(body_codes(&fields), [ErrorCode::L0310]);
+    // Operations inside parentheses and arguments count toward the expression around them.
+    let split = format!("x = f({}) + ({})", sum(limit / 2), sum(limit / 2));
+    assert_eq!(body_codes(&split), [ErrorCode::L0310]);
+    // Each statement starts a new count.
+    let two = format!("x = {}\ny = {}", sum(limit), sum(limit));
+    assert_eq!(body_codes(&two), []);
 }

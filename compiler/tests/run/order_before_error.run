@@ -1,0 +1,10 @@
+exit status 70
+--- standard output
+left
+divisor
+--- standard error
+error: division by zero
+  --> tests/run/order_before_error.lym:14:35
+   |
+14 |     print("{sum(noted("left", 1), 1 / noted("divisor", 0))}")
+   |                                   ^^^^^^^^^^^^^^^^^^^^^^^
