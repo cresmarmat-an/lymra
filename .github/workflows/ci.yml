@@ -2,21 +2,52 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   test:
-    name: Format, lint and test
-    runs-on: ubuntu-latest
+    name: Test on ${{ matrix.os }}
+    strategy:
+      # Every platform reports, even when another fails.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Check formatting
-        run: cargo fmt --all --check
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Show the C compilers
+        shell: bash
+        run: |
+          gcc --version || echo "gcc is not installed"
+          clang --version || echo "clang is not installed"
       - name: Lint
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
         run: cargo test
+
+  format:
+    name: Check formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  minimum-rust:
+    name: Test on Rust 1.85
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - run: cargo test
