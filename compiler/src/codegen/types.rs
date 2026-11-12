@@ -51,7 +51,13 @@ pub(super) fn fill_function(name: &str) -> String {
     format!("{name}_filled")
 }
 
-/// The struct for an array type, and its fill function.
+/**
+ * The struct for an array type, and its fill function. The fill function
+ * sets the first element and then doubles the filled part with `memcpy`.
+ * A loop that stores the value into each element is one C compilers
+ * rewrite, and MSVC rewrites it for large arrays into a fill of bytes,
+ * which is wrong for every element larger than a byte.
+ */
 fn definition(name: &str, element: &str, array: &ArrayType) -> String {
     let length = array.length;
     let fill = fill_function(name);
@@ -63,8 +69,12 @@ typedef struct {{
 
 LYMRA_UNUSED static {name} {fill}(const {element} value) {{
     {name} filled;
-    for (size_t position = 0; position < {length}u; ++position) {{
-        filled.elements[position] = value;
+    size_t done = 1;
+    filled.elements[0] = value;
+    while (done < {length}u) {{
+        size_t step = done < {length}u - done ? done : {length}u - done;
+        memcpy(&filled.elements[done], &filled.elements[0], step * sizeof filled.elements[0]);
+        done += step;
     }}
     return filled;
 }}",

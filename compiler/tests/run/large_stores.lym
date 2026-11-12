@@ -1,0 +1,38 @@
+#[
+    Large arrays filled with `array(value)` and stored into element by
+    element hold exactly the values given. A C compiler that turns such a
+    loop into a fill of bytes keeps only the low byte of each value, which
+    the sums below would show.
+]#
+
+constant integer64 size = 65536
+
+function filled(integer64 value) returns integer64
+    constant array[integer64, size] values = array(value)
+    variable integer64 sum = 0
+    for element in values
+        sum = sum + element
+    return sum
+
+function stored(integer64 value) returns integer64
+    variable array[integer64, size] values = array(0)
+    for index in range(0, size)
+        values[index] = value
+    variable integer64 sum = 0
+    for index in range(0, size)
+        sum = sum + values[index]
+    return sum
+
+function stored_narrow(integer16 value) returns integer64
+    variable array[integer16, size] values = array(0)
+    for index in range(0, size)
+        values[index] = value
+    variable integer64 sum = 0
+    for element in values
+        sum = sum + integer64(element)
+    return sum
+
+function main()
+    print("{filled(258)} {filled(-3)}")
+    print("{stored(258)} {stored(-3)}")
+    print("{stored_narrow(258)} {stored_narrow(-3)}")
