@@ -7,13 +7,17 @@
  */
 
 /*
- * On POSIX systems, output goes out through `write` and a stack overflow is
- * caught by a signal handler. The functions they need have to be asked for
- * before any header is included.
+ * Output goes out through the system's own write function, and a stack
+ * overflow is caught by the system's own mechanism: a signal handler on POSIX
+ * systems, an exception handler on Windows. What they need has to be asked
+ * for before any header is included.
  */
 #if defined(__unix__) || defined(__APPLE__)
 #define LYMRA_POSIX 1
 #define _XOPEN_SOURCE 700
+#elif defined(_WIN32)
+#define LYMRA_WINDOWS 1
+#define WIN32_LEAN_AND_MEAN
 #endif
 
 #include <stdbool.h>
@@ -28,9 +32,14 @@
 #include <signal.h>
 #include <sys/resource.h>
 #include <unistd.h>
+#elif defined(LYMRA_WINDOWS)
+#include <fcntl.h>
+#include <io.h>
+#include <windows.h>
 #endif
 
-#if !defined(__GNUC__)
+/* Clang in its MSVC mode does not call itself GCC, but it has every extension the runtime uses. */
+#if !defined(__GNUC__) && !defined(__clang__)
 #error "Lymra programs are compiled with GCC or Clang"
 #endif
 
@@ -90,6 +99,16 @@ LYMRA_UNUSED static void lymra_write_finished(void) {
             break;
         }
         lymra_output_written = written + (size_t)result;
+#elif defined(LYMRA_WINDOWS)
+        /* Raw bytes, so a line ends with the same line break as on every other system. */
+        DWORD result = 0;
+        if (!WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), lymra_output + written, (DWORD)waiting, &result, NULL) ||
+            result == 0) {
+            lymra_output_failed = true;
+            lymra_output_written = lymra_output_length;
+            break;
+        }
+        lymra_output_written = written + result;
 #else
         if (fwrite(lymra_output + written, 1, waiting, stdout) != waiting || fflush(stdout) != 0) {
             lymra_output_failed = true;
@@ -308,6 +327,12 @@ LYMRA_UNUSED static inline void lymra_end_line(void) {
     lymra_commit(lymra_line_end);
 }
 
+/* What a stack overflow writes, on every system that catches one. */
+LYMRA_UNUSED static const char lymra_stack_overflow_message[] =
+    "error: stack overflow: calls nested too deeply\n"
+    "help: a function kept calling itself, or functions kept calling one another; "
+    "make sure every chain of calls reaches a case that returns\n";
+
 #if defined(LYMRA_POSIX)
 /*
  * Calls that nest too deeply run the stack into its guard page, and the
@@ -339,11 +364,7 @@ LYMRA_UNUSED static void lymra_on_fault(int signal_number, siginfo_t *details, v
     /* A positive code means the program's own memory access caused the signal; another process can send one too. */
     bool caused_by_access = details->si_code > 0;
     if (caused_by_access && address < lymra_stack_top && lymra_stack_top - address <= lymra_stack_reach) {
-        static const char message[] =
-            "error: stack overflow: calls nested too deeply\n"
-            "help: a function kept calling itself, or functions kept calling one another; "
-            "make sure every chain of calls reaches a case that returns\n";
-        ssize_t written = write(STDERR_FILENO, message, sizeof message - 1);
+        ssize_t written = write(STDERR_FILENO, lymra_stack_overflow_message, sizeof lymra_stack_overflow_message - 1);
         (void)written;
         _exit(LYMRA_RUNTIME_ERROR_STATUS);
     }
@@ -385,11 +406,46 @@ LYMRA_UNUSED static void lymra_catch_stack_overflow(void) {
     sigaction(SIGSEGV, &action, NULL);
     sigaction(SIGBUS, &action, NULL);
 }
+#elif defined(LYMRA_WINDOWS)
+/*
+ * Calls that nest too deeply run the stack into its guard page, and Windows
+ * raises a stack overflow exception on the same thread. The handler writes
+ * the waiting output and a runtime error with stack the system keeps back
+ * for it, and ends the program. Calls cost nothing extra for this.
+ */
+
+/* Stack kept back for the handler, which runs after the rest is used up. */
+#define LYMRA_HANDLER_STACK ((ULONG)64 << 10)
+
+LYMRA_UNUSED static LONG WINAPI lymra_on_exception(EXCEPTION_POINTERS *exception) {
+    if (exception->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+    lymra_write_finished();
+    DWORD written = 0;
+    WriteFile(GetStdHandle(STD_ERROR_HANDLE), lymra_stack_overflow_message,
+              (DWORD)(sizeof lymra_stack_overflow_message - 1), &written, NULL);
+    /* Ends the process at once: an orderly exit would run code that needs more stack. */
+    TerminateProcess(GetCurrentProcess(), LYMRA_RUNTIME_ERROR_STATUS);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+/* Keeps stack back for the handler and installs it. If Windows refuses, an overflow crashes as it would in C. */
+LYMRA_UNUSED static void lymra_catch_stack_overflow(void) {
+    ULONG reserve = LYMRA_HANDLER_STACK;
+    if (SetThreadStackGuarantee(&reserve)) {
+        AddVectoredExceptionHandler(1, lymra_on_exception);
+    }
+}
 #endif
 
 /* Prepares the program to run. The C `main` calls it before anything else. */
 LYMRA_UNUSED __attribute__((noinline)) static void lymra_start(void) {
 #if defined(LYMRA_POSIX)
+    lymra_catch_stack_overflow();
+#elif defined(LYMRA_WINDOWS)
+    /* Error messages go out byte for byte too, with the same line breaks as everywhere else. */
+    _setmode(_fileno(stderr), _O_BINARY);
     lymra_catch_stack_overflow();
 #endif
 }

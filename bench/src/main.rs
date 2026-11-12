@@ -138,7 +138,7 @@ fn measure_program(
     eprintln!("{name}: building {} versions", variants.len());
     let mut executables = Vec::with_capacity(variants.len());
     for (index, variant) in variants.iter().enumerate() {
-        let executable = workspace.join(format!("{name}-{index}"));
+        let executable = workspace.join(format!("{name}-{index}{}", std::env::consts::EXE_SUFFIX));
         variant
             .build(directory, &executable)
             .map_err(|error| format!("{name}, {variant}: {error}"))?;
