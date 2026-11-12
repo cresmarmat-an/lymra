@@ -270,11 +270,11 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                         Err(_) => Err(self.report(errors::always_overflows(ty, span))),
                     };
                 }
-                Ok(binary(
-                    ir::ExprKind::Negate(Box::new(operand)),
-                    Type::Integer(ty),
-                    span,
-                ))
+                let kind = ir::ExprKind::Negate {
+                    operand: Box::new(operand),
+                    checked: true,
+                };
+                Ok(binary(kind, Type::Integer(ty), span))
             }
         }
     }
@@ -430,6 +430,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             operator,
             left: Box::new(left),
             right: Box::new(right),
+            checked: true,
         };
         Ok(binary(kind, Type::Integer(ty), span))
     }

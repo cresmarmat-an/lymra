@@ -214,6 +214,7 @@ Overflow is a runtime trap in every build mode, including `speed`. If you want w
 - Every `+`, `-`, `*`, `/` and `%` on integers is checked. Division by zero is checked too, and so is the one division whose result does not fit, the lowest value of a signed type divided by `-1`.
 - When every value in an operation is known while compiling, the compiler does the check itself: an overflow is error `L0404`, and a division by a value that is always zero is error `L0406`.
 - Otherwise a failed check stops the program with a runtime error (Section 11).
+- The compiler leaves out a check when it can prove the check never fails, from the conditions around the operation, the bounds of `for` loops, and known values. Which checks it can prove only changes how fast a program runs, never what it does (Section 13).
 
 ### 4.3 Size classes
 
@@ -550,6 +551,7 @@ error: integer overflow
 | Building values in place | Temporaries and copies on return |
 | `packed` choices | Padding every element up to the largest variant |
 | Code arguments inlined at compile time | Indirect calls through closures or function pointers |
+| Overflow-check elimination | Overflow and division checks that interval analysis proves can never fail |
 | Bounds-check elimination and `#!prove bounds` | Checks the compiler can prove are redundant |
 | Whole-program compilation to C | Cross-module call overhead, since everything can inline |
 

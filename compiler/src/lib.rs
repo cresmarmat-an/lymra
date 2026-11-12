@@ -4,7 +4,8 @@
  * The pipeline: `lexer` turns text into tokens, `parser` turns tokens into the
  * syntax tree in `ast`, and `lint` checks style rules on the tree. Then
  * `semantic` resolves names and checks types, producing the checked program in
- * `ir`. `codegen` turns that into C, and `driver` compiles the C with the
+ * `ir`. `optimize` removes the runtime checks it proves can never fail,
+ * `codegen` turns the program into C, and `driver` compiles the C with the
  * system's C compiler. `frontend` runs the checking stages for one file.
  */
 
@@ -18,6 +19,7 @@ pub mod frontend;
 pub mod ir;
 pub mod lexer;
 pub mod lint;
+pub mod optimize;
 pub mod parser;
 pub mod semantic;
 pub mod similarity;

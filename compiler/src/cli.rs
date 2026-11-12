@@ -11,6 +11,7 @@ use crate::diagnostics::{ErrorCode, render_report};
 use crate::driver::{self, Compiler, DriverError, TemporaryDirectory, Warnings};
 use crate::frontend::{self, analyze};
 use crate::ir::Program;
+use crate::optimize;
 use crate::source::SourceFile;
 
 const SOURCE_EXTENSION: &str = ".lym";
@@ -182,18 +183,23 @@ fn compile(
     compiler.compile(&c_source, executable, program.optimize, Warnings::Default)
 }
 
-/// Checks a program that is meant to run. Errors are written to `stderr` before this returns.
+/**
+ * Checks a program that is meant to run, and removes the runtime checks it
+ * proves can never fail. Errors are written to `stderr` before this returns.
+ */
 fn checked_program<'src>(
     source: &'src SourceFile,
     stderr: &mut dyn Write,
 ) -> Result<Program<'src>, Outcome> {
-    frontend::check_program(source).map_err(|diagnostics| {
+    let mut program = frontend::check_program(source).map_err(|diagnostics| {
         print(
             stderr,
             &render_report(&diagnostics, source),
             Outcome::Rejected,
         )
-    })
+    })?;
+    optimize::remove_proven_checks(&mut program);
+    Ok(program)
 }
 
 fn parse(path: &str, stdout: &mut dyn Write, stderr: &mut dyn Write) -> Outcome {

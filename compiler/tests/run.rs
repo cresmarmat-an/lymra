@@ -4,8 +4,11 @@
  * Every `.lym` file under `tests/run` and in `examples` is checked, turned
  * into C, compiled with each C compiler on this machine with all warnings as
  * errors, and run. Its exit status, output and error output have to match
- * the `.run` file recorded for it, and every compiler has to give the same
- * result.
+ * the `.run` file recorded for it.
+ *
+ * Each program is built twice: with every runtime check, and with the checks
+ * the optimizer proves unnecessary removed. Every build, with every compiler,
+ * has to give the same result, so a check removed by mistake shows up here.
  */
 
 mod common;
@@ -17,6 +20,7 @@ use lymra::codegen;
 use lymra::diagnostics::render_report;
 use lymra::driver::{Compiler, TemporaryDirectory, Warnings};
 use lymra::frontend;
+use lymra::optimize;
 
 const COMPILERS: [&str; 2] = ["gcc", "clang"];
 
@@ -77,32 +81,38 @@ fn run_case(case: &Case, compilers: &[Compiler]) -> Result<String, String> {
             render_report(&diagnostics, &source)
         )
     })?;
-    let c_source = codegen::generate(&program, &source);
+    let every_check = codegen::generate(&program, &source);
+    let mut optimized = program;
+    optimize::remove_proven_checks(&mut optimized);
+    let fewer_checks = codegen::generate(&optimized, &source);
+    let builds = [("every check", &every_check), ("optimized", &fewer_checks)];
 
     let mut agreed: Option<(String, String)> = None;
-    for compiler in compilers {
+    for (compiler, (build, c_source)) in compilers
+        .iter()
+        .flat_map(|compiler| builds.iter().map(move |build| (compiler, build)))
+    {
+        let label = format!("{} ({build})", compiler.name());
         let workspace = TemporaryDirectory::new().map_err(|error| error.to_string())?;
         let executable = workspace
             .path()
             .join(format!("program{}", std::env::consts::EXE_SUFFIX));
         compiler
-            .compile(&c_source, &executable, program.optimize, Warnings::Strict)
-            .map_err(|error| format!("{} with {}:\n{error}", case.name, compiler.name()))?;
+            .compile(c_source, &executable, optimized.optimize, Warnings::Strict)
+            .map_err(|error| format!("{} with {label}:\n{error}", case.name))?;
         let output = Command::new(&executable)
             .output()
             .map_err(|error| format!("{}: cannot run the program: {error}", case.name))?;
         let result = describe_run(output.status.code(), &output.stdout, &output.stderr);
         match &agreed {
-            Some((first_compiler, first_result)) if *first_result != result => {
+            Some((first_label, first_result)) if *first_result != result => {
                 return Err(format!(
-                    "{}: {first_compiler} and {} disagree\n--- {first_compiler}:\n{first_result}\n--- {}:\n{result}",
-                    case.name,
-                    compiler.name(),
-                    compiler.name()
+                    "{}: {first_label} and {label} disagree\n--- {first_label}:\n{first_result}\n--- {label}:\n{result}",
+                    case.name
                 ));
             }
             Some(_) => {}
-            None => agreed = Some((compiler.name(), result)),
+            None => agreed = Some((label, result)),
         }
     }
     agreed

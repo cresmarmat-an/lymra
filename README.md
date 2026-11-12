@@ -22,7 +22,7 @@ Every name the language defines is a whole English word: `variable`, `constant`,
 
 ## Status
 
-**Edition 0.1, roadmap phase 1.** The compiler checks Lymra programs and compiles them to native executables through C. Phase 1 covers integers of every size and checked conversions between them, booleans, text values, functions, `variable` parameters, `if`, `while`, `for` over `range`, and `print`. Every integer operation is checked for overflow, in every build mode. Anything later phases add is rejected with an error that names the phase.
+**Edition 0.1, roadmap phase 1.** The compiler checks Lymra programs and compiles them to native executables through C. Phase 1 covers integers of every size and checked conversions between them, booleans, text values, functions, `variable` parameters, `if`, `while`, `for` over `range`, and `print`. Every integer operation is checked for overflow, in every build mode, except where the compiler proves the check can never fail. Anything later phases add is rejected with an error that names the phase.
 
 ## Try it
 
@@ -88,12 +88,14 @@ error: integer overflow
 | `compiler/src/lint` | Rules that need the whole tree, such as naming |
 | `compiler/src/semantic` | Names, types and control flow, producing the checked program |
 | `compiler/src/ir` | The checked program: every name resolved, every expression typed |
+| `compiler/src/optimize` | Interval analysis that removes the overflow checks it proves can never fail |
 | `compiler/src/codegen` | The checked program to C, and the runtime every program includes |
 | `compiler/src/driver.rs` | Finds the C compiler, builds, and runs |
 | `compiler/src/diagnostics` | Error codes and how errors are rendered |
 | `compiler/tests/ui` | Golden syntax errors and syntax trees |
 | `compiler/tests/check` | Golden errors about names, types and control flow |
-| `compiler/tests/run` | Programs that are built with GCC and Clang and run, with their recorded output |
+| `compiler/tests/run` | Programs that are built with GCC and Clang, with and without the optimizer, and run, with their recorded output |
+| `compiler/tests/overflow_proofs` | Thousands of generated programs run in an exact interpreter, to catch a check removed by a wrong proof |
 | `docs/errors` | One page per error code, embedded in the compiler for `lymra explain` |
 
 ## Development

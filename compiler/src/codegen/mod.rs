@@ -340,19 +340,36 @@ impl Generator<'_, '_> {
             ExprKind::Local(id) => local_access(function, *id),
             ExprKind::Constant(id) => c_syntax::constant_name(self.program.constants[*id].name),
             ExprKind::Not(operand) => format!("(!{})", self.expr(function, operand)),
-            ExprKind::Negate(operand) => {
-                let site = self.site(expr.span);
+            ExprKind::Negate { operand, checked } => {
                 let operand = self.expr(function, operand);
+                if !checked {
+                    // The optimizer proved the operand is not the type's lowest value.
+                    return format!("(({})(-{operand}))", c_syntax::type_name(expr.ty));
+                }
+                let site = self.site(expr.span);
                 format!("lymra_negate_{}({operand}, {site})", expr.ty.name())
             }
             ExprKind::Arithmetic {
                 operator,
                 left,
                 right,
+                checked,
             } => {
-                let site = self.site(expr.span);
                 let left = self.expr(function, left);
                 let right = self.expr(function, right);
+                if !checked {
+                    /*
+                     * The optimizer proved the result fits the type and no divisor is
+                     * zero. C computes small types in `int`, which holds every value
+                     * of them, so the cast back loses nothing.
+                     */
+                    return format!(
+                        "(({})({left} {} {right}))",
+                        c_syntax::type_name(expr.ty),
+                        operator.symbol()
+                    );
+                }
+                let site = self.site(expr.span);
                 let operation = match operator {
                     ArithmeticOperator::Add => "add",
                     ArithmeticOperator::Subtract => "subtract",

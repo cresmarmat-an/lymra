@@ -126,12 +126,23 @@ pub enum ExprKind {
     Literal(Value),
     Local(LocalId),
     Constant(ConstantId),
-    Negate(Box<Expr>),
+    Negate {
+        operand: Box<Expr>,
+        /// Whether the operation can fail and has to be checked when the program runs.
+        checked: bool,
+    },
     Not(Box<Expr>),
     Arithmetic {
         operator: ArithmeticOperator,
         left: Box<Expr>,
         right: Box<Expr>,
+        /**
+         * Whether the operation can fail and has to be checked when the
+         * program runs. The checker sets it on every operation; the
+         * optimizer clears it where it proves the operation cannot overflow
+         * or divide by zero.
+         */
+        checked: bool,
     },
     Compare {
         operator: ComparisonOperator,
