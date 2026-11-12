@@ -2,7 +2,7 @@
 
 Status: draft. Every rule here can change until a compiler implements it and a test proves it.
 
-The compiler in `compiler/` implements the syntax of this whole document. Its test suite parses every code sample here, so the spec and the parser cannot drift apart. Checking names, types and memory comes in later phases (see the roadmap in the README).
+The compiler in `compiler/` implements the syntax of this whole document. Its test suite parses every code sample here, so the spec and the parser cannot drift apart. It also checks and compiles the core of the language: integers, booleans, text values, functions, `if`, `while`, `for` over `range`, and `print`. The rest arrives in the phases of the roadmap in the README, and until then the compiler rejects it with `L0309`, naming the phase.
 
 ## 1. Goals
 
@@ -154,13 +154,16 @@ constant copy_of_name = name        # immutable, type inferred
 ```
 
 - `variable` declares a mutable binding.
-- `constant` declares an immutable binding. A top-level `constant` must be computable at compile time.
+- `constant` declares an immutable binding. Changing a constant, a parameter or a loop variable is error `L0208`.
+- A top-level `constant` is computed by the compiler, from literals, operators and other top-level constants. Anything only known at run time, such as a function call, is error `L0210`, and so is a constant that depends on itself.
 - Every declaration starts with one of these two keywords. A type and a name before `=` with no keyword is error `L0203`.
 - Only `constant` may be declared at the top level of a file. A top-level `variable` would be global mutable state, and is error `L0205`.
 - `name = expr` with no keyword always means assignment. Assigning to a name that hasn't been declared is error `L0201`, and the message suggests `variable` or `constant`.
 - An assignment is a statement, not an expression, and its left side is a binding, a field or an element (`L0308`). There is no `+=` and no `++`: write `count = count + 1`.
 - Reading a binding before it is assigned is impossible: every declaration has an initializer. Leaving it out is error `L0204`.
-- An unused binding is error `L0202`.
+- An unused binding is error `L0202`. A binding declared `variable` that nothing changes is error `L0209`.
+- A name can be declared only once where it is visible: a local cannot reuse the name of another local in an enclosing block, a parameter, or a top-level constant or function. Redeclaring a name is error `L0207`. Nothing ever hides anything, so a name means one thing wherever it is visible.
+- The name `_` declares a binding that is never read. `constant _ = save_file()` runs the call and drops its value.
 
 **Why there's no keyword-less form (`string b = a`):** with generic types it gets ambiguous. In `list[integer32] x = y`, the parser can't tell whether `list[integer32]` is a type or an indexing expression until it has looked past the closing bracket. C and C++ have this exact problem. Starting every declaration with a keyword makes the grammar parseable with one token of lookahead.
 
@@ -186,9 +189,31 @@ Integer literals default to `integer64`. Float literals default to `float64`.
 
 The names are whole words (Section 2.5), and a number type always states its size in bits. There is no plain `integer` or `float`, because a second spelling of the same type would break Goal 4.
 
+Type rules:
+
+- **No conversions behind your back.** A value never changes type by itself. Mixing `integer64` and `unsigned8` in one operation, passing one where the other is expected, or using a number as a condition is error `L0402`.
+- **Literals take the type of their place.** An integer literal has no type of its own. It takes the type its context asks for, such as a declared type or the other side of an operator, and `integer64` when nothing asks. It has to fit (`L0404`). Arithmetic on literals is exact and happens while compiling, so `constant unsigned8 small = 300 - 100` is fine.
+- **Text is printed through interpolation.** `print` takes a `string`. Other values are turned into text by interpolating them: `print("{count}")`.
+
+| Operators | Work on | Result |
+|---|---|---|
+| `+` `-` `*` `/` `%` | two integers of the same type | that type |
+| `-` in front of a value | a signed integer | the same type |
+| `<` `<=` `>` `>=` | two integers of the same type | `boolean` |
+| `==` `!=` | two integers, or two `boolean` values, of the same type | `boolean` |
+| `and` `or` `not` | `boolean` values | `boolean` |
+
+Any other use is error `L0405`. `and` and `or` only evaluate their right side when the left side does not decide the result already.
+
+Division truncates toward zero, and a remainder takes the sign of the dividend: `-7 / 2` is `-3` and `-7 % 2` is `-1`. This matches C.
+
 ### 4.2 Integer overflow
 
-Overflow is a runtime trap in every build mode, including `speed`. If you want wrapping, you have to ask for it with `wrapping_add`, `wrapping_mul`, and so on. Rust wraps silently in release builds. Lymra doesn't, because a silent wrong number is a bug that compiles.
+Overflow is a runtime trap in every build mode, including `speed`. If you want wrapping, you have to ask for it with `wrapping_add`, `wrapping_multiply`, and so on. Rust wraps silently in release builds. Lymra doesn't, because a silent wrong number is a bug that compiles.
+
+- Every `+`, `-`, `*`, `/` and `%` on integers is checked. Division by zero is checked too, and so is the one division whose result does not fit, the lowest value of a signed type divided by `-1`.
+- When every value in an operation is known while compiling, the compiler does the check itself: an overflow is error `L0404`, and a division by a value that is always zero is error `L0406`.
+- Otherwise a failed check stops the program with a runtime error (Section 11).
 
 ### 4.3 Size classes
 
@@ -280,8 +305,12 @@ function main()
 ```
 
 - `returns T` is required whenever the function returns a value. A function without `returns` returns nothing.
+- Every path through a function with `returns` has to end in `return` and a value (`L0502`). Every `return` has to match the declaration (`L0503`).
+- A call passes exactly one argument for each parameter, in order (`L0501`). There are no default values and no two functions with the same name.
+- A call whose result is not used is error `L0505`. Drop a result on purpose with `constant _ = f()`.
+- Functions are not values: there are no function pointers. Using a function's name without calling it, or calling a value, is error `L0507`.
 - Parameters are immutable. Because the function can't modify them, the compiler is free to pass them by reference or by copy, whichever is faster for that type.
-- A parameter declared `variable` can be modified, and the change is visible to the caller. The caller has to mark the argument too, so the mutation is visible where the call is written:
+- A parameter declared `variable` can be modified, and the change is visible to the caller. The caller has to mark the argument too, so the mutation is visible where the call is written. Only a `variable` binding can be passed this way. A missing or extra mark is error `L0504`.
 
 ```lymra
 function add_item(variable list[integer32] items, integer32 value)
@@ -294,6 +323,16 @@ function main()
 
 - Return values are built directly in the caller's storage. Returning a `list` never copies it.
 - `main` is the entry point. Top-level code can only contain declarations, so the order of program startup is never ambiguous.
+- In edition 0.1, `main` takes no parameters and returns nothing (`L0506`). A program exits with status 0, or 70 when it stops on a runtime error.
+
+### 5.1 Built-in functions
+
+| Function | Does |
+|---|---|
+| `print(string text)` | Writes the text and a line break to standard output |
+| `range(start, end)` | The integers from `start` up to `end`, without `end`. It is only used in a `for` loop for now. |
+
+The names of built-in functions cannot be declared again (`L0207`).
 
 ## 6. Control flow
 
@@ -316,11 +355,14 @@ for index in range(0, 10)
 ```
 
 - A condition needs no parentheses, and nothing follows it on its line: no `:`, no `then`, no `{`.
+- A condition is a `boolean`. Lymra has no "truthy" values: write `if count != 0`, not `if count` (`L0402`).
+- `for name in range(start, end)` computes `start` and `end` once, then runs the block with `name` set to each integer from `start` up to `end`, without `end`. The loop variable cannot be changed. Name it `_` when the loop only repeats.
 - `else if` continues a chain. There is no `elif`.
-- `break` and `continue` work in `while` and `for`.
+- `break` and `continue` work in `while` and `for`. Anywhere else they are error `L0601`.
+- A statement after `return`, `break` or `continue`, or after an `if` whose every branch leaves, can never run. It is error `L0602`.
 - `match` picks a block by the variant of a `choice` (Section 4.7).
 - `return` ends the function, with a value when the function `returns` one.
-- `assert condition` stops the program if the condition is false. The compiler also uses it as a fact when it removes bounds checks (Section 2.3).
+- `assert condition` stops the program with a runtime error if the condition is false. The compiler will also use it as a fact when it removes bounds checks (Section 2.3).
 
 ## 7. Memory model
 
@@ -466,6 +508,16 @@ Each error code has a page in [`docs/errors/`](errors/README.md) that explains t
 | `L03xx` | Grammar |
 | `L04xx` to `L10xx` | The chapter of this document the rule comes from: `L07xx` is the memory model |
 
+A program that fails a check while it runs stops with a runtime error, in the same format without a code or a fix. The exit status is 70.
+
+```
+error: integer overflow
+ --> src/main.lym:4:17
+  |
+4 |         level = level + 1
+  |                 ^^^^^^^^^
+```
+
 ## 12. Open questions
 
 | ID | Question | Current lean |
@@ -477,6 +529,9 @@ Each error code has a page in [`docs/errors/`](errors/README.md) that explains t
 | O6 | Literal syntax for `array` and `list` values | `[1, 2, 3]` |
 | O7 | Bitwise operations | Functions with whole-word names such as `bit_and` and `shift_left`, not symbols |
 | O8 | Calling C: the syntax and rules of `external` declarations | `external function hypot(float64 x, float64 y) returns float64` |
+| O9 | Converting between integer types, which never happens by itself | A call named after the target type, such as `integer32(count)`, that stops the program if the value does not fit |
+| O10 | Reading the command line and choosing an exit status | Parameters of `main` and a `returns` type, once the needed types exist |
+| O11 | Removing overflow checks the compiler can prove unnecessary. A first measurement: a loop that GCC and Clang can turn into a formula ran about 200 times slower with the checks, because a check has to stop the program at the exact operation that overflows. A loop they cannot transform ran at the same speed. | Range analysis over loop bounds and known values, the same way bounds checks are removed |
 
 ## 13. Where speed comes from
 

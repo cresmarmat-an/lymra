@@ -108,6 +108,28 @@ pub fn render(diagnostic: &Diagnostic, source: &SourceFile) -> String {
     canvas.text
 }
 
+/**
+ * Renders where `span` is and the source line it starts on, with the span
+ * underlined: the middle part of a diagnostic, without a message or a fix.
+ * A runtime error prints this under its own message.
+ */
+pub fn render_location(span: Span, source: &SourceFile) -> String {
+    let label = Label::new(span, "");
+    let underline = underline(&label, PRIMARY_MARKER, source);
+    let position = source.position(span.start);
+    let gutter = (underline.line + 1).to_string().len();
+    let mut canvas = Canvas {
+        text: String::new(),
+        gutter,
+    };
+    let location = format!("{}:{}:{}", source.name(), position.line, position.column);
+    canvas.push(&format!("{:gutter$}--> {location}", ""));
+    canvas.empty_gutter();
+    canvas.source_line(underline.line, source.line_text(underline.line));
+    canvas.underline(&underline);
+    canvas.text
+}
+
 /// Renders every diagnostic, then a summary that points at `lymra explain`.
 pub fn render_report(diagnostics: &[Diagnostic], source: &SourceFile) -> String {
     let mut report = String::new();

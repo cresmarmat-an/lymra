@@ -4,7 +4,7 @@ mod codes;
 mod render;
 
 pub use codes::ErrorCode;
-pub use render::{render, render_report};
+pub use render::{render, render_location, render_report};
 
 use crate::source::Span;
 

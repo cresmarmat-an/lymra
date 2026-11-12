@@ -1,0 +1,13 @@
+exit status 70
+--- standard output
+251
+252
+253
+254
+255
+--- standard error
+error: integer overflow
+ --> tests/run/overflow.lym:4:17
+  |
+4 |         level = level + 1
+  |                 ^^^^^^^^^

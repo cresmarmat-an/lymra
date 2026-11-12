@@ -1,11 +1,12 @@
-//! The front end: everything that happens to one file before type checking.
+//! The front end: everything that happens to one file before code generation.
 
 use crate::ast::Module;
 use crate::diagnostics::Diagnostic;
+use crate::ir::Program;
 use crate::source::SourceFile;
-use crate::{lexer, lint, parser};
+use crate::{lexer, lint, parser, semantic};
 
-/// The syntax tree of a file and every error found while building it.
+/// The syntax tree of a file and every syntax error found while building it.
 pub struct Analysis<'src> {
     pub module: Module<'src>,
     /// Errors in source order. The file is valid Lymra syntax when this is empty.
@@ -26,4 +27,26 @@ pub fn analyze(source: &SourceFile) -> Analysis<'_> {
         module: parsed.module,
         diagnostics,
     }
+}
+
+/**
+ * Checks a file completely: syntax first, then names, types and control flow.
+ * Meaning is only checked once the syntax is valid, because a broken tree
+ * would produce errors that are only echoes of the syntax error.
+ */
+pub fn check(source: &SourceFile) -> Result<Program<'_>, Vec<Diagnostic>> {
+    let analysis = analyze(source);
+    if !analysis.diagnostics.is_empty() {
+        return Err(analysis.diagnostics);
+    }
+    semantic::check(source, &analysis.module)
+}
+
+/// Checks a file that is meant to run, which also needs a `main` function.
+pub fn check_program(source: &SourceFile) -> Result<Program<'_>, Vec<Diagnostic>> {
+    let program = check(source)?;
+    if program.main.is_none() {
+        return Err(vec![semantic::missing_main_error()]);
+    }
+    Ok(program)
 }

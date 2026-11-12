@@ -1,0 +1,9 @@
+constant integer64 largest = 9_223_372_036_854_775_807
+constant integer64 too_far = largest + 1
+
+function main()
+    constant unsigned8 last = 255
+    constant integer64 fits = largest - 1
+    constant integer8 minimum = -128
+    constant wraps = minimum * -1
+    print("{too_far} {last} {fits} {wraps} {largest / 0} {fits % (2 - 2)}")

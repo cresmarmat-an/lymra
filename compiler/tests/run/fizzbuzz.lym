@@ -1,0 +1,12 @@
+#!optimize speed
+
+function main()
+    for number in range(1, 16)
+        if number % 15 == 0
+            print("FizzBuzz")
+        else if number % 3 == 0
+            print("Fizz")
+        else if number % 5 == 0
+            print("Buzz")
+        else
+            print("{number}")

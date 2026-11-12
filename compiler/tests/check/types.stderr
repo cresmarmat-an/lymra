@@ -1,0 +1,196 @@
+error[L0404]: `300` does not fit in `unsigned8`
+ --> tests/check/types.lym:6:32
+  |
+6 |     constant unsigned8 small = 300
+  |                                ^^^ outside the range of `unsigned8`
+  |
+help: `unsigned8` holds 0 to 255; use a value in that range or a wider type
+
+error[L0404]: `-129` does not fit in `integer8`
+ --> tests/check/types.lym:7:32
+  |
+7 |     constant integer8 lowest = -129
+  |                                ^^^^ outside the range of `integer8`
+  |
+help: `integer8` holds -128 to 127; use a value in that range or a wider type
+
+error[L0402]: expected a `boolean`, found an `integer64`
+ --> tests/check/types.lym:9:29
+  |
+9 |     constant boolean flag = count
+  |                             ^^^^^ this is an `integer64`
+  |
+help: Lymra never converts a value to another type by itself; use a value of the expected type
+
+error[L0402]: expected a `string`, found a number
+  --> tests/check/types.lym:10:28
+   |
+10 |     constant string name = 5
+   |                            ^ this is a number
+   |
+help: write a `string` here
+
+error[L0402]: the two sides of `+` have different types
+  --> tests/check/types.lym:11:30
+   |
+11 |     constant mixed = count + small
+   |                              ^^^^^ this is an `unsigned8`
+   |                      ----- this is an `integer64`
+   |
+help: Lymra never converts a value to another type by itself; give both sides the same type
+
+error[L0402]: expected an `unsigned8`, found an `integer64`
+  --> tests/check/types.lym:12:39
+   |
+12 |     constant also_mixed = takes_small(count)
+   |                                       ^^^^^ this is an `integer64`
+   |
+help: Lymra never converts a value to another type by itself; use a value of the expected type
+
+error[L0402]: the two sides of `==` have different types
+  --> tests/check/types.lym:13:34
+   |
+13 |     constant compared = count == true
+   |                                  ^^^^ this is a `boolean`
+   |                         ----- this is an `integer64`
+   |
+help: Lymra never converts a value to another type by itself; give both sides the same type
+
+error[L0402]: a condition has to be a `boolean`, but this is an `integer64`
+  --> tests/check/types.lym:14:8
+   |
+14 |     if count
+   |        ^^^^^ not a `boolean`
+   |
+help: compare it with a number
+   |
+14 |     if count != 0
+
+error[L0402]: a condition has to be a `boolean`, but this is a `string`
+  --> tests/check/types.lym:16:11
+   |
+16 |     while name
+   |           ^^^^ not a `boolean`
+   |
+help: write a comparison or another `boolean` here
+
+error[L0402]: a condition has to be a `boolean`, but this is an `integer64`
+  --> tests/check/types.lym:18:12
+   |
+18 |     assert count + 1
+   |            ^^^^^^^^^ not a `boolean`
+   |
+help: compare it with a number
+   |
+18 |     assert count + 1 != 0
+
+error[L0402]: `print` takes text, but this is an `integer64`
+  --> tests/check/types.lym:19:11
+   |
+19 |     print(count)
+   |           ^^^^^ not text
+   |
+help: turn the value into text with interpolation
+   |
+19 |     print("{count}")
+
+error[L0402]: `print` takes text, but this is a `boolean`
+  --> tests/check/types.lym:20:11
+   |
+20 |     print(flag)
+   |           ^^^^ not text
+   |
+help: turn the value into text with interpolation
+   |
+20 |     print("{flag}")
+
+error[L0405]: `-` cannot negate an unsigned value, and this is an `unsigned8`
+  --> tests/check/types.lym:21:25
+   |
+21 |     constant negated = -small
+   |                         ^^^^^ this is an `unsigned8`
+   |
+help: use a signed type such as `integer16` if the value can be negative
+
+error[L0405]: `-` works on numbers, but this is a `boolean`
+  --> tests/check/types.lym:22:25
+   |
+22 |     constant flipped = -flag
+   |                         ^^^^ this is a `boolean`
+   |
+help: to flip a `boolean`, use `not`
+
+error[L0405]: `+` works on numbers, but this is a `string`
+  --> tests/check/types.lym:23:23
+   |
+23 |     constant joined = name + name
+   |                       ^^^^ not a number
+   |
+help: to put text together, interpolate it: `print("{first}{second}")`
+
+error[L0405]: `+` works on numbers, but this is a `string`
+  --> tests/check/types.lym:23:30
+   |
+23 |     constant joined = name + name
+   |                              ^^^^ not a number
+   |
+help: to put text together, interpolate it: `print("{first}{second}")`
+
+error[L0405]: `not` works on `boolean` values, but this is an `integer64`
+  --> tests/check/types.lym:24:31
+   |
+24 |     constant not_number = not count
+   |                               ^^^^^ not a `boolean`
+   |
+help: compare it to get a `boolean`, for example `count == 0`
+
+error[L0405]: `and` works on `boolean` values, but this is an `integer64`
+  --> tests/check/types.lym:25:21
+   |
+25 |     constant both = count and flag
+   |                     ^^^^^ not a `boolean`
+   |
+help: compare it to get a `boolean`, for example `count != 0`
+
+error[L0405]: `<` compares numbers, and a `boolean` has no order
+  --> tests/check/types.lym:26:24
+   |
+26 |     constant ordered = flag < flag
+   |                        ^^^^^^^^^^^ comparing `boolean` values
+   |
+help: compare `boolean` values with `==` and `!=`
+
+error[L0206]: unknown name `integer128`
+  --> tests/check/types.lym:27:24
+   |
+27 |     constant unknown = integer128
+   |                        ^^^^^^^^^^ nothing with this name is visible here
+   |
+help: declare it before this line with `constant` or `variable`, or check the spelling
+
+error[L0403]: unknown type `integer128`
+  --> tests/check/types.lym:28:14
+   |
+28 |     constant integer128 wide = 1
+   |              ^^^^^^^^^^ no integer type has this size
+   |
+help: integer types have 8, 16, 32 or 64 bits: `integer8` to `integer64`, `unsigned8` to `unsigned64`
+
+error[L0406]: division by zero
+  --> tests/check/types.lym:29:31
+   |
+29 |     constant float_like = 1 / 0
+   |                               ^ this is always zero
+   |
+help: divide by a value that is not zero; the program would stop here every time it ran this line
+
+error[L0404]: this number is too large for any integer type
+  --> tests/check/types.lym:30:21
+   |
+30 |     constant huge = 18_446_744_073_709_551_615 * 18_446_744_073_709_551_615
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ too large
+   |
+help: the largest integer, an `unsigned64`, is 18446744073709551615
+
+found 23 errors in tests/check/types.lym
+run `lymra explain L0404` to read why a rule exists and how to fix it

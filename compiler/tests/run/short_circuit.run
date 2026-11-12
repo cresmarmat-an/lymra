@@ -1,0 +1,6 @@
+exit status 0
+--- standard output
+false
+true
+the right sides never ran
+--- standard error

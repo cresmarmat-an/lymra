@@ -1,0 +1,34 @@
+function classify(integer64 number) returns string
+    if number < 0
+        return "negative"
+    else if number == 0
+        return "zero"
+    else
+        return "positive"
+
+function main()
+    for value in range(-1, 2)
+        print("{value} is {classify(value)}")
+
+    variable integer64 count = 0
+    while true
+        count = count + 1
+        if count % 2 == 0
+            continue
+        if count > 7
+            break
+        print("odd {count}")
+
+    variable integer64 sum = 0
+    for row in range(0, 3)
+        for column in range(0, 3)
+            if row == column
+                continue
+            sum = sum + row * 10 + column
+    print("sum {sum}")
+
+    for _ in range(0, 2)
+        print("again")
+    for empty in range(5, 5)
+        print("never {empty}")
+    print("done")

@@ -1,0 +1,59 @@
+error[L0602]: this code can never run
+ --> tests/check/control_flow.lym:3:5
+  |
+2 |     return 1
+  |     -------- this always leaves before the code below
+3 |     print("never")
+  |     ^^^^^^^^^^^^^^ unreachable
+  |
+help: remove it, or move it before the line that leaves
+
+error[L0602]: this code can never run
+  --> tests/check/control_flow.lym:10:5
+   |
+ 6 |     if flag
+   |     ------- this always leaves before the code below
+...
+10 |     print("never")
+   |     ^^^^^^^^^^^^^^ unreachable
+   |
+help: remove it, or move it before the line that leaves
+
+error[L0601]: `break` outside a loop
+  --> tests/check/control_flow.lym:13:5
+   |
+13 |     break
+   |     ^^^^^ no `while` or `for` loop encloses this
+   |
+help: use `break` inside a loop, or `return` to leave the function
+
+error[L0601]: `continue` outside a loop
+  --> tests/check/control_flow.lym:14:5
+   |
+14 |     continue
+   |     ^^^^^^^^ no `while` or `for` loop encloses this
+   |
+help: use `continue` inside a loop, or `return` to leave the function
+
+error[L0602]: this code can never run
+  --> tests/check/control_flow.lym:17:9
+   |
+16 |         break
+   |         ----- this always leaves before the code below
+17 |         print("never")
+   |         ^^^^^^^^^^^^^^ unreachable
+   |
+help: remove it, or move it before the line that leaves
+
+error[L0602]: this code can never run
+  --> tests/check/control_flow.lym:20:9
+   |
+19 |         continue
+   |         -------- this always leaves before the code below
+20 |         print("{index}")
+   |         ^^^^^^^^^^^^^^^^ unreachable
+   |
+help: remove it, or move it before the line that leaves
+
+found 6 errors in tests/check/control_flow.lym
+run `lymra explain L0602` to read why a rule exists and how to fix it

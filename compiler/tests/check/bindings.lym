@@ -1,0 +1,29 @@
+constant integer64 never_used = 1
+public constant integer64 exported = 2
+
+function unused_parameter(integer64 value, integer64 _) returns integer64
+    return 1
+
+function needless_mark(variable integer64 count) returns integer64
+    return count
+
+function changes_parameter(integer64 value) returns integer64
+    value = value + 1
+    return value
+
+function main()
+    constant unused_local = 1
+    variable integer64 only_written = 0
+    only_written = 5
+    variable integer64 never_changes = 3
+    print("{never_changes}")
+    constant fixed = 1
+    fixed = 2
+    exported = 3
+    unused_parameter = 4
+    for index in range(0, 3)
+        index = 1
+    for unused_index in range(0, 2)
+        print("loop")
+    variable _ = 1
+    print("{unused_parameter(1, 2)} {needless_mark(variable fixed)} {changes_parameter(1)}")

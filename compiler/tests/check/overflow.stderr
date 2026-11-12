@@ -1,0 +1,26 @@
+error[L0404]: this always overflows `integer64`
+ --> tests/check/overflow.lym:2:30
+  |
+2 | constant integer64 too_far = largest + 1
+  |                              ^^^^^^^^^^^ the result is known now, and it does not fit
+  |
+help: `integer64` holds -9223372036854775808 to 9223372036854775807; the program would stop here every time it ran this line
+
+error[L0406]: division by zero
+ --> tests/check/overflow.lym:9:55
+  |
+9 |     print("{too_far} {last} {fits} {wraps} {largest / 0} {fits % (2 - 2)}")
+  |                                                       ^ this is always zero
+  |
+help: divide by a value that is not zero; the program would stop here every time it ran this line
+
+error[L0406]: division by zero
+ --> tests/check/overflow.lym:9:66
+  |
+9 |     print("{too_far} {last} {fits} {wraps} {largest / 0} {fits % (2 - 2)}")
+  |                                                                  ^^^^^^^ this is always zero
+  |
+help: divide by a value that is not zero; the program would stop here every time it ran this line
+
+found 3 errors in tests/check/overflow.lym
+run `lymra explain L0404` to read why a rule exists and how to fix it

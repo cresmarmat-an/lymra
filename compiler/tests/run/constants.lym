@@ -1,0 +1,13 @@
+#!optimize size
+
+constant integer64 seconds_per_minute = 60
+constant integer64 seconds_per_hour = seconds_per_minute * 60
+constant integer64 seconds_per_day = seconds_per_hour * 24
+constant boolean long_day = seconds_per_day > 80_000
+constant string unit = "seconds"
+constant unsigned16 port = 8_080
+
+function main()
+    print("{seconds_per_day} {unit} in a day")
+    print("long day: {long_day}")
+    print("port {port}")

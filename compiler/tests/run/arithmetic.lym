@@ -1,0 +1,45 @@
+#[
+    Integer arithmetic on every integer type, including the edges of each range.
+    Division truncates toward zero, and a remainder takes the sign of the dividend.
+]#
+
+constant integer64 limit = 1_000
+constant integer64 doubled = limit * 2
+constant boolean large = doubled > 1_500
+
+function main()
+    variable integer64 total = 0
+    total = total + 40
+    total = total - 2
+    total = total * 3
+    print("total {total}")
+
+    constant integer64 seven = 7
+    constant integer64 minus_seven = -7
+    constant integer64 two = 2
+    constant integer64 minus_three = -3
+    print("{seven / two} {minus_seven / two} {seven % minus_three} {minus_seven % minus_three}")
+    print("folded {7 / 2} {-7 / 2} {7 % -3} {-7 % 3}")
+
+    variable unsigned8 small = 250
+    small = small + 5
+    print("unsigned8 {small}")
+
+    constant unsigned64 largest = 18_446_744_073_709_551_615
+    constant integer64 lowest = -9_223_372_036_854_775_808
+    constant integer64 minus_one = -1
+    print("edges {largest} {lowest} {lowest % minus_one}")
+
+    constant integer8 hundred = -100
+    constant integer8 divisor = 7
+    print("integer8 {hundred / divisor} {hundred % divisor}")
+
+    constant integer32 positive = 5
+    constant integer32 negative = -positive
+    constant integer16 medium = 32_767
+    constant unsigned32 wide = 4_000_000_000
+    print("mixed {negative} {medium} {wide}")
+
+    constant boolean equal = seven == 7
+    print("compare {equal} {seven != 7} {seven < 10} {seven >= 10}")
+    print("constants {limit} {doubled} {large}")

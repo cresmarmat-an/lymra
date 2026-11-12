@@ -1,0 +1,6 @@
+function main()
+    constant integer64 count = 3
+    assert count > 0
+    print("first check passed")
+    assert count > 5
+    print("never printed")

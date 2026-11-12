@@ -1,0 +1,43 @@
+function add(integer64 first, integer64 second) returns integer64
+    return first + second
+
+function nothing()
+    return
+
+function grade(integer64 score) returns string
+    if score > 90
+        return "A"
+    else if score > 80
+        return "B"
+
+function looping() returns integer64
+    while true
+        return 1
+
+function returns_value()
+    return 5
+
+function needs_value() returns integer64
+    return
+
+function increment(variable integer64 count)
+    count = count + 1
+
+function main(integer64 argument) returns integer64
+    print("{add(1)} {add(1, 2, 3)}")
+    print("a", "b")
+    constant value = nothing()
+    add(1, 2)
+    constant _ = add(1, 2)
+    variable integer64 total = 0
+    increment(total)
+    increment(variable total)
+    print("{add(variable total, 1)}")
+    total == 5
+    total + 1
+    constant named = add(first = 1, second = 2)
+    constant called = total(1)
+    constant reference = add
+    add = 3
+    print("{grade(95)} {looping()} {value} {named} {called} {reference} {argument}")
+    return 0

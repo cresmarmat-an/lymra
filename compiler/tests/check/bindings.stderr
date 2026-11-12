@@ -1,0 +1,140 @@
+error[L0202]: the constant `never_used` is never used
+ --> tests/check/bindings.lym:1:20
+  |
+1 | constant integer64 never_used = 1
+  |                    ^^^^^^^^^^ declared here, never read
+  |
+help: use it, or remove its declaration
+
+error[L0202]: the parameter `value` is never used
+ --> tests/check/bindings.lym:4:37
+  |
+4 | function unused_parameter(integer64 value, integer64 _) returns integer64
+  |                                     ^^^^^ declared here, never read
+  |
+help: if the function has to take this parameter, name it `_`
+  |
+4 | function unused_parameter(integer64 _, integer64 _) returns integer64
+
+error[L0209]: the parameter `count` is declared `variable` but never changes
+ --> tests/check/bindings.lym:7:43
+  |
+7 | function needless_mark(variable integer64 count) returns integer64
+  |                                           ^^^^^ nothing changes it
+  |
+help: remove `variable`; the function only reads this parameter
+  |
+7 | function needless_mark(integer64 count) returns integer64
+
+error[L0208]: `value` is a parameter, so it cannot change
+  --> tests/check/bindings.lym:11:5
+   |
+10 | function changes_parameter(integer64 value) returns integer64
+   |                                      ----- declared as a parameter here
+11 |     value = value + 1
+   |     ^^^^^ changed here
+   |
+help: copy it into a local first, as in `variable local_value = value`; or declare the parameter `variable` to change the caller's binding
+
+error[L0202]: the constant `unused_local` is never used
+  --> tests/check/bindings.lym:15:14
+   |
+15 |     constant unused_local = 1
+   |              ^^^^^^^^^^^^ declared here, never read
+   |
+help: use it, or remove its declaration
+
+error[L0202]: the variable `only_written` is assigned but never read
+  --> tests/check/bindings.lym:16:24
+   |
+16 |     variable integer64 only_written = 0
+   |                        ^^^^^^^^^^^^ its value is never used
+   |
+help: use its value, or remove the variable and its assignments
+
+error[L0209]: the variable `never_changes` is declared `variable` but never changes
+  --> tests/check/bindings.lym:18:24
+   |
+18 |     variable integer64 never_changes = 3
+   |                        ^^^^^^^^^^^^^ nothing changes it
+   |
+help: declare it with `constant`
+   |
+18 |     constant integer64 never_changes = 3
+
+error[L0208]: `fixed` is a constant, so it cannot change
+  --> tests/check/bindings.lym:21:5
+   |
+20 |     constant fixed = 1
+   |              ----- declared as a constant here
+21 |     fixed = 2
+   |     ^^^^^ changed here
+   |
+help: declare it with `variable` if it has to change
+   |
+20 |     variable fixed = 1
+
+error[L0208]: `exported` is a top-level constant, so it cannot change
+  --> tests/check/bindings.lym:22:5
+   |
+ 2 | public constant integer64 exported = 2
+   |                           -------- declared as a top-level constant here
+...
+22 |     exported = 3
+   |     ^^^^^^^^ changed here
+   |
+help: a top-level constant never changes; declare a `variable` inside the function
+
+error[L0507]: `unused_parameter` is a function, so nothing can be assigned to it
+  --> tests/check/bindings.lym:23:5
+   |
+23 |     unused_parameter = 4
+   |     ^^^^^^^^^^^^^^^^ assigned here
+   |
+help: assign to a `variable` instead
+
+error[L0208]: `index` is a loop variable, so it cannot change
+  --> tests/check/bindings.lym:25:9
+   |
+24 |     for index in range(0, 3)
+   |         ----- declared as a loop variable here
+25 |         index = 1
+   |         ^^^^^ changed here
+   |
+help: copy it into a local first, as in `variable local_index = index`
+
+error[L0202]: the loop variable `unused_index` is never used
+  --> tests/check/bindings.lym:26:9
+   |
+26 |     for unused_index in range(0, 2)
+   |         ^^^^^^^^^^^^ declared here, never read
+   |
+help: if the loop only repeats, name the variable `_`
+   |
+26 |     for _ in range(0, 2)
+
+error[L0209]: `_` is declared `variable`, but nothing can change it
+  --> tests/check/bindings.lym:28:5
+   |
+28 |     variable _ = 1
+   |     ^^^^^^^^ `_` cannot be named again, so it never changes
+   |
+help: declare it with `constant`
+   |
+28 |     constant _ = 1
+
+error[L0208]: `fixed` is a constant, so it cannot change
+  --> tests/check/bindings.lym:29:61
+   |
+20 |     constant fixed = 1
+   |              ----- declared as a constant here
+...
+29 |     print("{unused_parameter(1, 2)} {needless_mark(variable fixed)} {changes_parameter(1)}")
+   |                                                             ^^^^^ changed here
+   |
+help: declare it with `variable` if it has to change
+   |
+20 |     variable fixed = 1
+
+found 14 errors in tests/check/bindings.lym
+run `lymra explain L0202` to read why a rule exists and how to fix it

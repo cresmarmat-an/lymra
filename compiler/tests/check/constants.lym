@@ -1,0 +1,11 @@
+function compute() returns integer64
+    return 4
+
+constant computed = compute()
+constant first = second
+constant second = first
+constant self_reference = self_reference + 1
+constant fine = 3 * 4
+
+function main()
+    print("{computed} {first} {second} {self_reference} {fine}")

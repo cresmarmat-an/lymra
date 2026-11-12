@@ -1,0 +1,21 @@
+function early() returns integer64
+    return 1
+    print("never")
+
+function after_branches(boolean flag) returns integer64
+    if flag
+        return 1
+    else
+        return 2
+    print("never")
+
+function main()
+    break
+    continue
+    while true
+        break
+        print("never")
+    for index in range(0, 3)
+        continue
+        print("{index}")
+    print("{early()} {after_branches(true)}")

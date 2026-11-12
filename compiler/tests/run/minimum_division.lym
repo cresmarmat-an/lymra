@@ -1,0 +1,4 @@
+function main()
+    constant integer64 lowest = -9_223_372_036_854_775_808
+    constant integer64 minus_one = -1
+    print("{lowest / minus_one}")

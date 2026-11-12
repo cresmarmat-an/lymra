@@ -2,11 +2,15 @@
 
 use std::fs;
 use std::io::Write;
+use std::path::Path;
 use std::process::ExitCode;
 
 use crate::ast::print_module;
+use crate::codegen;
 use crate::diagnostics::{ErrorCode, render_report};
-use crate::frontend::analyze;
+use crate::driver::{self, Compiler, DriverError, TemporaryDirectory, Warnings};
+use crate::frontend::{self, analyze};
+use crate::ir::Program;
 use crate::source::SourceFile;
 
 const SOURCE_EXTENSION: &str = ".lym";
@@ -15,12 +19,20 @@ const USAGE: &str = "\
 Usage: lymra <command>
 
 Commands:
+  run <file.lym>       Build a program and run it
+  build <file.lym>     Build a program into an executable next to its source
   check <file.lym>     Check a file and report every error in it
+  emit <file.lym>      Print the C code the compiler generates for a program
   parse <file.lym>     Print the syntax tree of a file
   explain <code>       Explain an error code, for example: lymra explain L0102
   help                 Show this message
   version              Show the compiler version
+
+Building needs a C compiler, GCC or Clang. Set CC to choose one.
 ";
+
+/// The commands that take exactly one operand: a file, or an error code for `explain`.
+const COMMANDS_WITH_OPERAND: [&str; 6] = ["run", "build", "check", "emit", "parse", "explain"];
 
 /// How a run of the command line ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,8 +40,10 @@ pub enum Outcome {
     Success,
     /// The Lymra program has errors. They were reported.
     Rejected,
-    /// The command line itself was wrong, or a file could not be read.
+    /// The command line itself was wrong, a file could not be read, or no C compiler was found.
     Failed,
+    /// `lymra run` started the program, and this is the program's own exit code.
+    Exited(u8),
 }
 
 impl From<Outcome> for ExitCode {
@@ -38,6 +52,7 @@ impl From<Outcome> for ExitCode {
             Outcome::Success => ExitCode::SUCCESS,
             Outcome::Rejected => ExitCode::from(1),
             Outcome::Failed => ExitCode::from(2),
+            Outcome::Exited(code) => ExitCode::from(code),
         }
     }
 }
@@ -46,7 +61,10 @@ impl From<Outcome> for ExitCode {
 pub fn run(arguments: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> Outcome {
     let words: Vec<&str> = arguments.iter().map(String::as_str).collect();
     match words.as_slice() {
+        ["run", path] => run_program(path, stdout, stderr),
+        ["build", path] => build(path, stdout, stderr),
         ["check", path] => check(path, stdout, stderr),
+        ["emit", path] => emit(path, stdout, stderr),
         ["parse", path] => parse(path, stdout, stderr),
         ["explain", code] => explain(code, stdout, stderr),
         ["help" | "--help" | "-h"] => print(stdout, USAGE, Outcome::Success),
@@ -56,7 +74,7 @@ pub fn run(arguments: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write)
             Outcome::Success,
         ),
         [] => print(stderr, USAGE, Outcome::Failed),
-        [command @ ("check" | "parse" | "explain")] => {
+        [command] if COMMANDS_WITH_OPERAND.contains(command) => {
             let operand = if *command == "explain" {
                 "an error code"
             } else {
@@ -65,7 +83,7 @@ pub fn run(arguments: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write)
             let message = format!("error: `lymra {command}` needs {operand}\n\n{USAGE}");
             print(stderr, &message, Outcome::Failed)
         }
-        [command @ ("check" | "parse" | "explain"), ..] => {
+        [command, ..] if COMMANDS_WITH_OPERAND.contains(command) => {
             let message = format!("error: `lymra {command}` takes exactly one argument\n\n{USAGE}");
             print(stderr, &message, Outcome::Failed)
         }
@@ -77,25 +95,111 @@ pub fn run(arguments: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write)
 }
 
 fn check(path: &str, stdout: &mut dyn Write, stderr: &mut dyn Write) -> Outcome {
-    let source = match load(path) {
+    let source = match load_or_report(path, stderr) {
         Ok(source) => source,
-        Err(message) => return print(stderr, &message, Outcome::Failed),
+        Err(outcome) => return outcome,
     };
-    let analysis = analyze(&source);
-    if analysis.diagnostics.is_empty() {
-        return print(stdout, &format!("{path}: no errors\n"), Outcome::Success);
+    match frontend::check(&source) {
+        Ok(_) => print(stdout, &format!("{path}: no errors\n"), Outcome::Success),
+        Err(diagnostics) => print(
+            stderr,
+            &render_report(&diagnostics, &source),
+            Outcome::Rejected,
+        ),
     }
-    print(
-        stderr,
-        &render_report(&analysis.diagnostics, &source),
-        Outcome::Rejected,
-    )
+}
+
+fn emit(path: &str, stdout: &mut dyn Write, stderr: &mut dyn Write) -> Outcome {
+    let source = match load_or_report(path, stderr) {
+        Ok(source) => source,
+        Err(outcome) => return outcome,
+    };
+    match checked_program(&source, stderr) {
+        Ok(program) => print(
+            stdout,
+            &codegen::generate(&program, &source),
+            Outcome::Success,
+        ),
+        Err(outcome) => outcome,
+    }
+}
+
+fn build(path: &str, stdout: &mut dyn Write, stderr: &mut dyn Write) -> Outcome {
+    let source = match load_or_report(path, stderr) {
+        Ok(source) => source,
+        Err(outcome) => return outcome,
+    };
+    let program = match checked_program(&source, stderr) {
+        Ok(program) => program,
+        Err(outcome) => return outcome,
+    };
+    let executable = driver::executable_path(Path::new(path));
+    match compile(&program, &source, &executable) {
+        Ok(()) => print(
+            stdout,
+            &format!("{path}: built {}\n", executable.display()),
+            Outcome::Success,
+        ),
+        Err(error) => print(stderr, &error.to_string(), Outcome::Failed),
+    }
+}
+
+/// Builds the program in a temporary directory, runs it, and passes its exit code on.
+fn run_program(path: &str, stdout: &mut dyn Write, stderr: &mut dyn Write) -> Outcome {
+    let source = match load_or_report(path, stderr) {
+        Ok(source) => source,
+        Err(outcome) => return outcome,
+    };
+    let program = match checked_program(&source, stderr) {
+        Ok(program) => program,
+        Err(outcome) => return outcome,
+    };
+    let workspace = match TemporaryDirectory::new() {
+        Ok(workspace) => workspace,
+        Err(error) => return print(stderr, &error.to_string(), Outcome::Failed),
+    };
+    let executable = workspace
+        .path()
+        .join(format!("program{}", std::env::consts::EXE_SUFFIX));
+    if let Err(error) = compile(&program, &source, &executable) {
+        return print(stderr, &error.to_string(), Outcome::Failed);
+    }
+    // Anything this process still holds must be written before the program writes its own output.
+    let _ = stdout.flush();
+    match driver::run_executable(&executable) {
+        Ok(status) => Outcome::Exited(driver::exit_code(status)),
+        Err(error) => print(stderr, &error.to_string(), Outcome::Failed),
+    }
+}
+
+fn compile(
+    program: &Program<'_>,
+    source: &SourceFile,
+    executable: &Path,
+) -> Result<(), DriverError> {
+    let compiler = Compiler::find()?;
+    let c_source = codegen::generate(program, source);
+    compiler.compile(&c_source, executable, program.optimize, Warnings::Default)
+}
+
+/// Checks a program that is meant to run. Errors are written to `stderr` before this returns.
+fn checked_program<'src>(
+    source: &'src SourceFile,
+    stderr: &mut dyn Write,
+) -> Result<Program<'src>, Outcome> {
+    frontend::check_program(source).map_err(|diagnostics| {
+        print(
+            stderr,
+            &render_report(&diagnostics, source),
+            Outcome::Rejected,
+        )
+    })
 }
 
 fn parse(path: &str, stdout: &mut dyn Write, stderr: &mut dyn Write) -> Outcome {
-    let source = match load(path) {
+    let source = match load_or_report(path, stderr) {
         Ok(source) => source,
-        Err(message) => return print(stderr, &message, Outcome::Failed),
+        Err(outcome) => return outcome,
     };
     let analysis = analyze(&source);
     if analysis.diagnostics.is_empty() {
@@ -119,6 +223,11 @@ fn explain(code: &str, stdout: &mut dyn Write, stderr: &mut dyn Write) -> Outcom
             print(stderr, &message, Outcome::Failed)
         }
     }
+}
+
+/// Reads a source file. A failure is written to `stderr` before this returns.
+fn load_or_report(path: &str, stderr: &mut dyn Write) -> Result<SourceFile, Outcome> {
+    load(path).map_err(|message| print(stderr, &message, Outcome::Failed))
 }
 
 /// Reads a source file. The error is a complete message, ready to print.

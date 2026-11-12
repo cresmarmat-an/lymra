@@ -7,7 +7,7 @@
 mod common;
 
 use lymra::diagnostics::{ErrorCode, render_report};
-use lymra::frontend::analyze;
+use lymra::frontend::{self, analyze};
 
 const FENCE_OPEN: &str = "```lymra";
 const FENCE_CLOSE: &str = "```";
@@ -35,6 +35,18 @@ fn code_blocks(page: &str, heading: &str) -> Vec<String> {
     blocks
 }
 
+/// Every error code the compiler reports for a source, from syntax to meaning.
+fn reported_codes(text: &str) -> Vec<ErrorCode> {
+    let source = common::source("example.lym", text);
+    match frontend::check(&source) {
+        Ok(_) => Vec::new(),
+        Err(diagnostics) => diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect(),
+    }
+}
+
 #[test]
 fn each_example_produces_the_error_its_page_explains() {
     for &code in ErrorCode::ALL {
@@ -45,12 +57,7 @@ fn each_example_produces_the_error_its_page_explains() {
         let examples = code_blocks(code.explanation(), "## Example");
         assert!(!examples.is_empty(), "docs/errors/{code}.md has no example");
         for example in examples {
-            let source = common::source("example.lym", &example);
-            let reported: Vec<ErrorCode> = analyze(&source)
-                .diagnostics
-                .iter()
-                .map(|diagnostic| diagnostic.code)
-                .collect();
+            let reported = reported_codes(&example);
             assert!(
                 reported.contains(&code),
                 "the example in docs/errors/{code}.md reports {reported:?}, not {code}:\n{example}"
@@ -59,17 +66,47 @@ fn each_example_produces_the_error_its_page_explains() {
     }
 }
 
+/// True for the codes the semantic checker reports. Their pages show complete programs.
+fn is_about_meaning(code: ErrorCode) -> bool {
+    const BINDING_RULES: [ErrorCode; 7] = [
+        ErrorCode::L0201,
+        ErrorCode::L0202,
+        ErrorCode::L0206,
+        ErrorCode::L0207,
+        ErrorCode::L0208,
+        ErrorCode::L0209,
+        ErrorCode::L0210,
+    ];
+    code.as_str() >= "L0400" || code == ErrorCode::L0309 || BINDING_RULES.contains(&code)
+}
+
+/**
+ * A fix has to be valid syntax and must not produce the error its page is
+ * about. On pages about meaning, the fix is a complete program that passes
+ * every check. Fixes on syntax pages may use names they do not declare.
+ */
 #[test]
-fn each_fix_is_accepted() {
+fn each_fix_removes_its_error() {
     for &code in ErrorCode::ALL {
         for fix in code_blocks(code.explanation(), "## Fix") {
             let source = common::source("fix.lym", &fix);
-            let diagnostics = analyze(&source).diagnostics;
+            let syntax = analyze(&source).diagnostics;
             assert!(
-                diagnostics.is_empty(),
-                "the fix in docs/errors/{code}.md is rejected:\n{}",
-                render_report(&diagnostics, &source)
+                syntax.is_empty(),
+                "the fix in docs/errors/{code}.md has syntax errors:\n{}",
+                render_report(&syntax, &source)
             );
+            let reported = reported_codes(&fix);
+            assert!(
+                !reported.contains(&code),
+                "the fix in docs/errors/{code}.md still reports {code}:\n{fix}"
+            );
+            if is_about_meaning(code) {
+                assert!(
+                    reported.is_empty(),
+                    "the fix in docs/errors/{code}.md is not a complete program; it reports {reported:?}:\n{fix}"
+                );
+            }
         }
     }
 }

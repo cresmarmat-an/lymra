@@ -1,0 +1,13 @@
+#[
+    `and` and `or` stop as soon as the result is known, so the right side
+    here never runs. If it did, the division by zero would stop the program.
+]#
+
+function explode() returns boolean
+    constant integer64 zero = 0
+    return 1 / zero == 0
+
+function main()
+    print("{false and explode()}")
+    print("{true or explode()}")
+    print("the right sides never ran")

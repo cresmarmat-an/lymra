@@ -1,0 +1,12 @@
+exit status 0
+--- standard output
+total 114
+3 -3 1 -1
+folded 3 -3 1 -1
+unsigned8 255
+edges 18446744073709551615 -9223372036854775808 0
+integer8 -14 -2
+mixed -5 32767 4000000000
+compare true false true false
+constants 1000 2000 true
+--- standard error

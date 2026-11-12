@@ -1,0 +1,19 @@
+#!optimize debug
+
+function is_prime(integer64 candidate) returns boolean
+    if candidate < 2
+        return false
+    variable integer64 divisor = 2
+    while divisor * divisor <= candidate
+        if candidate % divisor == 0
+            return false
+        divisor = divisor + 1
+    return true
+
+function main()
+    variable integer64 found = 0
+    for candidate in range(0, 50)
+        if is_prime(candidate)
+            print("{candidate}")
+            found = found + 1
+    print("{found} primes below 50")

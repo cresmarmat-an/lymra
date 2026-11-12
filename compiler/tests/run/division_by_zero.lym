@@ -1,0 +1,6 @@
+function divide(integer64 total, integer64 parts) returns integer64
+    return total / parts
+
+function main()
+    print("{divide(10, 2)}")
+    print("{divide(10, 0)}")

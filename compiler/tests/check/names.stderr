@@ -1,0 +1,105 @@
+error[L0207]: `limit` is already declared
+ --> tests/check/names.lym:3:10
+  |
+1 | constant integer64 limit = 10
+  |                    ----- first declared here
+...
+3 | function limit() returns integer64
+  |          ^^^^^ declared again here
+  |
+help: choose another name; in Lymra one name never hides another
+
+error[L0207]: `print` is the name of a built-in function
+ --> tests/check/names.lym:6:10
+  |
+6 | function print()
+  |          ^^^^^ this name is taken
+  |
+help: choose another name
+
+error[L0207]: `width` is already declared
+ --> tests/check/names.lym:9:42
+  |
+9 | function area(integer64 width, integer64 width) returns integer64
+  |                                          ^^^^^ declared again here
+  |                         ----- first declared here
+  |
+help: choose another name; in Lymra one name never hides another
+
+error[L0206]: unknown name `totl`
+  --> tests/check/names.lym:14:13
+   |
+14 |     print("{totl}")
+   |             ^^^^ nothing with this name is visible here
+   |
+help: did you mean `total`?
+   |
+14 |     print("{total}")
+
+error[L0206]: unknown name `undefined_name`
+  --> tests/check/names.lym:15:13
+   |
+15 |     print("{undefined_name}")
+   |             ^^^^^^^^^^^^^^ nothing with this name is visible here
+   |
+help: declare it before this line with `constant` or `variable`, or check the spelling
+
+error[L0201]: assignment to undeclared name `totla`
+  --> tests/check/names.lym:16:5
+   |
+16 |     totla = 5
+   |     ^^^^^ `totla` is not declared in this scope
+   |
+help: did you mean `total`?
+   |
+16 |     total = 5
+
+error[L0201]: assignment to undeclared name `countr`
+  --> tests/check/names.lym:18:5
+   |
+18 |     countr = counter + 1
+   |     ^^^^^^ `countr` is not declared in this scope
+   |
+help: did you mean `counter`?
+   |
+18 |     counter = counter + 1
+
+error[L0207]: `limit` is already declared
+  --> tests/check/names.lym:20:14
+   |
+ 1 | constant integer64 limit = 10
+   |                    ----- first declared here
+...
+20 |     constant limit = 3
+   |              ^^^^^ declared again here
+   |
+help: choose another name; in Lymra one name never hides another
+
+error[L0207]: `range` is the name of a built-in function
+  --> tests/check/names.lym:21:14
+   |
+21 |     constant range = 4
+   |              ^^^^^ this name is taken
+   |
+help: choose another name
+
+error[L0206]: `_` cannot be read
+  --> tests/check/names.lym:22:13
+   |
+22 |     print("{_}")
+   |             ^ `_` names a value that is thrown away
+   |
+help: give the value a real name where it is declared
+
+error[L0201]: `_` cannot be assigned to
+  --> tests/check/names.lym:23:5
+   |
+23 |     _ = area(1, 2)
+   |     ^ `_` is not a binding
+   |
+help: to compute a value and drop it, declare it as `_`
+   |
+23 |     constant _ = area(1, 2)
+
+found 11 errors in tests/check/names.lym
+run `lymra explain L0207` to read why a rule exists and how to fix it

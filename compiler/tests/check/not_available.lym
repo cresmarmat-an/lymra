@@ -1,0 +1,29 @@
+use math.geometry
+
+type Frog
+    string name
+
+choice Shape
+    Dot
+
+function area(float64 width) returns integer64
+    return 1
+
+function main()
+    constant ratio = 1.5
+    constant list[integer32] numbers = list()
+    constant frog = Frog(name = "Kero")
+    constant packed Shape shape = make()
+    constant text = "count is {ratio}"
+    constant same = "a" == "b"
+    print("{frog.name} {numbers[0]} {geometry.area(2.0, 3.0)}")
+    for item in numbers
+        print("{item}")
+    constant counter = range(0, 3)
+    constant evens = filter(numbers) with number
+        number % 2 == 0
+    constant size = length(text)
+    match shape
+        case Dot
+            print("dot")
+    print("{area(1.0)} {same} {counter} {evens} {size}")

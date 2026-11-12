@@ -1,0 +1,162 @@
+error[L0309]: modules are not available yet
+ --> tests/check/not_available.lym:1:5
+  |
+1 | use math.geometry
+  |     ^^^^^^^^^^^^^ the compiler adds this in roadmap phase 4
+  |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: `type` declarations are not available yet
+ --> tests/check/not_available.lym:3:1
+  |
+3 | type Frog
+  | ^^^^^^^^^ the compiler adds this in roadmap phase 2
+  |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: choices and `match` are not available yet
+ --> tests/check/not_available.lym:6:1
+  |
+6 | choice Shape
+  | ^^^^^^^^^^^^ the compiler adds this in roadmap phase 2
+  |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: `float32` and `float64` are not available yet
+ --> tests/check/not_available.lym:9:15
+  |
+9 | function area(float64 width) returns integer64
+  |               ^^^^^^^ the compiler adds this in roadmap phase 2
+  |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: `float32` and `float64` are not available yet
+  --> tests/check/not_available.lym:13:22
+   |
+13 |     constant ratio = 1.5
+   |                      ^^^ the compiler adds this in roadmap phase 2
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: `list`, `stack` and `view` are not available yet
+  --> tests/check/not_available.lym:14:14
+   |
+14 |     constant list[integer32] numbers = list()
+   |              ^^^^^^^^^^^^^^^ the compiler adds this in roadmap phase 3
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: `list` is not available yet
+  --> tests/check/not_available.lym:14:40
+   |
+14 |     constant list[integer32] numbers = list()
+   |                                        ^^^^ the compiler adds this in roadmap phase 3
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: choices and `match` are not available yet
+  --> tests/check/not_available.lym:16:14
+   |
+16 |     constant packed Shape shape = make()
+   |              ^^^^^^^^^^^^ the compiler adds this in roadmap phase 2
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0206]: unknown name `make`
+  --> tests/check/not_available.lym:16:35
+   |
+16 |     constant packed Shape shape = make()
+   |                                   ^^^^ nothing with this name is visible here
+   |
+help: declare it before this line with `constant` or `variable`, or check the spelling
+
+error[L0309]: text with interpolation can only be given to `print` for now
+  --> tests/check/not_available.lym:17:21
+   |
+17 |     constant text = "count is {ratio}"
+   |                     ^^^^^^^^^^^^^^^^^^ the compiler adds this in roadmap phase 3
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: comparing text is not available yet
+  --> tests/check/not_available.lym:18:21
+   |
+18 |     constant same = "a" == "b"
+   |                     ^^^^^^^^^^ the compiler adds this in roadmap phase 2
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: fields are not available yet
+  --> tests/check/not_available.lym:19:13
+   |
+19 |     print("{frog.name} {numbers[0]} {geometry.area(2.0, 3.0)}")
+   |             ^^^^^^^^^ the compiler adds this in roadmap phase 2
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: arrays and indexing are not available yet
+  --> tests/check/not_available.lym:19:25
+   |
+19 |     print("{frog.name} {numbers[0]} {geometry.area(2.0, 3.0)}")
+   |                         ^^^^^^^^^^ the compiler adds this in roadmap phase 2
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: modules are not available yet
+  --> tests/check/not_available.lym:19:38
+   |
+19 |     print("{frog.name} {numbers[0]} {geometry.area(2.0, 3.0)}")
+   |                                      ^^^^^^^^^^^^^ the compiler adds this in roadmap phase 4
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: `for` can only loop over `range` for now
+  --> tests/check/not_available.lym:20:17
+   |
+20 |     for item in numbers
+   |                 ^^^^^^^ the compiler adds this in roadmap phase 3
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: `range` can only be used directly in a `for` loop for now
+  --> tests/check/not_available.lym:22:24
+   |
+22 |     constant counter = range(0, 3)
+   |                        ^^^^^^^^^^^ the compiler adds this in roadmap phase 3
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: `with` blocks are not available yet
+  --> tests/check/not_available.lym:23:38
+   |
+23 |     constant evens = filter(numbers) with number
+   |                                      ^^^^ the compiler adds this in roadmap phase 3
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: `length` is not available yet
+  --> tests/check/not_available.lym:25:21
+   |
+25 |     constant size = length(text)
+   |                     ^^^^^^ the compiler adds this in roadmap phase 2
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: choices and `match` are not available yet
+  --> tests/check/not_available.lym:26:5
+   |
+26 |     match shape
+   |     ^^^^^^^^^^^ the compiler adds this in roadmap phase 2
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: `float32` and `float64` are not available yet
+  --> tests/check/not_available.lym:29:18
+   |
+29 |     print("{area(1.0)} {same} {counter} {evens} {size}")
+   |                  ^^^ the compiler adds this in roadmap phase 2
+   |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+found 20 errors in tests/check/not_available.lym
+run `lymra explain L0309` to read why a rule exists and how to fix it

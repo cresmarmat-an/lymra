@@ -1,0 +1,23 @@
+constant integer64 limit = 10
+
+function limit() returns integer64
+    return 1
+
+function print()
+    return
+
+function area(integer64 width, integer64 width) returns integer64
+    return width
+
+function main()
+    constant total = limit + area(1, 2)
+    print("{totl}")
+    print("{undefined_name}")
+    totla = 5
+    variable integer64 counter = 0
+    countr = counter + 1
+    print("{counter}")
+    constant limit = 3
+    constant range = 4
+    print("{_}")
+    _ = area(1, 2)

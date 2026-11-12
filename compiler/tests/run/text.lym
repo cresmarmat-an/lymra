@@ -1,0 +1,21 @@
+constant string name = "Lymra"
+
+function describe(boolean flag) returns string
+    if flag
+        return "yes"
+    return "no"
+
+function main()
+    print("plain text")
+    print("")
+    print("{name} says hi")
+    print("{{braces}} and \"quotes\" and a back\\slash")
+    print("tab:\tend")
+    print("unicode: café ✓ 日本")
+    print("{describe(true)}, {describe(false)}")
+    print("{true} {false} {-5} {name}")
+    constant unsigned8 byte_value = 200
+    print("byte {byte_value}")
+    constant greeting = "hello"
+    print(greeting)
+    print("question marks?? stay ??= intact")

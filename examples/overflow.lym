@@ -1,0 +1,10 @@
+#[
+    Every integer operation is checked. This program counts past the largest
+    `unsigned8`, so it stops with a runtime error on the sixth round.
+]#
+
+function main()
+    variable unsigned8 level = 250
+    for _ in range(0, 10)
+        level = level + 1
+        print("{level}")

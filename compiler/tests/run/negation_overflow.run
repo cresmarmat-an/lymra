@@ -1,0 +1,9 @@
+exit status 70
+--- standard output
+127
+--- standard error
+error: integer overflow
+ --> tests/run/negation_overflow.lym:2:12
+  |
+2 |     return -value
+  |            ^^^^^^

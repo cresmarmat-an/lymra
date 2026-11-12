@@ -22,25 +22,30 @@ Every name the language defines is a whole English word: `variable`, `constant`,
 
 ## Status
 
-**Edition 0.1, roadmap phase 0.** The compiler reads Lymra source, checks its syntax and naming, and reports every error with a fix. It does not produce programs yet. That is phase 1.
+**Edition 0.1, roadmap phase 1.** The compiler checks Lymra programs and compiles them to native executables through C. Phase 1 covers integers of every size, booleans, text values, functions, `variable` parameters, `if`, `while`, `for` over `range`, and `print`. Every integer operation is checked for overflow, in every build mode. Anything later phases add is rejected with an error that names the phase.
 
 ## Try it
 
-The compiler is written in Rust and has no dependencies. It needs Rust 1.85 or newer.
+The compiler is written in Rust and has no dependencies. It needs Rust 1.85 or newer, and GCC or Clang to build programs.
 
 ```bash
 cargo build --release
 ```
 
 ```bash
-./target/release/lymra check examples/hello.lym
+./target/release/lymra run examples/hello.lym
 ```
 
 | Command | What it does |
 |---|---|
+| `lymra run <file.lym>` | Builds a program and runs it |
+| `lymra build <file.lym>` | Builds a program into an executable next to its source |
 | `lymra check <file.lym>` | Checks a file and reports every error in it |
+| `lymra emit <file.lym>` | Prints the C code the compiler generates |
 | `lymra parse <file.lym>` | Prints the syntax tree of a file |
 | `lymra explain <code>` | Explains an error code: the rule, why it exists, and the fix |
+
+The C compiler is the one in the `CC` environment variable, or else `cc`, `gcc` or `clang`. `#!optimize speed`, `size` or `debug` at the top of a file chooses how it is optimized; the default is `speed`.
 
 An error names the rule, shows the place, and shows the corrected line:
 
@@ -56,11 +61,21 @@ help: write `constant` for a value that never changes, or `variable` for one tha
 2 |     constant string name = "Kero"
 ```
 
+A program that fails a check while it runs stops with the same kind of message, and exit status 70:
+
+```
+error: integer overflow
+ --> examples/overflow.lym:9:17
+  |
+9 |         level = level + 1
+  |                 ^^^^^^^^^
+```
+
 ## Documents
 
 - [Language specification](docs/spec.md)
 - [Error codes](docs/errors/README.md)
-- [Example](examples/hello.lym)
+- Examples: [hello](examples/hello.lym), [overflow](examples/overflow.lym)
 - [Brand assets](branding/README.md)
 
 ## Repository layout
@@ -71,8 +86,14 @@ help: write `constant` for a value that never changes, or `variable` for one tha
 | `compiler/src/parser` | Tokens to the syntax tree, with error recovery |
 | `compiler/src/ast` | The syntax tree, its printer, and a visitor |
 | `compiler/src/lint` | Rules that need the whole tree, such as naming |
+| `compiler/src/semantic` | Names, types and control flow, producing the checked program |
+| `compiler/src/ir` | The checked program: every name resolved, every expression typed |
+| `compiler/src/codegen` | The checked program to C, and the runtime every program includes |
+| `compiler/src/driver.rs` | Finds the C compiler, builds, and runs |
 | `compiler/src/diagnostics` | Error codes and how errors are rendered |
-| `compiler/tests` | Golden files for every error message, plus spec, CLI and robustness tests |
+| `compiler/tests/ui` | Golden syntax errors and syntax trees |
+| `compiler/tests/check` | Golden errors about names, types and control flow |
+| `compiler/tests/run` | Programs that are built with GCC and Clang and run, with their recorded output |
 | `docs/errors` | One page per error code, embedded in the compiler for `lymra explain` |
 
 ## Development
@@ -81,7 +102,7 @@ help: write `constant` for a value that never changes, or `variable` for one tha
 cargo test
 ```
 
-The tests compare the compiler's exact output with files under `compiler/tests/ui`. After a deliberate change to a message, accept the new output:
+The tests compare the compiler's exact output with recorded files: error reports, syntax trees, and the output of programs it builds. They compile every test program with GCC and with Clang, with all warnings as errors, so the generated C stays clean. After a deliberate change, accept the new output:
 
 ```bash
 LYMRA_BLESS=1 cargo test
@@ -94,13 +115,13 @@ Each phase ends with a compiler that passes its own test suite. Nothing advances
 | Phase | Scope | Exit criterion | State |
 |---|---|---|---|
 | 0 | Lexer, parser, diagnostics format | Every snippet in the spec parses or fails with the documented error | Done |
-| 1 | Integers, booleans, functions, `if`, `while`, `print`. Emits C. | `examples/hello.lym` compiles and runs | Next |
-| 2 | Type inference, `string`, `array`, custom types | Type errors carry fix suggestions | |
-| 3 | Data stacks, `list`, `view`, root inference | Escaping-reference programs are rejected with `L0701` | |
+| 1 | Integers, booleans, functions, `if`, `while`, `for` over `range`, `print`. Emits C. | `examples/hello.lym` compiles and runs | Done |
+| 2 | Floats, arrays, custom types and choices, comparing text, `length`, wrapping arithmetic | Type errors carry fix suggestions | Next |
+| 3 | Data stacks, `list`, `stack`, `view`, text built from values, `with` blocks, root inference | Escaping-reference programs are rejected with `L0701` | |
 | 4 | Modules and `public` | Multi-file programs build | |
 | 5 | Pools, error handling, threads | Benchmark suite runs against C++ and Rust | |
 
-The compiler emits C in early phases. That gets native speed from mature backends (GCC, Clang) without writing a code generator first.
+The compiler emits C. That gets native speed from mature optimizers (GCC, Clang) without writing a code generator first.
 
 ## License
 

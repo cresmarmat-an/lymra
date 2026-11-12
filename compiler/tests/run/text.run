@@ -1,0 +1,14 @@
+exit status 0
+--- standard output
+plain text
+
+Lymra says hi
+{braces} and "quotes" and a back\slash
+tab:	end
+unicode: café ✓ 日本
+yes, no
+true false -5 Lymra
+byte 200
+hello
+question marks?? stay ??= intact
+--- standard error

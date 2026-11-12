@@ -1,0 +1,45 @@
+function factorial(integer64 number) returns integer64
+    if number <= 1
+        return 1
+    return number * factorial(number - 1)
+
+function is_even(unsigned32 number) returns boolean
+    if number == 0
+        return true
+    return is_odd(number - 1)
+
+function is_odd(unsigned32 number) returns boolean
+    if number == 0
+        return false
+    return is_even(number - 1)
+
+function swap(variable integer64 first, variable integer64 second)
+    constant saved = first
+    first = second
+    second = saved
+
+function add_twice(variable integer64 total, integer64 amount)
+    add_once(variable total, amount)
+    add_once(variable total, amount)
+
+function add_once(variable integer64 total, integer64 amount)
+    total = total + amount
+
+function noisy() returns integer64
+    print("noisy ran")
+    return 42
+
+function main()
+    print("{factorial(20)}")
+    print("{is_even(10)} {is_odd(7)} {is_even(3)}")
+
+    variable integer64 left = 1
+    variable integer64 right = 2
+    swap(variable left, variable right)
+    print("{left} {right}")
+
+    variable integer64 total = 0
+    add_twice(variable total, 5)
+    print("{total}")
+
+    constant _ = noisy()

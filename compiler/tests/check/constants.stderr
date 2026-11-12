@@ -1,0 +1,29 @@
+error[L0210]: a top-level constant has to be known when the program is compiled
+ --> tests/check/constants.lym:4:21
+  |
+4 | constant computed = compute()
+  |                     ^^^^^^^^^ this is only known when the program runs
+  |
+help: compute it inside a function, or write the value with literals and other top-level constants
+
+error[L0210]: the constant `first` depends on itself
+ --> tests/check/constants.lym:6:19
+  |
+5 | constant first = second
+  |          ----- declared here
+6 | constant second = first
+  |                   ^^^^^ used here while it is being computed
+  |
+help: compute it from values that do not lead back to it
+
+error[L0210]: the constant `self_reference` depends on itself
+ --> tests/check/constants.lym:7:27
+  |
+7 | constant self_reference = self_reference + 1
+  |                           ^^^^^^^^^^^^^^ used here while it is being computed
+  |          -------------- declared here
+  |
+help: compute it from values that do not lead back to it
+
+found 3 errors in tests/check/constants.lym
+run `lymra explain L0210` to read why a rule exists and how to fix it

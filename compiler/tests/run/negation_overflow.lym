@@ -1,0 +1,6 @@
+function negate(integer8 value) returns integer8
+    return -value
+
+function main()
+    print("{negate(-127)}")
+    print("{negate(-128)}")

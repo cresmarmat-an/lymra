@@ -1,0 +1,13 @@
+exit status 70
+--- standard output
+251
+252
+253
+254
+255
+--- standard error
+error: integer overflow
+ --> examples/overflow.lym:9:17
+  |
+9 |         level = level + 1
+  |                 ^^^^^^^^^

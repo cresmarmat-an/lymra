@@ -1,0 +1,31 @@
+function takes_small(unsigned8 value) returns unsigned8
+    return value
+
+function main()
+    constant integer64 count = 3
+    constant unsigned8 small = 300
+    constant integer8 lowest = -129
+    constant integer8 still_fits = -128
+    constant boolean flag = count
+    constant string name = 5
+    constant mixed = count + small
+    constant also_mixed = takes_small(count)
+    constant compared = count == true
+    if count
+        print("count")
+    while name
+        print("name")
+    assert count + 1
+    print(count)
+    print(flag)
+    constant negated = -small
+    constant flipped = -flag
+    constant joined = name + name
+    constant not_number = not count
+    constant both = count and flag
+    constant ordered = flag < flag
+    constant unknown = integer128
+    constant integer128 wide = 1
+    constant float_like = 1 / 0
+    constant huge = 18_446_744_073_709_551_615 * 18_446_744_073_709_551_615
+    print("{still_fits} {mixed} {also_mixed} {compared} {negated} {flipped} {joined} {not_number} {both} {ordered} {unknown} {wide} {float_like} {huge}")
