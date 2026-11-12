@@ -26,7 +26,17 @@ Every name the language defines is a whole English word: `variable`, `constant`,
 
 ## Try it
 
-The compiler is written in Rust and has no dependencies. It needs Rust 1.85 or newer, and GCC, Clang or MSVC to build programs. Every change is tested on x86-64 and ARM64 under Linux, macOS and Windows, on x86-64 under FreeBSD, and as 32-bit x86 code under Linux. On Windows, use GCC from MinGW-w64, Clang, or MSVC's `cl` from a Visual Studio developer prompt; on macOS, the Xcode command line tools provide Clang.
+The compiler is written in Rust and has no dependencies. It needs Rust 1.85 or newer, and GCC, Clang or MSVC to build programs. On Windows, use GCC from MinGW-w64, Clang, or MSVC's `cl` from a Visual Studio developer prompt, in Visual Studio 2019 version 16.8 or newer; on macOS, the Xcode command line tools provide Clang.
+
+Every change is built and tested on each of these:
+
+| System | Processors |
+|---|---|
+| Linux | x86-64, ARM64 and 32-bit x86; under QEMU, 32-bit ARM, 64-bit RISC-V, 64-bit PowerPC and big-endian IBM Z |
+| macOS | ARM64, and x86-64 both on an Intel Mac and under Rosetta |
+| Windows | x86-64, ARM64 and 32-bit x86, with the compilers of Visual Studio 2019, 2022 and the current release |
+| FreeBSD | x86-64 and ARM64 |
+| OpenBSD, NetBSD | x86-64 |
 
 ```bash
 cargo build --release
@@ -105,6 +115,7 @@ error: integer overflow
 | `compiler/tests/check` | Golden errors about names, types and control flow |
 | `compiler/tests/run` | Programs that are built with every C compiler on the machine, with and without the optimizer, and run, with their recorded output |
 | `compiler/tests/runtime_arithmetic.rs` | The runtime's overflow checks, in both the GCC and Clang form and the portable form, against exact arithmetic |
+| `compiler/tests/windows_console.rs`, `pseudo_console.rs` | On Windows, output reaches a console, and a terminal's pseudo console, as the characters printed |
 | `compiler/tests/overflow_proofs` | Thousands of generated programs run in an exact interpreter, to catch a check removed by a wrong proof |
 | `bench` | The same programs in Lymra, C and Rust, and the runner that times them |
 | `docs/errors` | One page per error code, embedded in the compiler for `lymra explain` |
@@ -115,7 +126,7 @@ error: integer overflow
 cargo test
 ```
 
-The tests compare the compiler's exact output with recorded files: error reports, syntax trees, and the output of programs it builds. They compile every test program with GCC and with Clang, with all warnings as errors, so the generated C stays clean. After a deliberate change, accept the new output:
+The tests compare the compiler's exact output with recorded files: error reports, syntax trees, and the output of programs it builds. They compile every test program with each C compiler on the machine, GCC, Clang and MSVC, with all warnings as errors, so the generated C stays clean. `CC` adds a compiler with its arguments, as in `CC="gcc -m32"`, and `LYMRA_TEST_COMPILERS` names the exact list instead, as in `LYMRA_TEST_COMPILERS="cl, clang -m32"`. After a deliberate change, accept the new output:
 
 ```bash
 LYMRA_BLESS=1 cargo test
