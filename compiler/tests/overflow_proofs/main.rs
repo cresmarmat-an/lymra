@@ -132,7 +132,9 @@ impl CheckCount {
             ExprKind::Not(operand) | ExprKind::Fill(operand) | ExprKind::Length(operand) => {
                 self.expr(operand);
             }
-            ExprKind::Compare { left, right, .. } | ExprKind::Logic { left, right, .. } => {
+            ExprKind::Compare { left, right, .. }
+            | ExprKind::Logic { left, right, .. }
+            | ExprKind::Wrapping { left, right, .. } => {
                 self.expr(left);
                 self.expr(right);
             }

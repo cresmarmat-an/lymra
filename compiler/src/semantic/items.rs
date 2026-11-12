@@ -255,7 +255,8 @@ fn runtime_part(expr: &ir::Expr) -> Span {
         | ir::ExprKind::Index { array: operand, .. } => runtime_part(operand),
         ir::ExprKind::Arithmetic { left, right, .. }
         | ir::ExprKind::Compare { left, right, .. }
-        | ir::ExprKind::Logic { left, right, .. } => {
+        | ir::ExprKind::Logic { left, right, .. }
+        | ir::ExprKind::Wrapping { left, right, .. } => {
             if matches!(
                 left.kind,
                 ir::ExprKind::Literal(_) | ir::ExprKind::Constant(_)

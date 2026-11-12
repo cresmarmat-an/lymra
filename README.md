@@ -142,7 +142,7 @@ Each phase ends with a compiler that passes its own test suite. Nothing advances
 |---|---|---|---|
 | 0 | Lexer, parser, diagnostics format | Every snippet in the spec parses or fails with the documented error | Done |
 | 1 | Integers, booleans, functions, `if`, `while`, `for` over `range`, `print`. Emits C. | `examples/hello.lym` compiles and runs | Done |
-| 2 | Floats, arrays, custom types and choices, comparing text, `length`, wrapping arithmetic | Type errors carry fix suggestions | In progress: arrays and `length` done |
+| 2 | Floats, arrays, custom types and choices, comparing text, `length`, wrapping arithmetic | Type errors carry fix suggestions | In progress: arrays, `length` and wrapping arithmetic done |
 | 3 | Data stacks, `list`, `stack`, `view`, text built from values, `with` blocks, root inference | Escaping-reference programs are rejected with `L0701` | |
 | 4 | Modules and `public` | Multi-file programs build | |
 | 5 | Pools, error handling, threads | Benchmark suite runs against C++ and Rust | |

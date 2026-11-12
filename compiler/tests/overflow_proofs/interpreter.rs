@@ -385,6 +385,17 @@ impl Interpreter<'_, '_> {
                     other => Err(Stop::Unsound(format!("element {position} of {other:?}"))),
                 };
             }
+            ExprKind::Wrapping {
+                operator,
+                left,
+                right,
+            } => {
+                let left = self.integer(left, slots)?;
+                let right = self.integer(right, slots)?;
+                let ty =
+                    ty.ok_or_else(|| Stop::Unsound("wrapping without an integer type".to_owned()))?;
+                return Ok(Slot::Integer(operator.apply(left, right, ty)));
+            }
             ExprKind::Fill(value) => {
                 let value = self.expr(value, slots)?;
                 let length = expr

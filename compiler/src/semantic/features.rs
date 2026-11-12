@@ -4,10 +4,7 @@ use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
 use crate::source::Span;
 
 /// Built-in functions the spec describes, with the phase that implements each.
-const FUTURE_FUNCTIONS: [(&str, u8); 15] = [
-    ("wrapping_add", 2),
-    ("wrapping_subtract", 2),
-    ("wrapping_multiply", 2),
+const FUTURE_FUNCTIONS: [(&str, u8); 12] = [
     ("bytes", 3),
     ("slice", 3),
     ("list", 3),

@@ -1,0 +1,23 @@
+#[
+    Wrapping arithmetic goes around its type instead of stopping the
+    program. The values arrive as parameters, so the program computes these
+    when it runs; `folded` is computed while compiling.
+]#
+
+function signed_edges(integer8 low8, integer16 high16, integer32 high32, integer64 low64, integer64 high64)
+    print("integer8 {wrapping_subtract(low8, 1)} {wrapping_multiply(low8, -1)} {wrapping_add(low8, -1)}")
+    print("integer16 {wrapping_add(high16, 1)} {wrapping_multiply(high16, high16)}")
+    print("integer32 {wrapping_add(high32, 1)} {wrapping_multiply(high32, 2)}")
+    print("integer64 {wrapping_add(high64, 1)} {wrapping_subtract(low64, 1)} {wrapping_multiply(high64, high64)}")
+
+function unsigned_edges(unsigned8 top8, unsigned16 top16, unsigned32 top32, unsigned64 top64, unsigned64 zero)
+    print("unsigned8 {wrapping_add(top8, 1)} {wrapping_multiply(top8, top8)}")
+    print("unsigned16 {wrapping_add(top16, 1)} {wrapping_multiply(top16, top16)}")
+    print("unsigned32 {wrapping_add(top32, 1)} {wrapping_multiply(top32, 3)}")
+    print("unsigned64 {wrapping_add(top64, 1)} {wrapping_subtract(zero, 1)} {wrapping_multiply(top64, top64)}")
+
+function main()
+    signed_edges(-128, 32767, 2147483647, -9223372036854775808, 9223372036854775807)
+    unsigned_edges(255, 65535, 4294967295, 18446744073709551615, 0)
+    constant unsigned8 folded = wrapping_add(200, 100)
+    print("folded {folded}")

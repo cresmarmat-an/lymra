@@ -18,6 +18,7 @@ mod items;
 mod scope;
 mod statements;
 mod values;
+mod wrapping;
 
 #[cfg(test)]
 mod tests;
@@ -34,7 +35,14 @@ use scope::{FunctionScope, LocalKind};
 type CheckResult<T> = Result<T, ErrorReported>;
 
 /// The built-in functions of phase 1.
-const BUILT_IN_FUNCTIONS: [&str; 3] = ["print", "range", "length"];
+const BUILT_IN_FUNCTIONS: [&str; 6] = [
+    "print",
+    "range",
+    "length",
+    "wrapping_add",
+    "wrapping_subtract",
+    "wrapping_multiply",
+];
 
 /**
  * Built-in types that are not integers. Floating-point types arrive later in

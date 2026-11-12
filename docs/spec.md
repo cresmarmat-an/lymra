@@ -354,6 +354,7 @@ function main()
 | `range(start, end)` | The integers from `start` up to `end`, without `end`. It is only used in a `for` loop for now. |
 | `length(items)` | The number of elements of an array, or of bytes in a `string`, as an `integer64`. An array's length is part of its type, so it is known while compiling. Phase 3 adds lists, stacks and views. |
 | `array(value)` | An array with every element set to `value`. Its type, and so its length, comes from the place it goes: a declared type, a parameter, or a function's return type (`L0412`). |
+| `wrapping_add(left, right)`, `wrapping_subtract`, `wrapping_multiply` | Arithmetic that wraps around the type instead of stopping the program: the exact result, keeping only as many low bits as the type has, read as two's complement for a signed type. The operands follow the rules of `+`. |
 | `integer8(value)` to `integer64(value)` | Converts an integer to that signed type |
 | `unsigned8(value)` to `unsigned64(value)` | Converts an integer to that unsigned type |
 
@@ -363,7 +364,6 @@ Later phases add these, and until then the compiler rejects each with `L0309`:
 
 | Function | Does | Phase |
 |---|---|---|
-| `wrapping_add(left, right)`, `wrapping_subtract`, `wrapping_multiply` | Arithmetic that wraps around instead of stopping the program | 2 |
 | `bytes(text)` | The UTF-8 bytes of a `string`, as a `view[unsigned8]` | 3 |
 | `slice(items, start, end)` | The elements from `start` up to `end`, without `end`, as a `view`. A slice of a `string` is a `string` that shares storage (Section 3.1); its ends have to fall between characters. | 3 |
 | `list()`, `stack()` | An empty list or stack | 3 |
@@ -373,7 +373,7 @@ Later phases add these, and until then the compiler rejects each with `L0309`:
 | `filter(items) with name`, `sort(variable items) with left, right` | The elements the block accepts; the elements in the block's order (Section 7.7) | 3 |
 | `pool()`, `insert(variable items, value)`, `remove(variable items, handle)` | An empty pool; a stored value's handle; a freed slot (Section 7.6) | 5 |
 
-The names of built-in functions and types cannot be declared again (`L0207`). No binding or function can be called `print`, `length`, `integer32`, `boolean`, `array` or `float64`.
+The names of built-in functions and types cannot be declared again (`L0207`). No binding or function can be called `print`, `length`, `wrapping_add`, `integer32`, `boolean`, `array` or `float64`.
 
 ## 6. Control flow
 

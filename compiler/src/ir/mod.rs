@@ -222,6 +222,12 @@ pub enum ExprKind {
         /// False when every value of the operand's type fits the target, so nothing can fail.
         checked: bool,
     },
+    /// `wrapping_add(left, right)` and the like: arithmetic that wraps around its type and never fails.
+    Wrapping {
+        operator: WrappingOperator,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
     /// `array[index]`, an element of an array.
     Index {
         array: Box<Expr>,
@@ -251,6 +257,7 @@ impl Expr {
             ExprKind::Arithmetic { left, right, .. }
             | ExprKind::Compare { left, right, .. }
             | ExprKind::Logic { left, right, .. }
+            | ExprKind::Wrapping { left, right, .. }
             | ExprKind::Index {
                 array: left,
                 index: right,
@@ -284,9 +291,9 @@ impl Expr {
                 checked,
                 ..
             } => *checked || left.has_effects() || right.has_effects(),
-            ExprKind::Compare { left, right, .. } | ExprKind::Logic { left, right, .. } => {
-                left.has_effects() || right.has_effects()
-            }
+            ExprKind::Compare { left, right, .. }
+            | ExprKind::Logic { left, right, .. }
+            | ExprKind::Wrapping { left, right, .. } => left.has_effects() || right.has_effects(),
             ExprKind::Index {
                 array,
                 index,
@@ -328,6 +335,55 @@ impl ArithmeticOperator {
             Self::Divide => "/",
             Self::Remainder => "%",
         }
+    }
+}
+
+/// The operations that have a wrapping form. Division cannot overflow but by -1, so it has none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WrappingOperator {
+    Add,
+    Subtract,
+    Multiply,
+}
+
+impl WrappingOperator {
+    /// The built-in function that performs it.
+    pub const fn function(self) -> &'static str {
+        match self {
+            Self::Add => "wrapping_add",
+            Self::Subtract => "wrapping_subtract",
+            Self::Multiply => "wrapping_multiply",
+        }
+    }
+
+    pub const fn from_function(name: &str) -> Option<Self> {
+        match name.as_bytes() {
+            b"wrapping_add" => Some(Self::Add),
+            b"wrapping_subtract" => Some(Self::Subtract),
+            b"wrapping_multiply" => Some(Self::Multiply),
+            _ => None,
+        }
+    }
+
+    /// The same operation, without the wrapping.
+    pub const fn arithmetic(self) -> ArithmeticOperator {
+        match self {
+            Self::Add => ArithmeticOperator::Add,
+            Self::Subtract => ArithmeticOperator::Subtract,
+            Self::Multiply => ArithmeticOperator::Multiply,
+        }
+    }
+
+    /// The result for two values of `ty`: exact, then wrapped around the type.
+    pub const fn apply(self, left: i128, right: i128, ty: IntegerType) -> i128 {
+        // Only the low 64 bits of each operand decide the low bits of the result.
+        let (left, right) = (left as u64, right as u64);
+        let bits = match self {
+            Self::Add => left.wrapping_add(right),
+            Self::Subtract => left.wrapping_sub(right),
+            Self::Multiply => left.wrapping_mul(right),
+        };
+        ty.from_bits(bits)
     }
 }
 

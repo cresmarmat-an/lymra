@@ -184,6 +184,18 @@ impl Analyzer<'_> {
                 _ => whole_type,
             },
             ExprKind::Convert { operand, .. } => self.range(operand, bounds).unwrap_or(whole_type),
+            // A wrapping result is the exact one when that fits the type, and otherwise could be any value of it.
+            ExprKind::Wrapping {
+                operator,
+                left,
+                right,
+            } => match (self.range(left, bounds), self.range(right, bounds)) {
+                (Some(left), Some(right)) => left
+                    .apply(operator.arithmetic(), right)
+                    .filter(|exact| exact.fits(ty))
+                    .unwrap_or(whole_type),
+                _ => whole_type,
+            },
             ExprKind::Length(operand) => match &operand.ty {
                 Type::Array(array) => Interval::exact(i128::from(array.length)),
                 Type::Integer(_) | Type::Boolean | Type::String => Interval {
@@ -241,6 +253,7 @@ impl Analyzer<'_> {
             ExprKind::Arithmetic { left, right, .. }
             | ExprKind::Compare { left, right, .. }
             | ExprKind::Logic { left, right, .. }
+            | ExprKind::Wrapping { left, right, .. }
             | ExprKind::Index {
                 array: left,
                 index: right,

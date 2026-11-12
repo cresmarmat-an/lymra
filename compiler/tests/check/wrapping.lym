@@ -1,0 +1,7 @@
+function main()
+    constant integer8 small = 1
+    constant integer64 large = 2
+    print("{wrapping_add(small, large)}")
+    print("{wrapping_multiply(true, 1)}")
+    print("{wrapping_subtract(1)}")
+    constant wrapping_add = 3

@@ -233,6 +233,7 @@ pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
         ExprKind::Arithmetic { left, right, .. }
         | ExprKind::Compare { left, right, .. }
         | ExprKind::Logic { left, right, .. }
+        | ExprKind::Wrapping { left, right, .. }
         | ExprKind::Index {
             array: left,
             index: right,

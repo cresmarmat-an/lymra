@@ -1,0 +1,12 @@
+exit status 0
+--- standard output
+integer8 127 -128 127
+integer16 -32768 1
+integer32 -2147483648 -2
+integer64 -9223372036854775808 9223372036854775807 1
+unsigned8 0 1
+unsigned16 0 1
+unsigned32 0 4294967293
+unsigned64 0 18446744073709551615 1
+folded 44
+--- standard error

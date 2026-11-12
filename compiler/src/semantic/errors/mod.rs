@@ -445,6 +445,16 @@ pub(super) fn conversion_argument_count(function: &str, found: usize, call: Span
     )
 }
 
+pub(super) fn wrapping_argument_count(function: &str, found: usize, call: Span) -> Diagnostic {
+    let given = if found == 1 { "was" } else { "were" };
+    Diagnostic::new(
+        ErrorCode::L0501,
+        format!("`{function}` takes 2 arguments, but {found} {given} given"),
+        Label::new(call, "it takes the two numbers it combines"),
+        Help::text(format!("write `{function}(left, right)`")),
+    )
+}
+
 pub(super) fn print_argument_count(found: usize, call: Span) -> Diagnostic {
     let given = if found == 1 { "was" } else { "were" };
     Diagnostic::new(

@@ -89,6 +89,24 @@ impl Generator<'_, '_> {
                 format!("lymra_{operation}_{}({left}, {right}, {site})", expr.ty)
             }
             ExprKind::Compare { .. } => format!("({})", self.condition(function, expr, writer)),
+            ExprKind::Wrapping {
+                operator,
+                left,
+                right,
+            } => {
+                let (left, right) = self.pair(function, left, right, writer);
+                let ty = self.types.name(&expr.ty);
+                let bits = expr.ty.as_integer().map_or(64, IntegerType::bits);
+                /*
+                 * Signed overflow is undefined in C, so the operation runs in
+                 * `uint64_t`, which wraps, and the low bits are read back as
+                 * the type. C compilers turn this into one instruction.
+                 */
+                format!(
+                    "(({ty})(uint{bits}_t)((uint64_t)({left}) {} (uint64_t)({right})))",
+                    operator.arithmetic().symbol()
+                )
+            }
             ExprKind::Logic {
                 operator,
                 left,

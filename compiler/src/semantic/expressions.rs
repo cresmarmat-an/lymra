@@ -658,6 +658,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             "length" => return self.check_length(call, span),
             _ => {}
         }
+        if let Some(operator) = ir::WrappingOperator::from_function(name) {
+            return self.check_wrapping(operator, call, span, hint);
+        }
         self.mark_argument_reads(&call.arguments);
         // A `type` or `choice` of a later phase is already reported where it is declared.
         if self.unavailable_types.contains(name) {

@@ -246,9 +246,16 @@ impl Writer {
         if depth == 0 || self.random.chance(35) {
             return self.operand();
         }
-        let operator = *self.random.pick(&["+", "-", "*", "/", "%", "+", "-"]);
         let left = self.expression(depth - 1);
         let right = self.expression(depth - 1);
+        if self.random.chance(10) {
+            let function =
+                *self
+                    .random
+                    .pick(&["wrapping_add", "wrapping_subtract", "wrapping_multiply"]);
+            return format!("{function}({left}, {right})");
+        }
+        let operator = *self.random.pick(&["+", "-", "*", "/", "%", "+", "-"]);
         if self.ty.is_signed() && self.random.chance(10) {
             return format!("-({left} {operator} {right})");
         }

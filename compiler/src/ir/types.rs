@@ -83,6 +83,25 @@ impl IntegerType {
     pub const fn contains(self, value: i128) -> bool {
         self.minimum() <= value && value <= self.maximum()
     }
+
+    /**
+     * The value of this type that `bits` stand for: the low bits of the
+     * type's size, read as two's complement for a signed type. This is how
+     * wrapping arithmetic brings a result back into the type.
+     */
+    pub const fn from_bits(self, bits: u64) -> i128 {
+        let width = self.bits();
+        let low = if width == 64 {
+            bits
+        } else {
+            bits & ((1 << width) - 1)
+        };
+        if self.is_signed() && (low >> (width - 1)) & 1 == 1 {
+            low as i128 - (1 << width)
+        } else {
+            low as i128
+        }
+    }
 }
 
 /// A type the checker knows.
@@ -184,6 +203,19 @@ mod tests {
         assert_eq!(IntegerType::Unsigned64.maximum(), i128::from(u64::MAX));
         assert!(IntegerType::Unsigned16.contains(65_535));
         assert!(!IntegerType::Unsigned16.contains(-1));
+    }
+
+    #[test]
+    fn bits_wrap_into_the_type() {
+        assert_eq!(IntegerType::Integer8.from_bits(0x80), -128);
+        assert_eq!(IntegerType::Integer8.from_bits(0x17F), 127);
+        assert_eq!(IntegerType::Unsigned8.from_bits(0x1FF), 255);
+        assert_eq!(IntegerType::Integer64.from_bits(u64::MAX), -1);
+        assert_eq!(
+            IntegerType::Unsigned64.from_bits(u64::MAX),
+            i128::from(u64::MAX)
+        );
+        assert_eq!(IntegerType::Integer32.from_bits(1 << 31), -(1 << 31));
     }
 
     #[test]
