@@ -94,6 +94,7 @@ error_codes! {
     L0505 => "value is not used",
     L0506 => "missing or malformed `main`",
     L0507 => "function and value confused",
+    L0508 => "binding changed and used in one expression",
     L0601 => "`break` or `continue` outside a loop",
     L0602 => "unreachable code",
 }

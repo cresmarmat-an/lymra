@@ -1,0 +1,56 @@
+error[L0508]: `apples` is passed with `variable` and also used elsewhere in the same expression
+  --> tests/check/evaluation_order.lym:13:40
+   |
+13 |     constant total = apples + take_one(variable apples)
+   |                                        ^^^^^^^^^^^^^^^ `take_one` may change `apples` here
+   |                      ------ `apples` is used here too, so the result depends on which runs first
+   |
+help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `apples`
+
+error[L0508]: `apples` is passed with `variable` and also used elsewhere in the same expression
+  --> tests/check/evaluation_order.lym:14:10
+   |
+14 |     swap(variable apples, variable apples)
+   |          ^^^^^^^^^^^^^^^ `swap` may change `apples` here
+   |                           --------------- `apples` is used here too, so the result depends on which runs first
+   |
+help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `apples`
+
+error[L0508]: `apples` is passed with `variable` and also used elsewhere in the same expression
+  --> tests/check/evaluation_order.lym:15:31
+   |
+15 |     print("{apples} {take_one(variable apples)}")
+   |                               ^^^^^^^^^^^^^^^ `take_one` may change `apples` here
+   |             ------ `apples` is used here too, so the result depends on which runs first
+   |
+help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `apples`
+
+error[L0508]: `pears` is passed with `variable` and also used elsewhere in the same expression
+  --> tests/check/evaluation_order.lym:16:31
+   |
+16 |     if pears > 0 and take_one(variable pears) > 0
+   |                               ^^^^^^^^^^^^^^ `take_one` may change `pears` here
+   |        ----- `pears` is used here too, so the result depends on which runs first
+   |
+help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `pears`
+
+error[L0508]: `pears` is passed with `variable` and also used elsewhere in the same expression
+  --> tests/check/evaluation_order.lym:18:20
+   |
+18 |     while take_one(variable pears) < pears
+   |                    ^^^^^^^^^^^^^^ `take_one` may change `pears` here
+   |                                      ----- `pears` is used here too, so the result depends on which runs first
+   |
+help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `pears`
+
+error[L0508]: `apples` is passed with `variable` and also used elsewhere in the same expression
+  --> tests/check/evaluation_order.lym:20:21
+   |
+20 |     assert take_one(variable apples) + take_one(variable apples) == 2
+   |                     ^^^^^^^^^^^^^^^ `take_one` may change `apples` here
+   |                                                 --------------- `apples` is used here too, so the result depends on which runs first
+   |
+help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `apples`
+
+found 6 errors in tests/check/evaluation_order.lym
+run `lymra explain L0508` to read why a rule exists and how to fix it

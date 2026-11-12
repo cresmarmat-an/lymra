@@ -10,6 +10,7 @@
  */
 
 mod errors;
+mod evaluation_order;
 mod expressions;
 mod features;
 mod items;

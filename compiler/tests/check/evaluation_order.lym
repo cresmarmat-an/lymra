@@ -1,0 +1,28 @@
+function take_one(variable integer64 count) returns integer64
+    count = count - 1
+    return 1
+
+function swap(variable integer64 first, variable integer64 second)
+    constant saved = first
+    first = second
+    second = saved
+
+function main()
+    variable integer64 apples = 5
+    variable integer64 pears = 2
+    constant total = apples + take_one(variable apples)
+    swap(variable apples, variable apples)
+    print("{apples} {take_one(variable apples)}")
+    if pears > 0 and take_one(variable pears) > 0
+        print("{total}")
+    while take_one(variable pears) < pears
+        pears = 3
+    assert take_one(variable apples) + take_one(variable apples) == 2
+
+    # Each of these is allowed: the uses happen in separate expressions, one after another.
+    apples = take_one(variable apples)
+    if take_one(variable pears) > 0
+        print("first")
+    else if pears > 2
+        print("second")
+    swap(variable apples, variable pears)

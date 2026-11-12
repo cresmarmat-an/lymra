@@ -1,5 +1,6 @@
 //! The wording of every error the semantic checker reports.
 
+use super::evaluation_order::Conflict;
 use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
 use crate::ir::{IntegerType, Type};
 use crate::source::Span;
@@ -532,6 +533,27 @@ pub(super) fn reference_needs_variable(span: Span) -> Diagnostic {
         Label::new(span, "not a binding the call can change"),
         Help::text("declare a `variable`, pass it, and read the result from it afterward"),
     )
+}
+
+/// One expression passes a binding with `variable` and also uses it somewhere else.
+pub(super) fn changed_and_used(conflict: &Conflict<'_>) -> Diagnostic {
+    let name = conflict.name;
+    let change = match conflict.function {
+        Some(function) => format!("`{function}` may change `{name}` here"),
+        None => format!("this call may change `{name}`"),
+    };
+    Diagnostic::new(
+        ErrorCode::L0508,
+        format!("`{name}` is passed with `variable` and also used elsewhere in the same expression"),
+        Label::new(conflict.changed, change),
+        Help::text(format!(
+            "make the call a statement of its own and save any result in a `constant`; the statements after it see the new `{name}`"
+        )),
+    )
+    .with_secondary(Label::new(
+        conflict.used,
+        format!("`{name}` is used here too, so the result depends on which runs first"),
+    ))
 }
 
 pub(super) fn unused_result(function: &str, statement: Span) -> Diagnostic {

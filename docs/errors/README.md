@@ -54,5 +54,6 @@ From 04 on, they are the chapter of the [specification](../spec.md) the rule com
 | [L0505](L0505.md) | value is not used |
 | [L0506](L0506.md) | missing or malformed `main` |
 | [L0507](L0507.md) | function and value confused |
+| [L0508](L0508.md) | binding changed and used in one expression |
 | [L0601](L0601.md) | `break` or `continue` outside a loop |
 | [L0602](L0602.md) | unreachable code |

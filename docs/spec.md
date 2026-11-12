@@ -311,6 +311,7 @@ function main()
 - Functions are not values: there are no function pointers. Using a function's name without calling it, or calling a value, is error `L0507`.
 - Parameters are immutable. Because the function can't modify them, the compiler is free to pass them by reference or by copy, whichever is faster for that type.
 - A parameter declared `variable` can be modified, and the change is visible to the caller. The caller has to mark the argument too, so the mutation is visible where the call is written. Only a `variable` binding can be passed this way. A missing or extra mark is error `L0504`.
+- An expression that passes a binding with `variable` cannot use that binding anywhere else, whether it reads it or passes it again (`L0508`). Whether the read or the change came first would be easy to misread, so such an expression has to be split into statements, which run in order. Each condition of an `if` and `else if` is its own expression.
 
 ```lymra
 function add_item(variable list[integer32] items, integer32 value)

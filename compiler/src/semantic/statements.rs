@@ -9,7 +9,7 @@
 use super::expressions::{CheckedCall, immutable_local_error};
 use super::features::Feature;
 use super::scope::{FunctionScope, LocalKind};
-use super::{CheckResult, Checker, DISCARD, errors};
+use super::{CheckResult, Checker, DISCARD, errors, evaluation_order};
 use crate::ast::{self, ArgumentKind, Mutability};
 use crate::diagnostics::{ErrorReported, Help};
 use crate::ir::{self, IntegerType, LocalId, Type};
@@ -69,6 +69,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
     }
 
     fn check_statement(&mut self, statement: &ast::Statement<'src>) -> Checked {
+        self.check_evaluation_order(statement);
         let span = statement.span;
         match &statement.kind {
             ast::StatementKind::Binding(binding) => {
@@ -103,6 +104,34 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 self.check_condition(condition)
                     .map(|condition| ir::Statement::Assert { condition }),
             ),
+        }
+    }
+
+    /// Checks each expression the statement evaluates on its own, since the conditions of an `if` run one at a time.
+    fn check_evaluation_order(&mut self, statement: &ast::Statement<'src>) {
+        match &statement.kind {
+            ast::StatementKind::Binding(binding) => self.report_order_conflict(&binding.value),
+            ast::StatementKind::Assignment { value, .. } => self.report_order_conflict(value),
+            ast::StatementKind::Expression(expr)
+            | ast::StatementKind::Assert(expr)
+            | ast::StatementKind::Return(Some(expr)) => self.report_order_conflict(expr),
+            ast::StatementKind::If(statement) => {
+                for branch in &statement.branches {
+                    self.report_order_conflict(&branch.condition);
+                }
+            }
+            ast::StatementKind::While { condition, .. } => self.report_order_conflict(condition),
+            ast::StatementKind::For { iterable, .. } => self.report_order_conflict(iterable),
+            ast::StatementKind::Match { .. }
+            | ast::StatementKind::Return(None)
+            | ast::StatementKind::Break
+            | ast::StatementKind::Continue => {}
+        }
+    }
+
+    fn report_order_conflict(&mut self, expr: &ast::Expr<'src>) {
+        if let Some(conflict) = evaluation_order::find_conflict(expr) {
+            self.report(errors::changed_and_used(&conflict));
         }
     }
 
