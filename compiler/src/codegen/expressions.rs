@@ -139,14 +139,14 @@ impl Generator<'_, '_> {
         writer: &mut Writer,
     ) -> String {
         let code = self.expr(function, array, writer);
-        let code = match (
-            array.has_effects() && (bounds.checked || index.has_effects()),
-            is_addressable(array),
-        ) {
+        let code = if !is_addressable(array) {
+            // An array that is not stored anywhere, such as a call's result, is stored first: C cannot index it in place.
+            self.temporary(&array.ty, &code, writer)
+        } else if array.has_effects() && (bounds.checked || index.has_effects()) {
             // Only where the array is stored has to be worked out first; its elements are not copied.
-            (true, true) => format!("(*{})", self.address(&array.ty, &code, writer)),
-            (true, false) => self.temporary(&array.ty, &code, writer),
-            (false, _) => code,
+            format!("(*{})", self.address(&array.ty, &code, writer))
+        } else {
+            code
         };
         let position = self.position(function, index, bounds, writer);
         format!("{code}.elements[{position}]")

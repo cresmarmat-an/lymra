@@ -13,8 +13,11 @@
 
 mod common;
 
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, PoisonError};
 
 use lymra::codegen;
 use lymra::diagnostics::render_report;
@@ -118,27 +121,49 @@ fn run_case(case: &Case, compilers: &[Compiler]) -> Result<String, String> {
         .ok_or_else(|| "no compiler ran".to_owned())
 }
 
+/**
+ * Runs every case, as many at a time as the machine has processors. Each
+ * case starts compilers and programs with pipes of their own, and running
+ * all at once runs out of file descriptors where the limit is low, as on
+ * OpenBSD.
+ */
+fn run_in_parallel(cases: &[Case], compilers: &[Compiler]) -> Vec<Result<String, String>> {
+    let workers = std::thread::available_parallelism()
+        .map_or(1, NonZeroUsize::get)
+        .min(cases.len());
+    let next = AtomicUsize::new(0);
+    let finished = Mutex::new(Vec::with_capacity(cases.len()));
+    std::thread::scope(|threads| {
+        for _ in 0..workers {
+            threads.spawn(|| {
+                loop {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(case) = cases.get(index) else {
+                        break;
+                    };
+                    let result = run_case(case, compilers);
+                    finished
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push((index, result));
+                }
+            });
+        }
+    });
+    let mut finished = finished
+        .into_inner()
+        .unwrap_or_else(PoisonError::into_inner);
+    finished.sort_by_key(|&(index, _)| index);
+    finished.into_iter().map(|(_, result)| result).collect()
+}
+
 #[test]
 fn every_program_runs_as_recorded() {
     let compilers = common::c_compilers();
     let cases = cases();
     assert!(!cases.is_empty(), "no programs found under tests/run");
 
-    let results: Vec<Result<String, String>> = std::thread::scope(|threads| {
-        let handles: Vec<_> = cases
-            .iter()
-            .map(|case| threads.spawn(|| run_case(case, &compilers)))
-            .collect();
-        handles
-            .into_iter()
-            .map(|handle| {
-                handle
-                    .join()
-                    .unwrap_or_else(|_| Err("the test thread panicked".to_owned()))
-            })
-            .collect()
-    });
-
+    let results = run_in_parallel(&cases, &compilers);
     let mut mismatches = Vec::new();
     for (case, result) in cases.iter().zip(results) {
         match result {
