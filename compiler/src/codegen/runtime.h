@@ -567,6 +567,13 @@ LYMRA_UNUSED static const char lymra_stack_overflow_message[] =
 /* The stack limit the program sets when the system sets none, so deep calls overflow instead of using up memory. */
 #define LYMRA_UNLIMITED_STACK_SIZE ((size_t)1 << 28)
 /*
+ * The least stack the handler counts on, whatever RLIMIT_STACK says. QEMU's
+ * user-mode emulation runs programs on at least 8 MiB of stack even under a
+ * smaller limit, so an overflow there faults further down than the limit
+ * suggests. Nothing else is mapped that close below the stack.
+ */
+#define LYMRA_LEAST_STACK_SIZE ((uintmax_t)8 << 20)
+/*
  * How far past the stack's limit a fault still counts as an overflow: the
  * largest frame a function can have. Phase 1 frames hold only numbers, far
  * below this. Once arrays can live on the stack, large frames will need stack
@@ -612,6 +619,9 @@ LYMRA_UNUSED static void lymra_catch_stack_overflow(void) {
     lymra_stack_top = (uintptr_t)&top;
     /* `rlim_t` is unsigned on most systems and signed on some, such as FreeBSD; the limit itself is never negative. */
     uintmax_t size = (uintmax_t)limit.rlim_cur;
+    if (size < LYMRA_LEAST_STACK_SIZE) {
+        size = LYMRA_LEAST_STACK_SIZE;
+    }
     size_t largest = SIZE_MAX - LYMRA_STACK_SLACK;
     lymra_stack_reach = (size < largest ? (size_t)size : largest) + LYMRA_STACK_SLACK;
 
