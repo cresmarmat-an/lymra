@@ -6,9 +6,10 @@
  * for every function so calls do not depend on order, the functions, and the
  * C `main` that calls the Lymra one.
  *
- * Every integer operation goes through a runtime function that traps on
- * overflow and on division by zero, as spec section 4.2 requires in every
- * build mode. Comparisons and logic cannot fail, so they stay plain C.
+ * Every integer operation the optimizer could not prove safe goes through a
+ * runtime function that traps on overflow and on division by zero, as spec
+ * section 4.2 requires in every build mode. Comparisons and logic cannot
+ * fail, so they stay plain C.
  */
 
 mod c_syntax;
@@ -53,7 +54,7 @@ pub fn generate(program: &Program<'_>, source: &SourceFile) -> String {
     section(&mut output, "Functions", &[functions.join("\n\n")]);
     if let Some(main) = program.main.and_then(|id| program.functions.get(id)) {
         let entry_point = format!(
-            "int main(void) {{\n{INDENT}{}();\n{INDENT}return lymra_finish();\n}}",
+            "int main(void) {{\n{INDENT}lymra_start();\n{INDENT}{}();\n{INDENT}return lymra_finish();\n}}",
             c_syntax::function_name(main.name)
         );
         section(&mut output, "Entry point", &[entry_point]);

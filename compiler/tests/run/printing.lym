@@ -1,0 +1,16 @@
+#[
+    Every kind of value printed, including the ends of the integer types.
+]#
+
+function main()
+    constant integer64 lowest = -9_223_372_036_854_775_808
+    constant integer64 highest = 9_223_372_036_854_775_807
+    constant unsigned64 largest = 18_446_744_073_709_551_615
+    constant integer8 small = -128
+    constant unsigned8 zero = 0
+    constant boolean yes = true
+    print("{lowest} {highest}")
+    print("{largest} {small} {zero}")
+    print("{yes} {not yes}")
+    print("")
+    print("done")

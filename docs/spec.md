@@ -331,7 +331,7 @@ function main()
 
 | Function | Does |
 |---|---|
-| `print(string text)` | Writes the text and a line break to standard output |
+| `print(string text)` | Writes the text and a line break to standard output, as one whole line |
 | `range(start, end)` | The integers from `start` up to `end`, without `end`. It is only used in a `for` loop for now. |
 | `integer8(value)` to `integer64(value)` | Converts an integer to that signed type |
 | `unsigned8(value)` to `unsigned64(value)` | Converts an integer to that unsigned type |
@@ -523,6 +523,8 @@ error: integer overflow
 4 |         level = level + 1
   |                 ^^^^^^^^^
 ```
+
+The checks are integer overflow, division by zero, a conversion whose value does not fit, and `assert`. Calls that nest too deeply, as in recursion that never reaches its end, stop the program the same way with `error: stack overflow`, without a location: on Linux and macOS a handler catches the overflow when the stack runs out, so calls cost nothing extra for the check. Before the error, the program writes every line it printed. A line appears whole or not at all, so a program that stops in the middle of a `print` leaves no half line behind. Output that cannot be written, for example to a full disk, ends the program with exit status 74.
 
 ## 12. Open questions
 

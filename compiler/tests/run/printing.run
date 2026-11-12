@@ -1,0 +1,8 @@
+exit status 0
+--- standard output
+-9223372036854775808 9223372036854775807
+18446744073709551615 -128 0
+true false
+
+done
+--- standard error

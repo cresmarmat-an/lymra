@@ -1,0 +1,11 @@
+#[
+    A line appears whole or not at all. When a value in it fails, the program
+    stops without leaving half the line behind.
+]#
+
+function show(integer8 count)
+    print("count {count}, ten more {count + 10}")
+
+function main()
+    show(100)
+    show(120)

@@ -1,0 +1,13 @@
+#[
+    Calls that nest too deeply stop the program with a runtime error, after
+    the lines it printed before.
+]#
+
+function depth(integer64 level) returns integer64
+    if level == 0
+        return 0
+    return depth(level - 1) % 1000 + 1
+
+function main()
+    print("before")
+    print("{depth(1_000_000_000)}")
