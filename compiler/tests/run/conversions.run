@@ -1,0 +1,9 @@
+exit status 0
+--- standard output
+widened 200
+narrowed 1000
+signed -5
+unsigned 4000000000 4000000000
+total 1200
+known 255 -128
+--- standard error

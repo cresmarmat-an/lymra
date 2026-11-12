@@ -1,0 +1,9 @@
+exit status 70
+--- standard output
+255
+--- standard error
+error: conversion out of range
+ --> tests/run/conversion_out_of_range.lym:2:12
+  |
+2 |     return to_unsigned8(value)
+  |            ^^^^^^^^^^^^^^^^^^^

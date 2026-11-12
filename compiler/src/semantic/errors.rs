@@ -185,6 +185,29 @@ pub(super) fn type_mismatch(expected: Type, found: Type, span: Span) -> Diagnost
     )
 }
 
+/// An integer of one type where another integer type is needed, with the conversion as the fix.
+pub(super) fn integer_mismatch(
+    expected: IntegerType,
+    found: Type,
+    span: Span,
+    source: &str,
+) -> Diagnostic {
+    let target = expected.name();
+    Diagnostic::new(
+        ErrorCode::L0402,
+        format!(
+            "expected an integer of type `{target}`, found {}",
+            described(found)
+        ),
+        Label::new(span, format!("this is {}", described(found))),
+        Help::replace(
+            format!("convert it with `to_{target}`; the program stops if the value does not fit"),
+            span,
+            format!("to_{target}({source})"),
+        ),
+    )
+}
+
 /// An integer literal where a value of another type is needed.
 pub(super) fn literal_mismatch(expected: Type, span: Span) -> Diagnostic {
     Diagnostic::new(
@@ -246,13 +269,20 @@ pub(super) fn operand_mismatch(
 ) -> Diagnostic {
     let (left_type, left_span) = left;
     let (right_type, right_span) = right;
+    let help = match (left_type, right_type) {
+        (Type::Integer(left_integer), Type::Integer(_)) => Help::text(format!(
+            "convert one side, for example with `to_{}`; the program stops if the value does not fit",
+            left_integer.name()
+        )),
+        _ => Help::text(
+            "Lymra never converts a value to another type by itself; give both sides the same type",
+        ),
+    };
     Diagnostic::new(
         ErrorCode::L0402,
         format!("the two sides of `{operator}` have different types"),
         Label::new(right_span, format!("this is {}", described(right_type))),
-        Help::text(
-            "Lymra never converts a value to another type by itself; give both sides the same type",
-        ),
+        help,
     )
     .with_secondary(Label::new(
         left_span,
@@ -385,6 +415,16 @@ pub(super) fn argument_count(
         declaration,
         format!("`{function}` is declared here"),
     ))
+}
+
+pub(super) fn conversion_argument_count(function: &str, found: usize, call: Span) -> Diagnostic {
+    let given = if found == 1 { "was" } else { "were" };
+    Diagnostic::new(
+        ErrorCode::L0501,
+        format!("`{function}` takes 1 argument, but {found} {given} given"),
+        Label::new(call, "a conversion takes the one value it converts"),
+        Help::text(format!("write `{function}(value)`")),
+    )
 }
 
 pub(super) fn print_argument_count(found: usize, call: Span) -> Diagnostic {

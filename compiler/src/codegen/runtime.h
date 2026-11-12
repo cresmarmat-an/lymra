@@ -35,7 +35,8 @@ typedef struct {
 typedef enum {
     LYMRA_INTEGER_OVERFLOW,
     LYMRA_DIVISION_BY_ZERO,
-    LYMRA_ASSERTION_FAILED
+    LYMRA_ASSERTION_FAILED,
+    LYMRA_CONVERSION_OUT_OF_RANGE
 } lymra_trap_kind;
 
 /*
@@ -49,6 +50,7 @@ LYMRA_UNUSED __attribute__((noreturn, cold, noinline)) static void lymra_trap(ly
         "integer overflow",
         "division by zero",
         "assertion failed",
+        "conversion out of range",
     };
     fflush(stdout);
     fprintf(stderr, "error: %s\n%s", messages[kind], site);
@@ -148,6 +150,23 @@ LYMRA_UNSIGNED_OPERATIONS(unsigned8, uint8_t)
 LYMRA_UNSIGNED_OPERATIONS(unsigned16, uint16_t)
 LYMRA_UNSIGNED_OPERATIONS(unsigned32, uint32_t)
 LYMRA_UNSIGNED_OPERATIONS(unsigned64, uint64_t)
+
+/* Checks a conversion from a signed type: the value has to lie within [minimum, maximum]. */
+LYMRA_UNUSED static inline int64_t lymra_check_signed(int64_t value, int64_t minimum, int64_t maximum,
+                                                       const char *site) {
+    if (value < minimum || value > maximum) {
+        lymra_trap(LYMRA_CONVERSION_OUT_OF_RANGE, site);
+    }
+    return value;
+}
+
+/* Checks a conversion from an unsigned type: the value has to be at most `maximum`. */
+LYMRA_UNUSED static inline uint64_t lymra_check_unsigned(uint64_t value, uint64_t maximum, const char *site) {
+    if (value > maximum) {
+        lymra_trap(LYMRA_CONVERSION_OUT_OF_RANGE, site);
+    }
+    return value;
+}
 
 LYMRA_UNUSED static inline void lymra_write_text(lymra_string text) {
     fwrite(text.data, 1, text.length, stdout);

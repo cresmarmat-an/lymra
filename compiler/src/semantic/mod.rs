@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::{self, Name, OptimizeMode};
 use crate::diagnostics::{Diagnostic, ErrorReported, Help};
-use crate::ir::{self, ConstantId, FunctionId, Program, Type, Value};
+use crate::ir::{self, ConstantId, FunctionId, IntegerType, Program, Type, Value};
 use crate::similarity;
 use crate::source::{SourceFile, Span};
 use scope::{FunctionScope, LocalKind};
@@ -32,7 +32,23 @@ use scope::{FunctionScope, LocalKind};
 type CheckResult<T> = Result<T, ErrorReported>;
 
 /// The built-in functions of phase 1. Their names cannot be declared again.
-const BUILT_IN_FUNCTIONS: [&str; 2] = ["print", "range"];
+const BUILT_IN_FUNCTIONS: [&str; 10] = [
+    "print",
+    "range",
+    "to_integer8",
+    "to_integer16",
+    "to_integer32",
+    "to_integer64",
+    "to_unsigned8",
+    "to_unsigned16",
+    "to_unsigned32",
+    "to_unsigned64",
+];
+
+/// The integer type a conversion function such as `to_integer32` converts to.
+fn conversion_target(name: &str) -> Option<IntegerType> {
+    name.strip_prefix("to_").and_then(IntegerType::from_name)
+}
 
 /// The name that declares a binding nobody reads.
 const DISCARD: &str = "_";

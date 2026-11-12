@@ -191,7 +191,7 @@ The names are whole words (Section 2.5), and a number type always states its siz
 
 Type rules:
 
-- **No conversions behind your back.** A value never changes type by itself. Mixing `integer64` and `unsigned8` in one operation, passing one where the other is expected, or using a number as a condition is error `L0402`.
+- **No conversions behind your back.** A value never changes type by itself. Mixing `integer64` and `unsigned8` in one operation, passing one where the other is expected, or using a number as a condition is error `L0402`. Convert explicitly with `to_unsigned8(count)` and its siblings (Section 5.1). A conversion that could lose the value is checked: if the value does not fit, the program stops with a runtime error. A conversion that cannot fail, such as `unsigned8` to `integer64`, costs nothing.
 - **Literals take the type of their place.** An integer literal has no type of its own. It takes the type its context asks for, such as a declared type or the other side of an operator, and `integer64` when nothing asks. It has to fit (`L0404`). Arithmetic on literals is exact and happens while compiling, so `constant unsigned8 small = 300 - 100` is fine.
 - **Text is printed through interpolation.** `print` takes a `string`. Other values are turned into text by interpolating them: `print("{count}")`.
 
@@ -331,6 +331,10 @@ function main()
 |---|---|
 | `print(string text)` | Writes the text and a line break to standard output |
 | `range(start, end)` | The integers from `start` up to `end`, without `end`. It is only used in a `for` loop for now. |
+| `to_integer8(value)` to `to_integer64(value)` | Converts an integer to that signed type |
+| `to_unsigned8(value)` to `to_unsigned64(value)` | Converts an integer to that unsigned type |
+
+A conversion stops the program if the value does not fit the target type. When the value is known while compiling, a value that does not fit is error `L0404` instead.
 
 The names of built-in functions cannot be declared again (`L0207`).
 
@@ -529,7 +533,6 @@ error: integer overflow
 | O6 | Literal syntax for `array` and `list` values | `[1, 2, 3]` |
 | O7 | Bitwise operations | Functions with whole-word names such as `bit_and` and `shift_left`, not symbols |
 | O8 | Calling C: the syntax and rules of `external` declarations | `external function hypot(float64 x, float64 y) returns float64` |
-| O9 | Converting between integer types, which never happens by itself | A call named after the target type, such as `integer32(count)`, that stops the program if the value does not fit |
 | O10 | Reading the command line and choosing an exit status | Parameters of `main` and a `returns` type, once the needed types exist |
 | O11 | Removing overflow checks the compiler can prove unnecessary. A first measurement: a loop that GCC and Clang can turn into a formula ran about 200 times slower with the checks, because a check has to stop the program at the exact operation that overflows. A loop they cannot transform ran at the same speed. | Range analysis over loop bounds and known values, the same way bounds checks are removed |
 

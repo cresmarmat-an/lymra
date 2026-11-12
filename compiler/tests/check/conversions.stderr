@@ -1,0 +1,79 @@
+error[L0207]: `to_integer32` is the name of a built-in function
+ --> tests/check/conversions.lym:3:10
+  |
+3 | function to_integer32()
+  |          ^^^^^^^^^^^^ this name is taken
+  |
+help: choose another name
+
+error[L0402]: expected an integer of type `unsigned8`, found an `integer64`
+ --> tests/check/conversions.lym:8:32
+  |
+8 |     constant unsigned8 small = count
+  |                                ^^^^^ this is an `integer64`
+  |
+help: convert it with `to_unsigned8`; the program stops if the value does not fit
+  |
+8 |     constant unsigned8 small = to_unsigned8(count)
+
+error[L0501]: `to_integer32` takes 1 argument, but 0 were given
+  --> tests/check/conversions.lym:10:25
+   |
+10 |     print("{to_integer32()} {to_integer32(1, 2)}")
+   |                         ^^ a conversion takes the one value it converts
+   |
+help: write `to_integer32(value)`
+
+error[L0501]: `to_integer32` takes 1 argument, but 2 were given
+  --> tests/check/conversions.lym:10:42
+   |
+10 |     print("{to_integer32()} {to_integer32(1, 2)}")
+   |                                          ^^^^^^ a conversion takes the one value it converts
+   |
+help: write `to_integer32(value)`
+
+error[L0405]: `to_unsigned8` converts integers, but this is a `boolean`
+  --> tests/check/conversions.lym:11:26
+   |
+11 |     print("{to_unsigned8(flag)}")
+   |                          ^^^^ not an integer
+   |
+help: only integers can be converted between integer types
+
+error[L0404]: `300` does not fit in `unsigned8`
+  --> tests/check/conversions.lym:12:26
+   |
+12 |     print("{to_unsigned8(300)}")
+   |                          ^^^ outside the range of `unsigned8`
+   |
+help: `unsigned8` holds 0 to 255; use a value in that range or a wider type
+
+error[L0404]: `large`, which is 1000, does not fit in `unsigned8`
+  --> tests/check/conversions.lym:13:26
+   |
+13 |     print("{to_unsigned8(large)}")
+   |                          ^^^^^ outside the range of `unsigned8`
+   |
+help: `unsigned8` holds 0 to 255; use a value in that range or a wider type
+
+error[L0504]: the parameter `value` is not `variable`, so the call cannot change this argument
+  --> tests/check/conversions.lym:14:26
+   |
+14 |     print("{to_unsigned8(variable count)}")
+   |                          ^^^^^^^^^ marked as changeable here
+   |
+help: remove `variable`
+   |
+14 |     print("{to_unsigned8(count)}")
+
+error[L0402]: the two sides of `+` have different types
+  --> tests/check/conversions.lym:15:30
+   |
+15 |     constant mixed = small + count
+   |                              ^^^^^ this is an `integer64`
+   |                      ----- this is an `unsigned8`
+   |
+help: convert one side, for example with `to_unsigned8`; the program stops if the value does not fit
+
+found 9 errors in tests/check/conversions.lym
+run `lymra explain L0207` to read why a rule exists and how to fix it

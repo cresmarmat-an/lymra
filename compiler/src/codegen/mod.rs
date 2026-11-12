@@ -15,8 +15,8 @@ mod c_syntax;
 
 use crate::diagnostics::render_location;
 use crate::ir::{
-    Argument, ArithmeticOperator, Block, Call, Expr, ExprKind, Function, LogicOperator, PrintPart,
-    Program, Statement, Type,
+    Argument, ArithmeticOperator, Block, Call, Expr, ExprKind, Function, IntegerType,
+    LogicOperator, PrintPart, Program, Statement, Type,
 };
 use crate::source::{SourceFile, Span};
 
@@ -388,6 +388,47 @@ impl Generator<'_, '_> {
                 format!("({left} {symbol} {right})")
             }
             ExprKind::Call(call) => self.call(function, call),
+            ExprKind::Convert { operand, checked } => {
+                self.convert(function, operand, expr, *checked)
+            }
+        }
+    }
+
+    /**
+     * A conversion to `target.ty`. An unchecked one is a plain cast. A checked
+     * one first tests the value against the part of the target's range that
+     * the source type can reach, in the source's signedness, so no comparison
+     * mixes signed and unsigned values.
+     */
+    fn convert(
+        &mut self,
+        function: &Function<'_>,
+        operand: &Expr,
+        target: &Expr,
+        checked: bool,
+    ) -> String {
+        let target_type = c_syntax::type_name(target.ty);
+        let value = self.expr(function, operand);
+        let (Type::Integer(source), Type::Integer(destination)) = (operand.ty, target.ty) else {
+            return format!("(({target_type})({value}))");
+        };
+        if !checked {
+            return format!("(({target_type})({value}))");
+        }
+        let site = self.site(target.span);
+        let maximum = destination.maximum().min(source.maximum());
+        if source.is_signed() {
+            let minimum = destination.minimum().max(source.minimum());
+            format!(
+                "(({target_type})lymra_check_signed((int64_t)({value}), {}, {}, {site}))",
+                c_syntax::integer_literal(minimum, IntegerType::Integer64),
+                c_syntax::integer_literal(maximum, IntegerType::Integer64)
+            )
+        } else {
+            format!(
+                "(({target_type})lymra_check_unsigned((uint64_t)({value}), {}, {site}))",
+                c_syntax::integer_literal(maximum, IntegerType::Unsigned64)
+            )
         }
     }
 

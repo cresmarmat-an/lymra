@@ -235,7 +235,9 @@ fn is_sized_integer_name(name: &str) -> bool {
 /// The part of an expression that is only known at run time: in a checked constant, its first call.
 fn runtime_part(expr: &ir::Expr) -> Span {
     match &expr.kind {
-        ir::ExprKind::Negate(operand) | ir::ExprKind::Not(operand) => runtime_part(operand),
+        ir::ExprKind::Negate(operand)
+        | ir::ExprKind::Not(operand)
+        | ir::ExprKind::Convert { operand, .. } => runtime_part(operand),
         ir::ExprKind::Arithmetic { left, right, .. }
         | ir::ExprKind::Compare { left, right, .. }
         | ir::ExprKind::Logic { left, right, .. } => {

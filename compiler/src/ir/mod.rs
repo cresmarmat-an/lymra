@@ -144,6 +144,12 @@ pub enum ExprKind {
         right: Box<Expr>,
     },
     Call(Call),
+    /// `to_integer32(value)` and the like. The expression's type is the target type.
+    Convert {
+        operand: Box<Expr>,
+        /// False when every value of the operand's type fits the target, so nothing can fail.
+        checked: bool,
+    },
 }
 
 #[derive(Debug)]

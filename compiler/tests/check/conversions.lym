@@ -1,0 +1,16 @@
+constant integer64 large = 1_000
+
+function to_integer32()
+    return
+
+function main()
+    constant integer64 count = 3
+    constant unsigned8 small = count
+    constant boolean flag = true
+    print("{to_integer32()} {to_integer32(1, 2)}")
+    print("{to_unsigned8(flag)}")
+    print("{to_unsigned8(300)}")
+    print("{to_unsigned8(large)}")
+    print("{to_unsigned8(variable count)}")
+    constant mixed = small + count
+    print("{mixed}")

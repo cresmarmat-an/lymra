@@ -37,15 +37,17 @@ error[L0402]: the two sides of `+` have different types
    |                              ^^^^^ this is an `unsigned8`
    |                      ----- this is an `integer64`
    |
-help: Lymra never converts a value to another type by itself; give both sides the same type
+help: convert one side, for example with `to_integer64`; the program stops if the value does not fit
 
-error[L0402]: expected an `unsigned8`, found an `integer64`
+error[L0402]: expected an integer of type `unsigned8`, found an `integer64`
   --> tests/check/types.lym:12:39
    |
 12 |     constant also_mixed = takes_small(count)
    |                                       ^^^^^ this is an `integer64`
    |
-help: Lymra never converts a value to another type by itself; use a value of the expected type
+help: convert it with `to_unsigned8`; the program stops if the value does not fit
+   |
+12 |     constant also_mixed = takes_small(to_unsigned8(count))
 
 error[L0402]: the two sides of `==` have different types
   --> tests/check/types.lym:13:34

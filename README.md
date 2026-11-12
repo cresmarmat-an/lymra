@@ -22,7 +22,7 @@ Every name the language defines is a whole English word: `variable`, `constant`,
 
 ## Status
 
-**Edition 0.1, roadmap phase 1.** The compiler checks Lymra programs and compiles them to native executables through C. Phase 1 covers integers of every size, booleans, text values, functions, `variable` parameters, `if`, `while`, `for` over `range`, and `print`. Every integer operation is checked for overflow, in every build mode. Anything later phases add is rejected with an error that names the phase.
+**Edition 0.1, roadmap phase 1.** The compiler checks Lymra programs and compiles them to native executables through C. Phase 1 covers integers of every size and checked conversions between them, booleans, text values, functions, `variable` parameters, `if`, `while`, `for` over `range`, and `print`. Every integer operation is checked for overflow, in every build mode. Anything later phases add is rejected with an error that names the phase.
 
 ## Try it
 

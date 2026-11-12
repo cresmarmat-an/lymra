@@ -11,7 +11,7 @@ use super::errors::{self, described};
 use super::features::Feature;
 use super::scope::{Local, LocalKind};
 use super::values::{self, FoldError, LiteralError};
-use super::{BUILT_IN_FUNCTIONS, CheckResult, Checker, DISCARD, Global};
+use super::{BUILT_IN_FUNCTIONS, CheckResult, Checker, DISCARD, Global, conversion_target};
 use crate::ast::{self, ArgumentKind, BinaryOperator, UnaryOperator};
 use crate::diagnostics::{Diagnostic, ErrorReported, Help};
 use crate::ir::{
@@ -76,10 +76,15 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         match expected {
             Some(expected) if checked.ty != expected => {
                 // A literal has no type of its own until a context gives it one, so it is just "a number" here.
-                let error = if values::literal_integer(expr).is_some() {
-                    errors::literal_mismatch(expected, expr.span)
-                } else {
-                    errors::type_mismatch(expected, checked.ty, expr.span)
+                let error = match (expected, checked.ty) {
+                    _ if values::literal_integer(expr).is_some() => {
+                        errors::literal_mismatch(expected, expr.span)
+                    }
+                    (Type::Integer(target), Type::Integer(_)) => {
+                        let source = self.text(expr.span);
+                        errors::integer_mismatch(target, checked.ty, expr.span, source)
+                    }
+                    _ => errors::type_mismatch(expected, checked.ty, expr.span),
                 };
                 Err(self.report(error))
             }
@@ -567,6 +572,10 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             Some(Global::Constant(_)) => {
                 Err(self.report(errors::not_a_function(name, callee.span)))
             }
+            None if conversion_target(name).is_some() => {
+                let target = conversion_target(name).ok_or(ErrorReported)?;
+                self.check_conversion(target, name, call, span)
+            }
             None => match name {
                 "print" => self.check_print(call, span),
                 "range" => {
@@ -587,6 +596,76 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 }
             },
         }
+    }
+
+    /**
+     * Checks a conversion such as `to_unsigned8(count)`. It is checked at
+     * run time only when some value of the operand's type does not fit the
+     * target type; a known value is converted now.
+     */
+    fn check_conversion(
+        &mut self,
+        target: IntegerType,
+        name: &'src str,
+        call: &ast::Call<'src>,
+        span: Span,
+    ) -> CheckResult<CheckedCall<'src>> {
+        let [argument] = call.arguments.as_slice() else {
+            self.check_arguments_for_errors(&call.arguments);
+            let arguments = Span::new(call.callee.span.end, span.end);
+            return Err(self.report(errors::conversion_argument_count(
+                name,
+                call.arguments.len(),
+                arguments,
+            )));
+        };
+        let value = match &argument.kind {
+            ArgumentKind::Positional(value) => value,
+            ArgumentKind::Mutable(value) => {
+                self.check_for_errors(value);
+                let mark = Span::new(argument.span.start, value.span.start);
+                return Err(self.report(errors::needless_variable_mark("value", mark)));
+            }
+            ArgumentKind::Named { value, .. } => {
+                self.mark_reads(value);
+                return Err(self.report(Feature::NamedArguments.diagnostic(argument.span)));
+            }
+        };
+        // A literal takes the target type directly, so it is checked against the target's range.
+        let operand = self.check_expr_with_hint(value, Some(Type::Integer(target)))?;
+        let Type::Integer(source) = operand.ty else {
+            return Err(self.report(errors::operator_type(
+                format!(
+                    "`{name}` converts integers, but this is {}",
+                    described(operand.ty)
+                ),
+                operand.span,
+                "not an integer".to_owned(),
+                "only integers can be converted between integer types",
+            )));
+        };
+        if let Some(Value::Integer { value: known, .. }) = self.known_value(&operand) {
+            if !target.contains(known) {
+                let shown = format!("`{}`, which is {known},", self.text(value.span));
+                return Err(self.report(errors::out_of_range(&shown, target, value.span)));
+            }
+            return Ok(CheckedCall::Value(literal(
+                Value::Integer {
+                    value: known,
+                    ty: target,
+                },
+                span,
+            )));
+        }
+        let checked = !(target.contains(source.minimum()) && target.contains(source.maximum()));
+        Ok(CheckedCall::Value(ir::Expr {
+            kind: ir::ExprKind::Convert {
+                operand: Box::new(operand),
+                checked,
+            },
+            ty: Type::Integer(target),
+            span,
+        }))
     }
 
     /// Marks what the arguments of a rejected call read, without reporting anything inside them.

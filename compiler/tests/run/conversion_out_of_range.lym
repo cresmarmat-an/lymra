@@ -1,0 +1,6 @@
+function shrink(integer64 value) returns unsigned8
+    return to_unsigned8(value)
+
+function main()
+    print("{shrink(255)}")
+    print("{shrink(-1)}")
