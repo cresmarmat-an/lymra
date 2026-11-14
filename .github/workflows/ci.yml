@@ -143,9 +143,10 @@ jobs:
       - name: Install the cross compiler and QEMU
         env:
           COMPILER: ${{ matrix.compiler }}
+        # qemu-user-binfmt runs programs for other processors directly; Ubuntu 26.04 no longer has qemu-user-static.
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-user-static "gcc-${COMPILER%-gcc}"
+          sudo apt-get install -y qemu-user-binfmt "gcc-${COMPILER%-gcc}"
       - name: Check that programs for the emulated processor run
         working-directory: ${{ runner.temp }}
         run: |
