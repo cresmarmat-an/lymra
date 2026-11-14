@@ -8,13 +8,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::c_syntax;
-use crate::ir::{ArrayType, CustomType, Type};
+use super::{INDENT, c_syntax};
+use crate::ir::{ArrayType, ChoiceType, CustomType, Type};
 
 #[derive(Default)]
 pub(super) struct CTypes {
     arrays: HashMap<Arc<ArrayType>, String>,
-    /// The declared types defined so far, by name, which is unique in a program.
+    /// The declared types and choices defined so far, by name, which is unique in a program.
     customs: HashMap<String, String>,
     /// The structs, and the fill functions of arrays, in the order C needs them.
     definitions: Vec<String>,
@@ -29,6 +29,7 @@ impl CTypes {
             Type::String => "lymra_string".to_owned(),
             Type::Array(array) => self.array_name(array),
             Type::Custom(custom) => self.custom_name(custom),
+            Type::Choice(choice) => self.choice_name(choice),
         }
     }
 
@@ -41,27 +42,77 @@ impl CTypes {
         if let Some(name) = self.customs.get(&custom.name) {
             return name.clone();
         }
-        let members: Vec<String> = custom
+        let members = self.members(custom, INDENT);
+        let name = c_syntax::custom_type_name(&custom.name);
+        self.definitions.push(format!(
+            "/* {} */\ntypedef struct {{\n{members}\n}} {name};",
+            custom.name
+        ));
+        self.customs.insert(custom.name.clone(), name.clone());
+        name
+    }
+
+    /**
+     * The struct of a choice: a tag that says which variant the value holds,
+     * then a union with a struct for each variant that has fields. Its
+     * members are named by position too, as `variant_0`.
+     */
+    fn choice_name(&mut self, choice: &ChoiceType) -> String {
+        if let Some(name) = self.customs.get(&choice.name) {
+            return name.clone();
+        }
+        let tag = c_syntax::integer_type(choice.tag_type());
+        let nested = format!("{INDENT}{INDENT}{INDENT}");
+        let variants: Vec<String> = choice
+            .variants
+            .iter()
+            .enumerate()
+            .filter(|(_, variant)| !variant.fields.is_empty())
+            .map(|(position, variant)| {
+                let members = self.members(variant, &nested);
+                format!(
+                    "{INDENT}{INDENT}struct {{ /* {} */\n{members}\n{INDENT}{INDENT}}} {};",
+                    variant.name,
+                    c_syntax::variant_name(position)
+                )
+            })
+            .collect();
+        // C has no empty union, so a choice whose variants hold nothing is its tag alone.
+        let payload = if variants.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n{INDENT}union {{\n{}\n{INDENT}}} {};",
+                variants.join("\n"),
+                c_syntax::VARIANTS
+            )
+        };
+        let name = c_syntax::choice_name(&choice.name);
+        self.definitions.push(format!(
+            "/* {} */\ntypedef struct {{\n{INDENT}{tag} {};{payload}\n}} {name};",
+            choice.name,
+            c_syntax::TAG
+        ));
+        self.customs.insert(choice.name.clone(), name.clone());
+        name
+    }
+
+    /// The members of a struct for `fields`, one a line, each with a comment that gives its Lymra name.
+    fn members(&mut self, fields: &CustomType, indent: &str) -> String {
+        let members: Vec<String> = fields
             .fields
             .iter()
             .enumerate()
             .map(|(position, field)| {
                 let ty = self.name(&field.ty);
                 format!(
-                    "    {ty} {}; /* {} */",
+                    "{indent}{ty} {}; /* {} */",
                     c_syntax::field_name(position),
                     field.name
                 )
             })
             .collect();
-        let name = c_syntax::custom_type_name(&custom.name);
-        self.definitions.push(format!(
-            "/* {} */\ntypedef struct {{\n{}\n}} {name};",
-            custom.name,
-            members.join("\n")
-        ));
-        self.customs.insert(custom.name.clone(), name.clone());
-        name
+        members.join("\n")
     }
 
     fn array_name(&mut self, array: &Arc<ArrayType>) -> String {

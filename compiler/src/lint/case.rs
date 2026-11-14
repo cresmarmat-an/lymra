@@ -1,7 +1,7 @@
 //! The two naming styles of Lymra: checking a name against one, and rewriting a name into one.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Case {
+pub(crate) enum Case {
     /// `snake_case`: lowercase words joined by single underscores.
     Snake,
     /// `PascalCase`: words run together, each starting with a capital.

@@ -61,7 +61,7 @@ impl<'src> Checker<'src, '_> {
             Definition::Type(id) => Declared::Type(
                 self.types
                     .get(id)
-                    .map_or("", |entry| entry.declaration.name.text),
+                    .map_or("", |entry| entry.declaration.name().text),
             ),
             Definition::Constant(id) => Declared::Constant(
                 self.constants
@@ -74,7 +74,7 @@ impl<'src> Checker<'src, '_> {
     /// Where `definition` is declared: the name after `type` or `constant`.
     fn declaration(&self, definition: Definition) -> Span {
         let name = match definition {
-            Definition::Type(id) => self.types.get(id).map(|entry| entry.declaration.name),
+            Definition::Type(id) => self.types.get(id).map(|entry| entry.declaration.name()),
             Definition::Constant(id) => self.constants.get(id).map(|entry| entry.binding.name),
         };
         name.map_or(Span::empty(0), |name| name.span)

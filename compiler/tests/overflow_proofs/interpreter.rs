@@ -6,8 +6,9 @@
 use std::fmt::Write as _;
 
 use lymra::ir::{
-    Argument, ArithmeticOperator, Block, Call, ComparisonOperator, Expr, ExprKind, FunctionId,
-    IntegerType, LocalId, LogicOperator, PlaceStep, PrintPart, Program, Statement, Type, Value,
+    Argument, ArithmeticOperator, Block, Call, ComparisonOperator, Expr, ExprKind, FieldValue,
+    FunctionId, IntegerType, LocalId, LogicOperator, PlaceStep, PrintPart, Program, Statement,
+    Type, Value,
 };
 use lymra::source::Span;
 
@@ -67,6 +68,11 @@ enum Slot {
     Text(String),
     /// The elements of an array, or the fields of a value of a declared type, in order.
     Compound(Vec<Slot>),
+    /// A value of a choice: the position of its variant, and the variant's fields in order.
+    Variant {
+        variant: usize,
+        fields: Vec<Slot>,
+    },
     /// A local before its declaration runs, or the result of a function that returns nothing.
     Unset,
 }
@@ -279,6 +285,21 @@ impl Interpreter<'_, '_> {
                     }
                 }
             }
+            Statement::Match { value, cases } => {
+                let Slot::Variant { variant, fields } = self.expr(value, slots)? else {
+                    return Err(Stop::Unsound("a match on a value of no choice".to_owned()));
+                };
+                let case = cases
+                    .iter()
+                    .find(|case| case.variant == variant)
+                    .ok_or_else(|| Stop::Unsound(format!("no case for variant {variant}")))?;
+                for binding in &case.bindings {
+                    slots[binding.local] = fields.get(binding.field).cloned().ok_or_else(|| {
+                        Stop::Unsound(format!("field {} past the end", binding.field))
+                    })?;
+                }
+                return self.block(&case.body, slots);
+            }
             Statement::Return(value) => {
                 let value = match value {
                     Some(value) => Some(self.expr(value, slots)?),
@@ -333,6 +354,24 @@ impl Interpreter<'_, '_> {
                 other => Err(Stop::Unsound(format!("a loop over {other:?}"))),
             },
         }
+    }
+
+    /// The values of a construction's `count` fields, computed in the order they are written.
+    fn fields(
+        &mut self,
+        fields: &[FieldValue],
+        count: usize,
+        slots: &mut [Slot],
+    ) -> Eval<Vec<Slot>> {
+        let mut values = vec![Slot::Unset; count];
+        for field in fields {
+            let value = self.expr(&field.value, slots)?;
+            let slot = values
+                .get_mut(field.field)
+                .ok_or_else(|| Stop::Unsound(format!("field {} past the end", field.field)))?;
+            *slot = value;
+        }
+        Ok(values)
     }
 
     fn condition(&mut self, expr: &Expr, slots: &mut [Slot]) -> Eval<bool> {
@@ -421,20 +460,21 @@ impl Interpreter<'_, '_> {
                     Type::Custom(custom) => custom.fields.len(),
                     other => return Err(Stop::Unsound(format!("a construction of {other}"))),
                 };
-                let mut values = vec![Slot::Unset; count];
-                for field in fields {
-                    let value = self.expr(&field.value, slots)?;
-                    match values.get_mut(field.field) {
-                        Some(slot) => *slot = value,
-                        None => {
-                            return Err(Stop::Unsound(format!(
-                                "field {} past the end",
-                                field.field
-                            )));
-                        }
-                    }
+                return Ok(Slot::Compound(self.fields(fields, count, slots)?));
+            }
+            ExprKind::Variant { variant, fields } => {
+                let count = match &expr.ty {
+                    Type::Choice(choice) => choice
+                        .variants
+                        .get(*variant)
+                        .map(|declared| declared.fields.len()),
+                    _ => None,
                 }
-                return Ok(Slot::Compound(values));
+                .ok_or_else(|| Stop::Unsound(format!("variant {variant} of {}", expr.ty)))?;
+                return Ok(Slot::Variant {
+                    variant: *variant,
+                    fields: self.fields(fields, count, slots)?,
+                });
             }
             ExprKind::Field { object, field } => {
                 return match self.expr(object, slots)? {
@@ -606,7 +646,7 @@ fn describe(slot: &Slot) -> String {
         Slot::Integer(value) => value.to_string(),
         Slot::Boolean(value) => value.to_string(),
         Slot::Text(text) => text.clone(),
-        Slot::Compound(_) | Slot::Unset => "?".to_owned(),
+        Slot::Compound(_) | Slot::Variant { .. } | Slot::Unset => "?".to_owned(),
     }
 }
 
@@ -615,6 +655,10 @@ fn compare(operator: ComparisonOperator, left: &Slot, right: &Slot) -> bool {
         (Slot::Integer(left), Slot::Integer(right)) => left.cmp(right),
         (Slot::Boolean(left), Slot::Boolean(right)) => left.cmp(right),
         (Slot::Text(left), Slot::Text(right)) => left.cmp(right),
+        // Only choices whose variants hold no fields are compared, by their variant.
+        (Slot::Variant { variant: left, .. }, Slot::Variant { variant: right, .. }) => {
+            left.cmp(right)
+        }
         _ => return false,
     };
     match operator {

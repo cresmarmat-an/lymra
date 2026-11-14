@@ -101,8 +101,8 @@ impl<'src> Visitor<'src> for NamingChecker {
             }
             StatementKind::For { variable, .. } => self.require_binding(*variable, "loop variable"),
             StatementKind::Match { arms, .. } => {
-                for name in arms.iter().flat_map(|arm| &arm.pattern.bindings) {
-                    self.require_binding(*name, "binding");
+                for binding in arms.iter().flat_map(|arm| &arm.pattern.bindings) {
+                    self.require_binding(binding.name, "binding");
                 }
             }
             _ => {}

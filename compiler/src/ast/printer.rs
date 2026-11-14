@@ -175,7 +175,18 @@ impl Printer {
     }
 
     fn match_arm(&mut self, arm: &MatchArm<'_>) {
-        let bindings: Vec<&str> = arm.pattern.bindings.iter().map(|name| name.text).collect();
+        let bindings: Vec<String> = arm
+            .pattern
+            .bindings
+            .iter()
+            .map(|binding| {
+                if binding.name.text == binding.field.text {
+                    binding.field.text.to_owned()
+                } else {
+                    format!("{} = {}", binding.field.text, binding.name.text)
+                }
+            })
+            .collect();
         let payload = if bindings.is_empty() {
             String::new()
         } else {

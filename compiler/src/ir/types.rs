@@ -114,15 +114,48 @@ pub enum Type {
     Array(Arc<ArrayType>),
     /// A type the program declares with `type`, shared like an array.
     Custom(Arc<CustomType>),
+    /// A type the program declares with `choice`, shared like an array.
+    Choice(Arc<ChoiceType>),
 }
 
-/// A `type` declaration: named fields, stored one after another (spec 4.6).
+/**
+ * Named fields stored one after another: a `type` declaration (spec 4.6),
+ * or one variant of a `choice`.
+ */
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CustomType {
+    /// A type's name is unique among the program's types, so it identifies the type.
+    pub name: String,
+    /// In the order the declaration lists them. A type has at least one; a variant can have none.
+    pub fields: Vec<FieldType>,
+}
+
+/// A `choice` declaration: a value that is exactly one of its variants (spec 4.7).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ChoiceType {
     /// Unique among the program's types, so it identifies the type.
     pub name: String,
     /// At least one, in the order the declaration lists them.
-    pub fields: Vec<FieldType>,
+    pub variants: Vec<CustomType>,
+}
+
+impl ChoiceType {
+    /// The position and the fields of the variant called `name`.
+    pub fn variant(&self, name: &str) -> Option<(usize, &CustomType)> {
+        self.variants
+            .iter()
+            .enumerate()
+            .find(|(_, variant)| variant.name == name)
+    }
+
+    /// The type of the tag that says which variant a value holds: the smallest one with room for every variant.
+    pub fn tag_type(&self) -> IntegerType {
+        let largest = self.variants.len().saturating_sub(1);
+        [IntegerType::Unsigned8, IntegerType::Unsigned16]
+            .into_iter()
+            .find(|tag| tag.contains(largest as i128))
+            .unwrap_or(IntegerType::Unsigned32)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -138,6 +171,23 @@ impl CustomType {
             .iter()
             .enumerate()
             .find(|(_, field)| field.name == name)
+    }
+
+    /// The fields laid out as a C struct lays them out, each at a multiple of its alignment.
+    fn layout(&self) -> Option<Layout> {
+        let mut end = 0_u64;
+        let mut align = 1;
+        for field in &self.fields {
+            let layout = field.ty.layout()?;
+            end = end
+                .checked_next_multiple_of(layout.align)?
+                .checked_add(layout.size)?;
+            align = align.max(layout.align);
+        }
+        Some(Layout {
+            size: end.checked_next_multiple_of(align)?,
+            align,
+        })
     }
 }
 
@@ -164,20 +214,24 @@ impl Type {
     pub const fn as_integer(&self) -> Option<IntegerType> {
         match self {
             Self::Integer(integer) => Some(*integer),
-            Self::Boolean | Self::String | Self::Array(_) | Self::Custom(_) => None,
+            Self::Boolean | Self::String | Self::Array(_) | Self::Custom(_) | Self::Choice(_) => {
+                None
+            }
         }
     }
 
     pub fn as_array(&self) -> Option<&ArrayType> {
         match self {
             Self::Array(array) => Some(array),
-            Self::Integer(_) | Self::Boolean | Self::String | Self::Custom(_) => None,
+            Self::Integer(_) | Self::Boolean | Self::String | Self::Custom(_) | Self::Choice(_) => {
+                None
+            }
         }
     }
 
-    /// Whether values of the type hold other values: arrays and declared types.
+    /// Whether values of the type hold other values: arrays, and types declared with `type` or `choice`.
     pub const fn is_compound(&self) -> bool {
-        matches!(self, Self::Array(_) | Self::Custom(_))
+        matches!(self, Self::Array(_) | Self::Custom(_) | Self::Choice(_))
     }
 
     /**
@@ -202,20 +256,23 @@ impl Type {
                     align: element.align,
                 })
             }
-            Self::Custom(custom) => {
-                let mut end = 0_u64;
-                let mut align = 1;
-                for field in &custom.fields {
-                    let layout = field.ty.layout()?;
-                    end = end
-                        .checked_next_multiple_of(layout.align)?
-                        .checked_add(layout.size)?;
-                    align = align.max(layout.align);
+            Self::Custom(custom) => custom.layout(),
+            // The tag, then the fields of whichever variant needs the most room.
+            Self::Choice(choice) => {
+                let tag = u64::from(choice.tag_type().bits() / 8);
+                let mut largest = 0_u64;
+                let mut payload_align = 1;
+                for variant in &choice.variants {
+                    let layout = variant.layout()?;
+                    largest = largest.max(layout.size);
+                    payload_align = payload_align.max(layout.align);
                 }
-                Some(Layout {
-                    size: end.checked_next_multiple_of(align)?,
-                    align,
-                })
+                let align = payload_align.max(tag);
+                let size = tag
+                    .checked_next_multiple_of(payload_align)?
+                    .checked_add(largest.checked_next_multiple_of(payload_align)?)?
+                    .checked_next_multiple_of(align)?;
+                Some(Layout { size, align })
             }
         }
     }
@@ -234,6 +291,7 @@ impl fmt::Display for Type {
             Self::String => formatter.write_str("string"),
             Self::Array(array) => write!(formatter, "array[{}, {}]", array.element, array.length),
             Self::Custom(custom) => formatter.write_str(&custom.name),
+            Self::Choice(choice) => formatter.write_str(&choice.name),
         }
     }
 }
@@ -305,6 +363,50 @@ mod tests {
         assert_eq!(small.layout(), Some(Layout { size: 24, align: 8 }));
         assert_eq!(small.to_string(), "Small");
         assert_eq!(Type::array(small, 3).size(), Some(72));
+    }
+
+    #[test]
+    fn choices_hold_a_tag_and_their_largest_variant() {
+        let variant = |name: &str, fields: Vec<Type>| CustomType {
+            name: name.to_owned(),
+            fields: fields
+                .into_iter()
+                .enumerate()
+                .map(|(position, ty)| FieldType {
+                    name: format!("field_{position}"),
+                    ty,
+                })
+                .collect(),
+        };
+        let choice = |variants: Vec<CustomType>| {
+            Type::Choice(Arc::new(ChoiceType {
+                name: "Shape".to_owned(),
+                variants,
+            }))
+        };
+        let wide = Type::Integer(IntegerType::Integer64);
+        let byte = Type::Integer(IntegerType::Unsigned8);
+        let shape = choice(vec![
+            variant("Circle", vec![wide.clone()]),
+            variant("Rect", vec![wide.clone(), wide.clone()]),
+            variant("Dot", vec![]),
+        ]);
+        assert_eq!(shape.layout(), Some(Layout { size: 24, align: 8 }));
+        let flags = choice(vec![variant("On", vec![]), variant("Off", vec![])]);
+        assert_eq!(flags.layout(), Some(Layout { size: 1, align: 1 }));
+        // Three bytes of fields round up to the two-byte alignment of the other variant.
+        let odd = choice(vec![
+            variant("Bytes", vec![byte.clone(), byte.clone(), byte]),
+            variant("Short", vec![Type::Integer(IntegerType::Integer16)]),
+        ]);
+        assert_eq!(odd.layout(), Some(Layout { size: 6, align: 2 }));
+        let many = ChoiceType {
+            name: "Many".to_owned(),
+            variants: (0..300)
+                .map(|index| variant(&format!("V{index}"), vec![]))
+                .collect(),
+        };
+        assert_eq!(many.tag_type(), IntegerType::Unsigned16);
     }
 
     #[test]

@@ -83,6 +83,7 @@ error_codes! {
     L0308 => "invalid assignment target",
     L0309 => "feature not available yet",
     L0310 => "nesting too deep",
+    L0401 => "`match` does not handle each variant once",
     L0402 => "mismatched types",
     L0403 => "unknown type",
     L0404 => "number does not fit its type",

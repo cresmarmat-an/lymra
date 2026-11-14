@@ -142,12 +142,17 @@ impl Generator<'_, '_> {
                 match &operand.ty {
                     // The array is computed for its effects; its length is part of its type.
                     Type::Array(array) => format!("((void)({code}), INT64_C({}))", array.length),
-                    Type::Integer(_) | Type::Boolean | Type::String | Type::Custom(_) => {
-                        format!("((int64_t)({code}).length)")
-                    }
+                    Type::Integer(_)
+                    | Type::Boolean
+                    | Type::String
+                    | Type::Custom(_)
+                    | Type::Choice(_) => format!("((int64_t)({code}).length)"),
                 }
             }
             ExprKind::Construct(fields) => self.construct(function, fields, &expr.ty, writer),
+            ExprKind::Variant { variant, fields } => {
+                self.variant(function, *variant, fields, &expr.ty, writer)
+            }
             ExprKind::Field { object, field } => {
                 let object = self.expr(function, object, writer);
                 format!("({object}).{}", c_syntax::field_name(*field))
@@ -209,17 +214,54 @@ impl Generator<'_, '_> {
         }
     }
 
-    /**
-     * A value of a declared type, as a C compound literal. Its fields are
-     * computed in the order they are written, and each one with effects but
-     * the last goes into a temporary first, since C computes the values of
-     * an initializer in any order.
-     */
+    /// A value of a declared type, as a C compound literal.
     fn construct(
         &mut self,
         function: &Function<'_>,
         fields: &[FieldValue],
         ty: &Type,
+        writer: &mut Writer,
+    ) -> String {
+        let fields = self.initializers(function, fields, writer);
+        let name = self.types.name(ty);
+        format!("(({name}){{ {fields} }})")
+    }
+
+    /**
+     * A value of a choice, as a C compound literal: its tag, then the
+     * fields of its variant, if it has any, in the variant's struct.
+     */
+    fn variant(
+        &mut self,
+        function: &Function<'_>,
+        variant: usize,
+        fields: &[FieldValue],
+        ty: &Type,
+        writer: &mut Writer,
+    ) -> String {
+        let name = self.types.name(ty);
+        let tag = format!(".{} = {variant}", c_syntax::TAG);
+        if fields.is_empty() {
+            return format!("(({name}){{ {tag} }})");
+        }
+        let fields = self.initializers(function, fields, writer);
+        format!(
+            "(({name}){{ {tag}, .{} = {{ .{} = {{ {fields} }} }} }})",
+            c_syntax::VARIANTS,
+            c_syntax::variant_name(variant)
+        )
+    }
+
+    /**
+     * The designated initializers of a construction's fields. They are
+     * computed in the order they are written, and each one with effects but
+     * the last goes into a temporary first, since C computes the values of
+     * an initializer in any order.
+     */
+    fn initializers(
+        &mut self,
+        function: &Function<'_>,
+        fields: &[FieldValue],
         writer: &mut Writer,
     ) -> String {
         let last_effect = fields.iter().rposition(|field| field.value.has_effects());
@@ -238,8 +280,7 @@ impl Generator<'_, '_> {
                 format!(".{} = {code}", c_syntax::field_name(field.field))
             })
             .collect();
-        let name = self.types.name(ty);
-        format!("(({name}){{ {} }})", members.join(", "))
+        members.join(", ")
     }
 
     /// The address of an argument that holds other values: where it is stored, or else a temporary that holds it.
@@ -281,15 +322,20 @@ impl Generator<'_, '_> {
         else {
             return self.expr(function, expr, writer);
         };
-        let is_text = matches!(left.ty, Type::String);
+        let operands = &left.ty;
         let (left, right) = self.pair(function, left, right, writer);
-        if is_text {
-            return format!(
-                "lymra_compare_text({left}, {right}) {} 0",
-                operator.symbol()
-            );
+        let symbol = operator.symbol();
+        match operands {
+            Type::String => format!("lymra_compare_text({left}, {right}) {symbol} 0"),
+            // Only a choice whose variants hold no fields is compared, by its tag alone.
+            Type::Choice(_) => format!(
+                "({left}).{tag} {symbol} ({right}).{tag}",
+                tag = c_syntax::TAG
+            ),
+            Type::Integer(_) | Type::Boolean | Type::Array(_) | Type::Custom(_) => {
+                format!("{left} {symbol} {right}")
+            }
         }
-        format!("{left} {} {right}", operator.symbol())
     }
 
     /// Computes `code`, of type `ty`, into a new constant and returns the constant's name.

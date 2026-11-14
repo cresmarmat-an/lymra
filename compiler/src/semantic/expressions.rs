@@ -271,6 +271,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             }
             Some(Global::Function(_)) => Err(self.report(errors::function_as_value(name, span))),
             Some(Global::Type(_)) => Err(self.report(errors::type_as_value(name, span))),
+            Some(Global::Variant { choice, variant }) => {
+                self.check_variant_name(choice, variant, span)
+            }
             None => match BuiltIn::of(name) {
                 Some(BuiltIn::Function) => Err(self.report(errors::function_as_value(name, span))),
                 Some(BuiltIn::Type) => Err(self.report(errors::type_as_value(name, span))),
@@ -346,7 +349,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 "`-` works on numbers, but this is a `boolean`".to_owned(),
                 "to flip a `boolean`, use `not`".to_owned(),
             ),
-            Type::String | Type::Array(_) | Type::Custom(_) => (
+            Type::String | Type::Array(_) | Type::Custom(_) | Type::Choice(_) => (
                 format!(
                     "`-` works on numbers, but this is {}",
                     described(&operand.ty)
@@ -421,6 +424,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     }
                     Type::Custom(_) => {
                         "arithmetic works on single numbers; work on the fields one by one"
+                    }
+                    Type::Choice(_) => {
+                        "arithmetic works on single numbers; read the fields in a `match` first"
                     }
                     Type::Boolean | Type::Integer(_) => {
                         "arithmetic needs integer types such as `integer64`"
@@ -537,6 +543,33 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     "compare the fields one by one",
                 )));
             }
+            // A choice whose variants hold nothing is compared by which variant it is.
+            Type::Choice(choice)
+                if choice
+                    .variants
+                    .iter()
+                    .all(|variant| variant.fields.is_empty()) =>
+            {
+                if !operator.is_equality() {
+                    return Err(self.report(errors::operator_type(
+                        format!("`{symbol}` compares numbers, and a choice has no order"),
+                        span,
+                        format!("comparing `{}` values", choice.name),
+                        "compare variants with `==` and `!=`, or tell them apart in a `match`",
+                    )));
+                }
+            }
+            Type::Choice(choice) => {
+                return Err(self.report(errors::operator_type(
+                    format!(
+                        "`{symbol}` compares single values, and the variants of `{}` hold fields",
+                        choice.name
+                    ),
+                    span,
+                    "comparing values with fields".to_owned(),
+                    "tell the variants apart in a `match`, then compare their fields",
+                )));
+            }
             Type::Integer(_) | Type::Boolean | Type::String => {}
         }
         if let (Some(left_value), Some(right_value)) =
@@ -613,7 +646,10 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             .scope
             .as_ref()
             .is_some_and(|scope| scope.lookup(name).is_some())
-            || matches!(self.globals.get(name), Some(Global::Constant(_)));
+            || matches!(
+                self.globals.get(name),
+                Some(Global::Constant(_) | Global::Variant { .. })
+            );
         !is_value
     }
 
@@ -653,6 +689,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         match self.globals.get(name).copied() {
             Some(Global::Function(id)) => self.check_function_call(id, name, call, span),
             Some(Global::Type(id)) => self.check_construction(id, call, span),
+            Some(Global::Variant { choice, variant }) => {
+                self.check_variant_call(choice, variant, call, span)
+            }
             Some(Global::Constant(_)) => {
                 Err(self.report(errors::not_a_function(name, callee.span)))
             }
@@ -685,10 +724,6 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             return self.check_wrapping(operator, call, span, hint);
         }
         self.mark_argument_reads(&call.arguments);
-        // A `type` or `choice` of a later phase is already reported where it is declared.
-        if self.unavailable_types.contains(name) {
-            return Err(ErrorReported);
-        }
         let callee = call.callee.span;
         let diagnostic = match name {
             "range" => Feature::RangeValues.diagnostic(span),
@@ -988,6 +1023,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 self.report(errors::not_assignable(name, "function", span))
             }
             Some(Global::Type(_)) => self.report(errors::not_assignable(name, "type", span)),
+            Some(Global::Variant { .. }) => {
+                self.report(errors::not_assignable(name, "variant", span))
+            }
             None => match BuiltIn::of(name) {
                 Some(built_in) => self.report(errors::not_assignable(name, built_in.noun(), span)),
                 None => self.report_unknown_name(name, span),
@@ -1047,7 +1085,8 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     Ok(value) => match ir::TextForm::of(&value.ty) {
                         Some(form) => checked.push(ir::PrintPart::Value { value, form }),
                         None => {
-                            self.report(errors::compound_in_text(&value.ty, value.span));
+                            let source = self.text(value.span);
+                            self.report(errors::compound_in_text(&value.ty, value.span, source));
                             failed = true;
                         }
                     },
@@ -1076,7 +1115,7 @@ pub(super) fn immutable_local_error(local: &Local<'_>, span: Span) -> Diagnostic
             "copy it into a local first, as in `variable local_{name} = {name}`; \
              or declare the parameter `variable` to change the caller's binding"
         )),
-        (LocalKind::LoopVariable, _) => Help::text(format!(
+        (LocalKind::LoopVariable | LocalKind::CaseBinding, _) => Help::text(format!(
             "copy it into a local first, as in `variable local_{name} = {name}`"
         )),
         _ => Help::text("declare it with `variable` if it has to change"),

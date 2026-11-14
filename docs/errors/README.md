@@ -43,6 +43,7 @@ From 04 on, they are the chapter of the [specification](../spec.md) the rule com
 | [L0308](L0308.md) | invalid assignment target |
 | [L0309](L0309.md) | feature not available yet |
 | [L0310](L0310.md) | nesting too deep |
+| [L0401](L0401.md) | `match` does not handle each variant once |
 | [L0402](L0402.md) | mismatched types |
 | [L0403](L0403.md) | unknown type |
 | [L0404](L0404.md) | number does not fit its type |

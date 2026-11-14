@@ -1,0 +1,136 @@
+#[
+    A choice holds one of its variants. A variant is built by naming its
+    fields, or by its name alone, and a `match` takes it apart again with a
+    case for each variant. Choices are values: copied whole, passed and
+    returned, and changed through a `variable` parameter.
+]#
+
+choice Shape
+    Circle(integer64 radius)
+    Rect(integer64 width, integer64 height)
+    Dot
+
+choice Light
+    Red
+    Amber
+    Green
+
+type Signal
+    Light light
+    integer64 seconds
+
+choice Event
+    Arrived(Signal signal, array[integer32, 2] lanes)
+    Left(Shape shape)
+    Quiet
+
+choice Only
+    One(integer64 value)
+
+function area(Shape shape) returns integer64
+    match shape
+        case Circle(radius)
+            return 3 * radius * radius
+        case Rect(width, height)
+            return width * height
+        case Dot
+            return 0
+
+function next(Light light) returns Light
+    match light
+        case Red
+            return Green
+        case Amber
+            return Red
+        case Green
+            return Amber
+
+function grow(variable Shape shape)
+    match shape
+        case Circle(radius)
+            shape = Circle(radius = radius + 1)
+        case Rect(width = old_width, height)
+            shape = Rect(width = old_width + 1, height = height)
+        case Dot
+            shape = Circle(radius = 1)
+
+function noted(string name, integer64 value) returns integer64
+    print("{name}")
+    return value
+
+function only() returns Only
+    print("only")
+    return One(value = 7)
+
+function main()
+    variable array[Shape, 3] shapes = array(Dot)
+    shapes[0] = Circle(radius = 2)
+    shapes[1] = Rect(height = 3, width = 4)
+    variable integer64 total = 0
+    for shape in shapes
+        total = total + area(shape)
+    print("total {total}")
+
+    variable grown = Dot
+    grow(variable grown)
+    grow(variable grown)
+    constant copy = grown
+    grow(variable grown)
+    variable box = Rect(width = 1, height = 5)
+    grow(variable box)
+    print("grown {area(grown)}, copy {area(copy)}, box {area(box)}")
+
+    variable light = Red
+    variable integer64 changes = 0
+    while light != Amber
+        light = next(light)
+        changes = changes + 1
+    print("amber after {changes}, red next {next(light) == Red}")
+
+    variable array[Event, 3] events = array(Quiet)
+    events[0] = Arrived(lanes = array(5), signal = Signal(light = Green, seconds = 30))
+    events[2] = Left(shape = Rect(width = 2, height = 2))
+    for event in events
+        match event
+            case Arrived(signal, lanes)
+                match signal.light
+                    case Green
+                        print("arrived on green for {signal.seconds}s in lane {lanes[1]}")
+                    case Red
+                        print("arrived on red")
+                    case Amber
+                        print("arrived on amber")
+            case Left(shape)
+                print("left with area {area(shape)}")
+            case Quiet
+                continue
+
+    constant ordered = Rect(height = noted("height", 2), width = noted("width", 3))
+    print("ordered {area(ordered)}")
+
+    match only()
+        case One
+            print("one")
+    match only()
+        case One(value)
+            print("value {value}")
+
+    variable current = Circle(radius = 5)
+    match current
+        case Circle(radius)
+            current = Dot
+            print("was {radius}, now {area(current)}")
+        case Rect
+            print("rect")
+        case Dot
+            print("dot")
+
+    for index in range(0, 3)
+        match shapes[index]
+            case Rect(width)
+                print("first rect is {width} wide, at {index}")
+                break
+            case Circle
+                print("circle at {index}")
+            case Dot
+                print("dot at {index}")

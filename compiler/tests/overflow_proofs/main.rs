@@ -102,6 +102,12 @@ impl CheckCount {
                 self.expr(array);
                 self.block(body);
             }
+            Statement::Match { value, cases } => {
+                self.expr(value);
+                for case in cases {
+                    self.block(&case.body);
+                }
+            }
             Statement::Return(None) | Statement::Break | Statement::Continue => {}
         }
     }
@@ -140,7 +146,7 @@ impl CheckCount {
             } => {
                 self.expr(operand);
             }
-            ExprKind::Construct(fields) => {
+            ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
                 for field in fields {
                     self.expr(&field.value);
                 }

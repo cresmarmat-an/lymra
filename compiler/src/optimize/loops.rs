@@ -206,6 +206,13 @@ fn collect_statement(
             collect_references(array, changed);
             collect_block(body, changed, declared);
         }
+        Statement::Match { value, cases } => {
+            collect_references(value, changed);
+            for case in cases {
+                declared.extend(case.bindings.iter().map(|binding| binding.local));
+                collect_block(&case.body, changed, declared);
+            }
+        }
         Statement::Return(None) | Statement::Break | Statement::Continue => {}
     }
 }
@@ -235,7 +242,7 @@ pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
         } => {
             collect_references(operand, changed);
         }
-        ExprKind::Construct(fields) => {
+        ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
             for field in fields {
                 collect_references(&field.value, changed);
             }

@@ -3,7 +3,7 @@
 use super::{MAX_NESTING, ParseResult, Parser, errors, foreign};
 use crate::ast::{
     BinaryOperator, Block, BlockArgument, ConditionalBranch, Expr, ExprKind, IfStatement, MatchArm,
-    Mutability, Pattern, Statement, StatementKind,
+    Mutability, Pattern, PatternBinding, Statement, StatementKind,
 };
 use crate::diagnostics::{ErrorReported, Help};
 use crate::lexer::{Keyword, Token, TokenKind};
@@ -380,9 +380,8 @@ impl<'src> Parser<'src, '_> {
         let mut bindings = Vec::new();
         if self.at(TokenKind::LeftParen) {
             let open = self.advance();
-            let parse_binding_name = |parser: &mut Self| parser.expect_name("a name for the field");
             let (names, close) =
-                self.parse_list(open, TokenKind::RightParen, parse_binding_name)?;
+                self.parse_list(open, TokenKind::RightParen, Self::parse_pattern_binding)?;
             bindings = names;
             span = span.to(close.span);
         }
@@ -391,6 +390,17 @@ impl<'src> Parser<'src, '_> {
             bindings,
             span,
         })
+    }
+
+    /// `field`, or `field = name` to bind the field under another name.
+    fn parse_pattern_binding(&mut self) -> ParseResult<PatternBinding<'src>> {
+        let field = self.expect_name("a field name")?;
+        if !self.at(TokenKind::Assign) {
+            return Ok(PatternBinding { field, name: field });
+        }
+        self.advance();
+        let name = self.expect_name("a name for the field")?;
+        Ok(PatternBinding { field, name })
     }
 
     fn parse_return(&mut self) -> ParseResult<Statement<'src>> {

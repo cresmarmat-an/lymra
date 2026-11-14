@@ -326,9 +326,12 @@ function area(Shape shape) returns float64
             return 0.0
 ```
 
-- A `match` has to cover every variant. A missing variant is error `L0401`, and the message lists the missing cases.
+- A variant is built like a value of a declared type, with every field named once (Section 4.6): `Circle(radius = 2.0)`. A variant without fields is written by its name alone, as `Dot`. Variant names share the top level of a file with types, functions and constants, so each is declared once (`L0207`).
+- A `case` names one variant and the fields it uses, each bound to a constant for the body of the case: `case Rect(width, height)`. A case can leave out fields it does not use. Where a field's name is taken, the field is bound under another, as in `case Rect(width = rect_width)`, since one name never hides another (Section 3).
+- A `match` has to cover every variant, once. A missing variant, a variant handled twice, or a case that names no variant of the choice is error `L0401`, and the message lists the missing cases. There is no case for every other variant, like `_` in Rust or `default` in C: adding a variant to a choice then shows every `match` that has to handle it.
+- A choice is a value like a number (Section 3.1). Assigning or passing it gives an independent copy, and a `variable` parameter changes the caller's. A choice whose variants hold no fields is compared with `==` and `!=`; other choices are told apart in a `match`. A choice cannot be put into text yet.
 - A plain `Shape` reserves room for its largest variant, so a `list[Shape]` can be indexed and its elements can be overwritten.
-- A `packed Shape` takes exactly the size of the variant it holds. In the example above, a `list[packed Shape]` stores a `Dot` in 1 byte instead of 17. The trade is that a packed list can be iterated but not indexed (`L0408`), since it keeps no element positions, and a packed value can't change its variant after it is built.
+- A `packed Shape` takes exactly the size of the variant it holds. In the example above, a `list[packed Shape]` stores a `Dot` in 1 byte instead of the 24 a plain `Shape` takes: a tag, then room for a `Rect`'s two `float64` fields at their alignment. The trade is that a packed list can be iterated but not indexed (`L0408`), since it keeps no element positions, and a packed value can't change its variant after it is built. `packed` comes with lists, in roadmap phase 3.
 
 ## 5. Functions
 

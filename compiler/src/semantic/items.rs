@@ -2,8 +2,8 @@
 
 use super::features::Feature;
 use super::{
-    BuiltIn, CheckResult, Checker, ConstantEntry, ConstantState, DISCARD, Definition,
-    FunctionEntry, Global, Parameter, TypeEntry, TypeState, errors,
+    BuiltIn, CheckResult, Checker, ConstantEntry, ConstantState, DISCARD, DeclaredType, Definition,
+    FunctionEntry, Global, Parameter, TypeEntry, TypeId, TypeState, errors,
 };
 use crate::ast::{self, Mutability, Name, Visibility};
 use crate::diagnostics::ErrorReported;
@@ -26,15 +26,13 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     self.report(Feature::Modules.diagnostic(path.span));
                 }
                 ast::ItemKind::Type(declaration) => {
-                    let id = self.types.len();
-                    self.types.push(TypeEntry {
-                        declaration,
-                        state: TypeState::Pending,
-                    });
-                    self.declare_global(declaration.name, Global::Type(id));
+                    self.declare_type(DeclaredType::Record(declaration));
                 }
                 ast::ItemKind::Choice(declaration) => {
-                    self.skip_unavailable_type(declaration.name, item.span, Feature::Choices)
+                    let choice = self.declare_type(DeclaredType::Choice(declaration));
+                    for (variant, declared) in declaration.variants.iter().enumerate() {
+                        self.declare_global(declared.name, Global::Variant { choice, variant });
+                    }
                 }
                 ast::ItemKind::Constant(binding) => {
                     let id = self.constants.len();
@@ -61,9 +59,13 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }
         // Every type is resolved, even one nothing uses, so its own mistakes are reported.
         for id in 0..self.types.len() {
-            if let Some(name) = self.types.get(id).map(|entry| entry.declaration.name.span) {
+            if let Some(name) = self
+                .types
+                .get(id)
+                .map(|entry| entry.declaration.name().span)
+            {
                 // A failure is reported where it happens.
-                let _ = self.custom_type(id, name);
+                let _ = self.declared_type(id, name);
             }
         }
         for id in 0..self.functions.len() {
@@ -71,10 +73,15 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }
     }
 
-    /// Reports a declaration of a later phase once, so uses of its name are not reported again.
-    fn skip_unavailable_type(&mut self, name: Name<'src>, item: Span, feature: Feature) {
-        self.unavailable_types.insert(name.text);
-        self.report(feature.diagnostic(Span::new(item.start, name.span.end)));
+    /// Registers a `type` or `choice` declaration under its name. Returns its id.
+    fn declare_type(&mut self, declaration: DeclaredType<'src, 'ast>) -> TypeId {
+        let id = self.types.len();
+        self.types.push(TypeEntry {
+            declaration,
+            state: TypeState::Pending,
+        });
+        self.declare_global(declaration.name(), Global::Type(id));
+        id
     }
 
     fn declare_global(&mut self, name: Name<'src>, global: Global) {
@@ -137,7 +144,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
     pub(super) fn resolve_type(&mut self, ty: &ast::TypeExpr<'src>) -> CheckResult<Type> {
         let (path, arguments) = match &ty.kind {
             ast::TypeExprKind::Packed(_) => {
-                return Err(self.report(Feature::Choices.diagnostic(ty.span)));
+                return Err(self.report(Feature::Packed.diagnostic(ty.span)));
             }
             ast::TypeExprKind::Named { path, arguments } => (path, arguments),
         };
@@ -149,13 +156,10 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }
         if let Some(Global::Type(id)) = self.globals.get(name.text).copied() {
             self.no_arguments(name.text, arguments, ty.span)?;
-            return self.custom_type(id, name.span).map(Type::Custom);
+            return self.declared_type(id, name.span);
         }
         if let Some(feature) = Feature::future_type(name.text) {
             return Err(self.report(feature.diagnostic(ty.span)));
-        }
-        if self.unavailable_types.contains(name.text) {
-            return Err(ErrorReported);
         }
         let resolved = match name.text {
             "boolean" => Some(Type::Boolean),
@@ -174,7 +178,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 errors::unsupported_integer_size(self.text(ty.span), ty.span),
             )),
             _ => {
-                let declared = self.types.iter().map(|entry| entry.declaration.name.text);
+                let declared = self.types.iter().map(|entry| entry.declaration.name().text);
                 let known = IntegerType::ALL
                     .iter()
                     .map(|integer| integer.name())
@@ -313,6 +317,7 @@ fn runtime_part(expr: &ir::Expr) -> Span {
         | ir::ExprKind::Local(_)
         | ir::ExprKind::Call(_)
         | ir::ExprKind::Fill(_)
-        | ir::ExprKind::Construct(_) => expr.span,
+        | ir::ExprKind::Construct(_)
+        | ir::ExprKind::Variant { .. } => expr.span,
     }
 }

@@ -33,6 +33,19 @@ pub(in crate::semantic) fn no_fields(found: &Type, object: Span, field: &str) ->
         Type::Array(_) => {
             "an array has elements, not fields; to read one, index it, as in `values[0]`".to_owned()
         }
+        Type::Choice(choice) => match choice
+            .variants
+            .iter()
+            .find(|variant| variant.field(field).is_some())
+        {
+            Some(variant) => format!(
+                "`{field}` belongs to the variant `{}`; read it in a `match`, as in `case {}({field})`",
+                variant.name, variant.name
+            ),
+            None => {
+                "a choice holds fields only in its variants; read them in a `match` case".to_owned()
+            }
+        },
         Type::Integer(_) | Type::Boolean | Type::String | Type::Custom(_) => {
             format!("only a value of a type declared with `type` has fields such as `{field}`")
         }

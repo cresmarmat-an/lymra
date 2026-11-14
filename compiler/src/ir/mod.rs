@@ -9,7 +9,7 @@
 
 mod types;
 
-pub use types::{ArrayType, CustomType, FieldType, IntegerType, Layout, Type, Value};
+pub use types::{ArrayType, ChoiceType, CustomType, FieldType, IntegerType, Layout, Type, Value};
 
 use crate::ast::OptimizeMode;
 use crate::source::Span;
@@ -109,12 +109,38 @@ pub enum Statement {
         length: u64,
         body: Block,
     },
+    /**
+     * `match value`: the value is computed once, then the case for the
+     * variant it holds runs, with the fields the case names bound to their
+     * values. The cases handle every variant of the choice once.
+     */
+    Match {
+        value: Expr,
+        cases: Vec<Case>,
+    },
     Return(Option<Expr>),
     Break,
     Continue,
     Assert {
         condition: Expr,
     },
+}
+
+/// One `case` of a `match`.
+#[derive(Clone, Debug)]
+pub struct Case {
+    /// The position of the variant in its choice.
+    pub variant: usize,
+    /// The locals the case declares, each holding one field of the variant.
+    pub bindings: Vec<CaseBinding>,
+    pub body: Block,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CaseBinding {
+    pub local: LocalId,
+    /// The position of the field in its variant.
+    pub field: usize,
 }
 
 /// Where an assignment stores its value: a local, or a part of it.
@@ -178,7 +204,7 @@ impl TextForm {
             Type::Boolean => Some(Self::Boolean),
             Type::Integer(integer) if integer.is_signed() => Some(Self::Signed),
             Type::Integer(_) => Some(Self::Unsigned),
-            Type::Array(_) | Type::Custom(_) => None,
+            Type::Array(_) | Type::Custom(_) | Type::Choice(_) => None,
         }
     }
 }
@@ -256,6 +282,11 @@ pub enum ExprKind {
         object: Box<Expr>,
         field: usize,
     },
+    /// `Circle(radius = 2)` or `Dot`: a value of a choice, the variant at `variant` with its fields in the order written.
+    Variant {
+        variant: usize,
+        fields: Vec<FieldValue>,
+    },
 }
 
 /// The value given for one field in a construction.
@@ -280,7 +311,9 @@ impl Expr {
             | ExprKind::Field {
                 object: operand, ..
             } => operand.mentions(local),
-            ExprKind::Construct(fields) => fields.iter().any(|field| field.value.mentions(local)),
+            ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
+                fields.iter().any(|field| field.value.mentions(local))
+            }
             ExprKind::Arithmetic { left, right, .. }
             | ExprKind::Compare { left, right, .. }
             | ExprKind::Logic { left, right, .. }
@@ -312,7 +345,9 @@ impl Expr {
             | ExprKind::Field {
                 object: operand, ..
             } => operand.has_effects(),
-            ExprKind::Construct(fields) => fields.iter().any(|field| field.value.has_effects()),
+            ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
+                fields.iter().any(|field| field.value.has_effects())
+            }
             ExprKind::Negate { operand, checked } | ExprKind::Convert { operand, checked } => {
                 *checked || operand.has_effects()
             }

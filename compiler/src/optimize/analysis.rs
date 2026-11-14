@@ -24,7 +24,7 @@ use super::interval::Interval;
 use super::loops::{self, Change, Changes, Followed};
 use super::proof::UnprovenIndex;
 use crate::ir::{
-    Argument, ArithmeticOperator, Block, Branch, Call, ComparisonOperator, Expr, ExprKind,
+    Argument, ArithmeticOperator, Block, Branch, Call, Case, ComparisonOperator, Expr, ExprKind,
     Function, IntegerType, Local, LocalId, LogicOperator, PlaceStep, PrintPart, Statement, Type,
     Value,
 };
@@ -91,6 +91,31 @@ impl Bounds {
 enum Flow {
     Continues,
     Leaves,
+}
+
+/// What holds after the paths of an `if` or a `match` meet again.
+#[derive(Default)]
+struct Merge {
+    /// Bounds that hold at the end of every path that continues, or `None` if none does.
+    after: Option<Bounds>,
+    /// What every path did to the followed variables, including paths that left.
+    changes: Option<Changes>,
+}
+
+impl Merge {
+    fn add(&mut self, bounds: Bounds, changes: Changes, flow: Flow) {
+        if flow == Flow::Continues {
+            self.after = Some(match self.after.take() {
+                Some(previous) => previous.join(&bounds),
+                None => bounds,
+            });
+        }
+        // A path that leaves still changed things before it left, inside the current iteration.
+        self.changes = Some(match self.changes.take() {
+            Some(previous) => loops::join_changes(&previous, &changes),
+            None => changes,
+        });
+    }
 }
 
 /// What a walk does besides tracking bounds.
@@ -199,7 +224,11 @@ impl Analyzer<'_> {
             },
             ExprKind::Length(operand) => match &operand.ty {
                 Type::Array(array) => Interval::exact(i128::from(array.length)),
-                Type::Integer(_) | Type::Boolean | Type::String | Type::Custom(_) => Interval {
+                Type::Integer(_)
+                | Type::Boolean
+                | Type::String
+                | Type::Custom(_)
+                | Type::Choice(_) => Interval {
                     low: 0,
                     high: whole_type.high,
                 },
@@ -212,6 +241,7 @@ impl Analyzer<'_> {
             | ExprKind::Index { .. }
             | ExprKind::Fill(_)
             | ExprKind::Construct(_)
+            | ExprKind::Variant { .. }
             | ExprKind::Field { .. } => whole_type,
         };
         // A checked operation that does not stop the program gives a value of its type.
@@ -256,7 +286,7 @@ impl Analyzer<'_> {
             } => {
                 self.remove_checks(operand, bounds);
             }
-            ExprKind::Construct(fields) => {
+            ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
                 for field in fields {
                     self.remove_checks(&mut field.value, bounds);
                 }
@@ -448,6 +478,10 @@ impl Analyzer<'_> {
                 let element = variable.map(|variable| (variable, None));
                 self.walk_counted(body, element, trips, &changed, bounds, changes, mode);
             }
+            Statement::Match { value, cases } => {
+                self.evaluate(value, bounds, changes, mode);
+                return self.walk_match(cases, bounds, changes, mode);
+            }
             Statement::Assert { condition } => {
                 self.evaluate(condition, bounds, changes, mode);
                 // The program stops when an assertion fails, so after one its condition holds.
@@ -474,52 +508,63 @@ impl Analyzer<'_> {
     ) -> Flow {
         // `remaining` holds where every condition so far was false.
         let mut remaining = bounds.clone();
-        let mut after: Option<Bounds> = None;
-        let mut joined_changes: Option<Changes> = None;
-        let mut join = |branch_bounds: Bounds, branch_changes: Changes, flow: Flow| {
-            if flow == Flow::Continues {
-                after = Some(match after.take() {
-                    Some(previous) => previous.join(&branch_bounds),
-                    None => branch_bounds,
-                });
-            }
-            // A branch that leaves still changed things before it left, inside the current iteration.
-            joined_changes = Some(match joined_changes.take() {
-                Some(previous) => loops::join_changes(&previous, &branch_changes),
-                None => branch_changes,
-            });
-        };
-
+        let mut merge = Merge::default();
         for branch in branches.iter_mut() {
             self.evaluate(&mut branch.condition, &mut remaining, changes, mode);
             let mut inside = remaining.clone();
             self.refine(&mut inside, &branch.condition, true);
             let mut branch_changes = changes.clone();
             let flow = self.walk_block(&mut branch.body, &mut inside, &mut branch_changes, mode);
-            join(inside, branch_changes, flow);
+            merge.add(inside, branch_changes, flow);
             self.refine(&mut remaining, &branch.condition, false);
         }
-        let every_branch_leaves = match otherwise {
+        match otherwise {
             Some(block) => {
                 let mut inside = remaining.clone();
                 let mut branch_changes = changes.clone();
                 let flow = self.walk_block(block, &mut inside, &mut branch_changes, mode);
-                join(inside, branch_changes, flow);
-                after.is_none()
+                merge.add(inside, branch_changes, flow);
             }
-            None => {
-                join(remaining.clone(), changes.clone(), Flow::Continues);
-                false
+            None => merge.add(remaining.clone(), changes.clone(), Flow::Continues),
+        }
+        self.finish_merge(merge, bounds, changes)
+    }
+
+    /**
+     * A `match` runs exactly one of its cases, each from what holds before
+     * it. A case's bindings can hold any value of their fields' types.
+     */
+    fn walk_match(
+        &mut self,
+        cases: &mut [Case],
+        bounds: &mut Bounds,
+        changes: &mut Changes,
+        mode: Mode,
+    ) -> Flow {
+        let mut merge = Merge::default();
+        for case in cases.iter_mut() {
+            let mut inside = bounds.clone();
+            for binding in &case.bindings {
+                inside.set(binding.local, None);
             }
-        };
-        *bounds = after.unwrap_or(remaining);
-        if let Some(joined) = joined_changes {
+            let mut case_changes = changes.clone();
+            let flow = self.walk_block(&mut case.body, &mut inside, &mut case_changes, mode);
+            merge.add(inside, case_changes, flow);
+        }
+        self.finish_merge(merge, bounds, changes)
+    }
+
+    /// Takes what holds where the paths meet. Control leaves when no path continues.
+    fn finish_merge(&self, merge: Merge, bounds: &mut Bounds, changes: &mut Changes) -> Flow {
+        if let Some(joined) = merge.changes {
             *changes = joined;
         }
-        if every_branch_leaves {
-            Flow::Leaves
-        } else {
-            Flow::Continues
+        match merge.after {
+            Some(after) => {
+                *bounds = after;
+                Flow::Continues
+            }
+            None => Flow::Leaves,
         }
     }
 

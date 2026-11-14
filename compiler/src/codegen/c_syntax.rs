@@ -43,6 +43,22 @@ pub(super) fn field_name(position: usize) -> String {
     format!("field_{position}")
 }
 
+/// The struct of a choice, kept apart from other C names by its prefix like a declared type.
+pub(super) fn choice_name(name: &str) -> String {
+    format!("choice_{name}")
+}
+
+/// The member of a choice's struct that says which variant the value holds.
+pub(super) const TAG: &str = "tag";
+
+/// The member of a choice's struct that holds the fields of its variants, one struct for each.
+pub(super) const VARIANTS: &str = "variants";
+
+/// The struct, inside a choice's union, of the variant at `position`.
+pub(super) fn variant_name(position: usize) -> String {
+    format!("variant_{position}")
+}
+
 /**
  * A C string literal holding exactly the bytes of `text`. Bytes outside
  * printable ASCII are written as three-digit octal escapes, which cannot run

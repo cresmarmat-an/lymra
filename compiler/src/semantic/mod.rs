@@ -10,6 +10,7 @@
  */
 
 mod arrays;
+mod choices;
 mod custom_types;
 mod cycles;
 mod errors;
@@ -26,12 +27,11 @@ mod wrapping;
 #[cfg(test)]
 mod tests;
 
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::collections::HashMap;
 
 use crate::ast::{self, Name, OptimizeMode};
 use crate::diagnostics::{Diagnostic, ErrorReported, Help};
-use crate::ir::{self, ConstantId, CustomType, FunctionId, IntegerType, Program, Type, Value};
+use crate::ir::{self, ConstantId, FunctionId, IntegerType, Program, Type, Value};
 use crate::similarity;
 use crate::source::{SourceFile, Span};
 use scope::{FunctionScope, LocalKind};
@@ -134,6 +134,11 @@ enum Global {
     Function(FunctionId),
     Constant(ConstantId),
     Type(TypeId),
+    /// A variant of the `choice` declared as the type `choice`, by its position there.
+    Variant {
+        choice: TypeId,
+        variant: usize,
+    },
 }
 
 /// A parameter with its type resolved.
@@ -161,17 +166,33 @@ enum ConstantState {
     Failed,
 }
 
-/// How far a `type` declaration is resolved. Resolving one in progress means it contains itself.
+/// How far a type declaration is resolved. Resolving one in progress means it contains itself.
 #[derive(Debug)]
 enum TypeState {
     Pending,
     InProgress,
-    Done(Arc<CustomType>),
+    Done(Type),
     Failed,
 }
 
+/// A type the program declares: a `type` with fields, or a `choice` with variants.
+#[derive(Clone, Copy, Debug)]
+enum DeclaredType<'src, 'ast> {
+    Record(&'ast ast::TypeDeclaration<'src>),
+    Choice(&'ast ast::ChoiceDeclaration<'src>),
+}
+
+impl<'src> DeclaredType<'src, '_> {
+    fn name(self) -> Name<'src> {
+        match self {
+            Self::Record(declaration) => declaration.name,
+            Self::Choice(declaration) => declaration.name,
+        }
+    }
+}
+
 struct TypeEntry<'src, 'ast> {
-    declaration: &'ast ast::TypeDeclaration<'src>,
+    declaration: DeclaredType<'src, 'ast>,
     state: TypeState,
 }
 
@@ -197,8 +218,6 @@ struct Checker<'src, 'ast> {
      * such as an `array(value)` with no length to take, is not reported.
      */
     destination_unknown: bool,
-    /// Names of `type` and `choice` declarations, which are not available yet and already reported.
-    unavailable_types: HashSet<&'src str>,
     optimize: Option<OptimizeMode>,
     prove_bounds: bool,
     /// The function whose body is being checked. `None` while top-level constants are computed.
@@ -216,7 +235,6 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             types: Vec::new(),
             resolving: Vec::new(),
             destination_unknown: false,
-            unavailable_types: HashSet::new(),
             optimize: None,
             prove_bounds: false,
             scope: None,
@@ -262,7 +280,17 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 .get(id)
                 .map(|entry| entry.declaration.name.span),
             Global::Constant(id) => self.constants.get(id).map(|entry| entry.binding.name.span),
-            Global::Type(id) => self.types.get(id).map(|entry| entry.declaration.name.span),
+            Global::Type(id) => self
+                .types
+                .get(id)
+                .map(|entry| entry.declaration.name().span),
+            Global::Variant { choice, variant } => match self.types.get(choice)?.declaration {
+                DeclaredType::Choice(declaration) => declaration
+                    .variants
+                    .get(variant)
+                    .map(|variant| variant.name.span),
+                DeclaredType::Record(_) => None,
+            },
         }
     }
 

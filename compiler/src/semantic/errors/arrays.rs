@@ -179,13 +179,23 @@ pub(in crate::semantic) fn no_length(found: &Type, span: Span) -> Diagnostic {
     )
 }
 
-/// An array or a value of a declared type interpolated into text, which holds numbers, `boolean` values and text.
-pub(in crate::semantic) fn compound_in_text(found: &Type, span: Span) -> Diagnostic {
+/**
+ * A value that holds other values, interpolated into text, which holds
+ * numbers, `boolean` values and text. `source` is the value as written.
+ */
+pub(in crate::semantic) fn compound_in_text(found: &Type, span: Span, source: &str) -> Diagnostic {
     let help = match found {
-        Type::Custom(_) => "put its fields in one by one, as in `{frog.name}`",
-        Type::Integer(_) | Type::Boolean | Type::String | Type::Array(_) => {
-            "put its elements in one by one, as in `{values[0]}`, or print them in a loop"
-        }
+        Type::Custom(custom) => format!(
+            "put its fields in one by one, as in `{{{source}.{}}}`",
+            custom
+                .fields
+                .first()
+                .map_or("field", |field| field.name.as_str())
+        ),
+        Type::Choice(_) => "print it from a `match`, with a `case` for each variant".to_owned(),
+        Type::Integer(_) | Type::Boolean | Type::String | Type::Array(_) => format!(
+            "put its elements in one by one, as in `{{{source}[0]}}`, or print them in a loop"
+        ),
     };
     Diagnostic::new(
         ErrorCode::L0402,
@@ -203,7 +213,7 @@ pub(in crate::semantic) fn not_iterable(found: &Type, span: Span, source: &str) 
             span,
             format!("range(0, {source})"),
         ),
-        Type::Boolean | Type::String | Type::Array(_) | Type::Custom(_) => {
+        Type::Boolean | Type::String | Type::Array(_) | Type::Custom(_) | Type::Choice(_) => {
             Help::text("loop over `range(start, end)` or over an array")
         }
     };

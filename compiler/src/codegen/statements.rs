@@ -3,7 +3,7 @@
 use super::expressions::{Bounds, is_addressable};
 use super::{Generator, INDENT, Writer, c_syntax, local_access};
 use crate::ir::{
-    Block, Branch, Expr, Function, LocalId, Place, PlaceStep, PrintPart, Statement, TextForm,
+    Block, Branch, Case, Expr, Function, LocalId, Place, PlaceStep, PrintPart, Statement, TextForm,
 };
 
 impl Generator<'_, '_> {
@@ -65,6 +65,7 @@ impl Generator<'_, '_> {
                 length,
                 body,
             } => self.for_each(function, *variable, array, *length, body, writer),
+            Statement::Match { value, cases } => self.match_cases(function, value, cases, writer),
             Statement::Return(Some(value)) => {
                 let value = self.expr(function, value, writer);
                 writer.line(&format!("return {value};"));
@@ -287,6 +288,69 @@ impl Generator<'_, '_> {
         self.block_contents(function, body, writer);
         writer.depth -= 1;
         writer.line("}");
+        writer.depth -= 1;
+        writer.line("}");
+    }
+
+    /**
+     * `match value`. The value is computed once, and a pointer keeps where it
+     * is; the tag picks the case, which copies the fields it names into its
+     * bindings before its body runs. The cases form an `if` chain rather
+     * than a `switch`, where C would take a `break` in a case as leaving the
+     * `switch` instead of the loop around it. The cases handle every
+     * variant, so the last one needs no test.
+     */
+    fn match_cases(
+        &mut self,
+        function: &Function<'_>,
+        value: &Expr,
+        cases: &[Case],
+        writer: &mut Writer,
+    ) {
+        let choice = self.types.name(&value.ty);
+        let matched = self.helper("matched");
+        writer.line("{");
+        writer.depth += 1;
+        let code = self.expr(function, value, writer);
+        // With one case and nothing to bind, the value is only computed.
+        let reads_value = cases.len() > 1 || cases.iter().any(|case| !case.bindings.is_empty());
+        if reads_value {
+            let address = if is_addressable(value) {
+                format!("&({code})")
+            } else {
+                format!("&{}", self.temporary(&value.ty, &code, writer))
+            };
+            writer.line(&format!("const {choice} *{matched} = {address};"));
+        } else if value.has_effects() {
+            writer.line(&format!("(void)({code});"));
+        }
+        for (position, case) in cases.iter().enumerate() {
+            let test = format!("{matched}->{} == {}", c_syntax::TAG, case.variant);
+            let line = match (position, position + 1 == cases.len()) {
+                (0, true) => "{".to_owned(),
+                (0, false) => format!("if ({test}) {{"),
+                (_, true) => "} else {".to_owned(),
+                (_, false) => format!("}} else if ({test}) {{"),
+            };
+            writer.line(&line);
+            writer.depth += 1;
+            for binding in &case.bindings {
+                let local = &function.locals[binding.local];
+                writer.line(&format!(
+                    "const {} {} = {matched}->{}.{}.{};",
+                    self.types.name(&local.ty),
+                    c_syntax::local_name(local.name),
+                    c_syntax::VARIANTS,
+                    c_syntax::variant_name(case.variant),
+                    c_syntax::field_name(binding.field)
+                ));
+            }
+            self.block_contents(function, &case.body, writer);
+            writer.depth -= 1;
+        }
+        if !cases.is_empty() {
+            writer.line("}");
+        }
         writer.depth -= 1;
         writer.line("}");
     }

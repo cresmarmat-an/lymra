@@ -228,12 +228,19 @@ pub struct MatchArm<'src> {
     pub span: Span,
 }
 
-/// A `case` pattern: a variant name and the names its fields are bound to.
+/// A `case` pattern: a variant name and the fields it binds.
 #[derive(Debug)]
 pub struct Pattern<'src> {
     pub variant: Name<'src>,
-    pub bindings: Vec<Name<'src>>,
+    pub bindings: Vec<PatternBinding<'src>>,
     pub span: Span,
+}
+
+/// A field a `case` binds: `field` alone binds it under its own name, `field = name` under another.
+#[derive(Clone, Copy, Debug)]
+pub struct PatternBinding<'src> {
+    pub field: Name<'src>,
+    pub name: Name<'src>,
 }
 
 #[derive(Debug)]

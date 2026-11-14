@@ -1,14 +1,14 @@
 /*!
  * Types the program declares with `type`: resolving their fields, building
- * a value with every field named, and reading a field. A type is resolved
- * when something first names it (see `cycles`).
+ * a value with every field named, and reading a field. A declared type is
+ * resolved when something first names it (see `cycles`); a `choice` is
+ * resolved here too, from the fields of its variants (see `choices`).
  */
 
 use std::sync::Arc;
 
-use super::arrays::MAX_VALUE_SIZE;
 use super::expressions::CheckedCall;
-use super::{CheckResult, Checker, Definition, TypeId, TypeState, errors};
+use super::{CheckResult, Checker, DeclaredType, Definition, TypeId, TypeState, errors};
 use crate::ast::{self, ArgumentKind};
 use crate::diagnostics::ErrorReported;
 use crate::ir::{self, CustomType, FieldType, Type};
@@ -16,18 +16,14 @@ use crate::similarity;
 use crate::source::Span;
 
 impl<'src, 'ast> Checker<'src, 'ast> {
-    /// The declared type `id`, resolving its fields first if needed. `reference` is where it is named.
-    pub(super) fn custom_type(
-        &mut self,
-        id: TypeId,
-        reference: Span,
-    ) -> CheckResult<Arc<CustomType>> {
+    /// The declared type `id`, resolving it first if needed. `reference` is where it is named.
+    pub(super) fn declared_type(&mut self, id: TypeId, reference: Span) -> CheckResult<Type> {
         let Some(entry) = self.types.get(id) else {
             return Err(ErrorReported);
         };
         let declaration = entry.declaration;
         match &entry.state {
-            TypeState::Done(ty) => return Ok(Arc::clone(ty)),
+            TypeState::Done(ty) => return Ok(ty.clone()),
             TypeState::Failed => return Err(ErrorReported),
             TypeState::InProgress => {
                 let diagnostic = self.cycle(Definition::Type(id), reference);
@@ -37,10 +33,18 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }
         self.set_type_state(id, TypeState::InProgress);
         let resolved = self.defining(Definition::Type(id), reference, |checker| {
-            checker.resolve_fields(declaration)
+            let ty = match declaration {
+                DeclaredType::Record(declaration) => {
+                    let custom =
+                        checker.resolve_fields(declaration.name.text, &declaration.fields)?;
+                    Type::Custom(Arc::new(custom))
+                }
+                DeclaredType::Choice(declaration) => checker.resolve_choice(declaration)?,
+            };
+            checker.fits_on_stack(ty, declaration.name().span)
         });
         let state = match &resolved {
-            Ok(ty) => TypeState::Done(Arc::clone(ty)),
+            Ok(ty) => TypeState::Done(ty.clone()),
             Err(ErrorReported) => TypeState::Failed,
         };
         self.set_type_state(id, state);
@@ -53,15 +57,19 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }
     }
 
-    /// Resolves every field of a declaration. Each field is checked, even after one fails.
-    fn resolve_fields(
+    /**
+     * Resolves the fields of a type or a variant called `name`. A field name
+     * used twice is error `L0207`. Each field is checked, even after one fails.
+     */
+    pub(super) fn resolve_fields(
         &mut self,
-        declaration: &'ast ast::TypeDeclaration<'src>,
-    ) -> CheckResult<Arc<CustomType>> {
-        let mut fields = Vec::with_capacity(declaration.fields.len());
+        name: &str,
+        fields: &'ast [ast::Field<'src>],
+    ) -> CheckResult<CustomType> {
+        let mut resolved = Vec::with_capacity(fields.len());
         let mut failed = false;
-        for (position, field) in declaration.fields.iter().enumerate() {
-            let earlier = declaration.fields[..position]
+        for (position, field) in fields.iter().enumerate() {
+            let earlier = fields[..position]
                 .iter()
                 .find(|other| other.name.text == field.name.text);
             if let Some(earlier) = earlier {
@@ -74,7 +82,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 continue;
             }
             match self.resolve_type(&field.ty) {
-                Ok(ty) => fields.push(FieldType {
+                Ok(ty) => resolved.push(FieldType {
                     name: field.name.text.to_owned(),
                     ty,
                 }),
@@ -84,53 +92,63 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         if failed {
             return Err(ErrorReported);
         }
-        let custom = Arc::new(CustomType {
-            name: declaration.name.text.to_owned(),
-            fields,
-        });
-        let ty = Type::Custom(Arc::clone(&custom));
-        match ty.size() {
-            Some(size) if size <= MAX_VALUE_SIZE => Ok(custom),
-            size => Err(self.report(errors::too_large_for_stack(
-                &ty,
-                size,
-                declaration.name.span,
-            ))),
-        }
+        Ok(CustomType {
+            name: name.to_owned(),
+            fields: resolved,
+        })
     }
 
-    /**
-     * Checks a construction such as `Frog(name = "Kero", age = 3)`: every
-     * field given once, by name, in any order. The values run in the order
-     * they are written.
-     */
+    /// Checks a construction such as `Frog(name = "Kero", age = 3)`.
     pub(super) fn check_construction(
         &mut self,
         id: TypeId,
         call: &ast::Call<'src>,
         span: Span,
     ) -> CheckResult<CheckedCall<'src>> {
-        let custom = match self.custom_type(id, call.callee.span) {
-            Ok(custom) => custom,
-            Err(error) => {
+        let custom = match self.declared_type(id, call.callee.span) {
+            Ok(Type::Custom(custom)) => custom,
+            Ok(Type::Choice(choice)) => {
                 self.check_arguments_for_errors(&call.arguments);
-                return Err(error);
+                return Err(self.report(errors::choice_called(&choice, call.callee.span)));
+            }
+            Ok(_) | Err(ErrorReported) => {
+                self.check_arguments_for_errors(&call.arguments);
+                return Err(ErrorReported);
             }
         };
-        let mut given: Vec<Option<Span>> = vec![None; custom.fields.len()];
-        let mut values = Vec::with_capacity(call.arguments.len());
+        let values = self.check_field_values(&custom, &call.arguments, span)?;
+        Ok(CheckedCall::Value(ir::Expr {
+            kind: ir::ExprKind::Construct(values),
+            ty: Type::Custom(custom),
+            span,
+        }))
+    }
+
+    /**
+     * Checks the values given for the fields of `record`, a type or a
+     * variant: every field once, by name, in any order. The values run in
+     * the order they are written. `span` is the whole construction.
+     */
+    pub(super) fn check_field_values(
+        &mut self,
+        record: &CustomType,
+        arguments: &[ast::Argument<'src>],
+        span: Span,
+    ) -> CheckResult<Vec<ir::FieldValue>> {
+        let mut given: Vec<Option<Span>> = vec![None; record.fields.len()];
+        let mut values = Vec::with_capacity(arguments.len());
         let mut failed = false;
         // A misnamed field is likely the one that seems missing, so a missing one is only reported without them.
         let mut misnamed = false;
-        for (position, argument) in call.arguments.iter().enumerate() {
+        for (position, argument) in arguments.iter().enumerate() {
             let (name, value) = match &argument.kind {
                 ArgumentKind::Named { name, value } => (name, value),
                 ArgumentKind::Positional(value) => {
                     self.check_for_errors(value);
-                    let field = custom.fields.get(position).map(|field| field.name.as_str());
+                    let field = record.fields.get(position).map(|field| field.name.as_str());
                     let written = self.text(value.span);
                     self.report(errors::unnamed_field(
-                        &custom.name,
+                        &record.name,
                         field,
                         argument.span,
                         written,
@@ -146,14 +164,14 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     continue;
                 }
             };
-            let Some((index, field)) = custom.field(name.text) else {
+            let Some((index, field)) = record.field(name.text) else {
                 self.check_for_errors(value);
                 let suggestion = similarity::closest_match(
                     name.text,
-                    custom.fields.iter().map(|field| field.name.as_str()),
+                    record.fields.iter().map(|field| field.name.as_str()),
                 );
                 self.report(errors::unknown_field(
-                    &custom.name,
+                    &record.name,
                     name.text,
                     name.span,
                     suggestion,
@@ -180,7 +198,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 Err(ErrorReported) => failed = true,
             }
         }
-        let missing: Vec<&str> = custom
+        let missing: Vec<&str> = record
             .fields
             .iter()
             .zip(&given)
@@ -188,17 +206,13 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             .map(|(field, _)| field.name.as_str())
             .collect();
         if !missing.is_empty() && !misnamed {
-            self.report(errors::missing_fields(&custom.name, &missing, span));
+            self.report(errors::missing_fields(&record.name, &missing, span));
             failed = true;
         }
         if failed {
             return Err(ErrorReported);
         }
-        Ok(CheckedCall::Value(ir::Expr {
-            kind: ir::ExprKind::Construct(values),
-            ty: Type::Custom(custom),
-            span,
-        }))
+        Ok(values)
     }
 
     /// Checks `object.field`, where `object` is a value.

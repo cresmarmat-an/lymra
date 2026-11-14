@@ -37,7 +37,11 @@ impl<'src> Checker<'src, '_> {
         if length == 0 {
             return Err(self.report(errors::empty_array(length_span)));
         }
-        let ty = Type::array(element, length);
+        self.fits_on_stack(Type::array(element, length), span)
+    }
+
+    /// `ty` if a value of it fits on the call stack, else error `L0410`, reported at `span`.
+    pub(super) fn fits_on_stack(&mut self, ty: Type, span: Span) -> CheckResult<Type> {
         match ty.size() {
             Some(size) if size <= MAX_VALUE_SIZE => Ok(ty),
             size => Err(self.report(errors::too_large_for_stack(&ty, size, span))),
@@ -171,7 +175,7 @@ impl<'src> Checker<'src, '_> {
         let known = match &operand.ty {
             Type::Array(array) => (!operand.has_effects()).then_some(array.length),
             Type::String => None,
-            Type::Integer(_) | Type::Boolean | Type::Custom(_) => {
+            Type::Integer(_) | Type::Boolean | Type::Custom(_) | Type::Choice(_) => {
                 return Err(self.report(errors::no_length(&operand.ty, operand.span)));
             }
         };

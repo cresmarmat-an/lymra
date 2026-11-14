@@ -104,11 +104,13 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 iterable,
                 body,
             } => self.check_for(*variable, iterable, body),
-            ast::StatementKind::Match { scrutinee, .. } => {
-                self.mark_reads(scrutinee);
+            ast::StatementKind::Match { scrutinee, arms } => {
                 let header = Span::new(span.start, scrutinee.span.end);
-                self.report(Feature::Choices.diagnostic(header));
-                Checked::continuing(Err(ErrorReported))
+                let (statement, falls_through) = self.check_match(scrutinee, arms, header);
+                Checked {
+                    statement: statement.ok(),
+                    falls_through,
+                }
             }
             ast::StatementKind::Return(value) => Checked {
                 statement: self.check_return(value.as_ref(), span).ok(),
@@ -147,8 +149,10 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 self.report_order_conflict(&[condition]);
             }
             ast::StatementKind::For { iterable, .. } => self.report_order_conflict(&[iterable]),
-            ast::StatementKind::Match { .. }
-            | ast::StatementKind::Return(None)
+            ast::StatementKind::Match { scrutinee, .. } => {
+                self.report_order_conflict(&[scrutinee]);
+            }
+            ast::StatementKind::Return(None)
             | ast::StatementKind::Break
             | ast::StatementKind::Continue => {}
         }
@@ -430,7 +434,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 array: checked,
             }),
             Type::String => Err(self.report(Feature::ForEach.diagnostic(iterable.span))),
-            Type::Integer(_) | Type::Boolean | Type::Custom(_) => {
+            Type::Integer(_) | Type::Boolean | Type::Custom(_) | Type::Choice(_) => {
                 let source = self.text(iterable.span);
                 Err(self.report(errors::not_iterable(&checked.ty, iterable.span, source)))
             }
@@ -560,6 +564,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                         "if the loop only repeats, name the variable `_`",
                         name.span,
                         "_",
+                    ),
+                    LocalKind::CaseBinding => Help::text(
+                        "leave it out of the `case`, which names only the fields it uses",
                     ),
                     LocalKind::Constant | LocalKind::Variable => {
                         Help::text("use it, or remove its declaration")

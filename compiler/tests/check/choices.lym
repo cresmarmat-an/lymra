@@ -1,0 +1,52 @@
+choice Shape
+    Circle(integer64 radius)
+    Rect(integer64 width, integer64 height)
+    Dot
+
+choice Light
+    Red
+    Green
+
+choice Chain
+    Link(integer64 value, Chain next)
+    End
+
+choice Twice
+    Same(integer64 value, integer64 value)
+
+function area(Shape shape, integer64 width) returns integer64
+    match shape
+        case Circle(radius)
+            return radius + width
+        case Rect(width, hight)
+            return 1
+        case Circle
+            return 2
+        case Red
+            return 3
+        case Sqare
+            return 4
+        case _
+            return 5
+
+function main()
+    constant shape = Shape(radius = 2)
+    constant dot = Dot()
+    constant circle = Circle
+    constant bad = Circle(radius = 1, depth = 2)
+    match 5
+        case Dot
+            print("five")
+    constant light = Red
+    if light < Green
+        print("ordered")
+    if Circle(radius = 1) == Dot
+        print("same")
+    print("{light} {area(Dot, 1)} {shape} {dot} {circle} {bad}")
+    print("{Dot.radius}")
+    Dot = Red
+    match light
+        case Red
+            light = Green
+        case Green
+            print("green")

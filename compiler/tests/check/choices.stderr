@@ -1,0 +1,184 @@
+error[L0415]: `Chain` contains itself
+  --> tests/check/choices.lym:11:27
+   |
+10 | choice Chain
+   |        ----- declared here
+11 |     Link(integer64 value, Chain next)
+   |                           ^^^^^ a `Chain` holds a `Chain` here, which would hold another, without end
+   |
+help: keep the `Chain` values in an array and hold the index of one here instead
+   |
+11 |     Link(integer64 value, integer64 next)
+
+error[L0207]: `value` is already declared
+  --> tests/check/choices.lym:15:37
+   |
+15 |     Same(integer64 value, integer64 value)
+   |                                     ^^^^^ declared again here
+   |                    ----- first declared here
+   |
+help: choose another name; in Lymra one name never hides another
+
+error[L0401]: a `match` handles every variant of `Shape`; `Dot` is not handled
+  --> tests/check/choices.lym:18:5
+   |
+18 |     match shape
+   |     ^^^^^^^^^^^ this leaves out a variant
+   |
+help: add `case Dot`
+
+error[L0207]: `width` is already declared
+  --> tests/check/choices.lym:21:19
+   |
+17 | function area(Shape shape, integer64 width) returns integer64
+   |                                      ----- first declared here
+...
+21 |         case Rect(width, hight)
+   |                   ^^^^^ this binds the field under the same name
+   |
+help: bind the field under another name; in Lymra one name never hides another
+   |
+21 |         case Rect(width = rect_width, hight)
+
+error[L0413]: `Rect` has no field `hight`
+  --> tests/check/choices.lym:21:26
+   |
+21 |         case Rect(width, hight)
+   |                          ^^^^^ not a field of this type
+   |
+help: did you mean `height`?
+   |
+21 |         case Rect(width, height)
+
+error[L0401]: `Circle` is handled twice
+  --> tests/check/choices.lym:23:14
+   |
+19 |         case Circle(radius)
+   |              -------------- first handled here
+...
+23 |         case Circle
+   |              ^^^^^^ handled again here
+   |
+help: keep one `case` for it; the first one that matches is the only one that would run
+
+error[L0401]: `Red` is a variant of `Light`, not of `Shape`
+  --> tests/check/choices.lym:25:14
+   |
+25 |         case Red
+   |              ^^^ not a variant of `Shape`
+   |
+help: handle the variants of `Shape` here, or match a value of `Light`
+
+error[L0401]: `Sqare` is not a variant of `Shape`
+  --> tests/check/choices.lym:27:14
+   |
+27 |         case Sqare
+   |              ^^^^^ not a variant of this choice
+   |
+help: name one of the variants the declaration of `Shape` lists
+
+error[L0401]: a `case` names one variant; Lymra has no case for every other variant
+  --> tests/check/choices.lym:29:14
+   |
+29 |         case _
+   |              ^ not a variant
+   |
+help: write a `case` for each variant, so that adding a variant later shows every `match` that has to handle it
+
+error[L0507]: `Shape` is a choice, so a value of it is one of its variants
+  --> tests/check/choices.lym:33:22
+   |
+33 |     constant shape = Shape(radius = 2)
+   |                      ^^^^^ not a variant
+   |
+help: build one of its variants, as in `Circle(radius = ...)`
+
+error[L0507]: `Dot` holds no fields, so it is written without brackets
+  --> tests/check/choices.lym:34:23
+   |
+34 |     constant dot = Dot()
+   |                       ^^ nothing goes here
+   |
+help: write `Dot` alone
+   |
+34 |     constant dot = Dot
+
+error[L0414]: every field of a `Circle` has to be given; `radius` is missing
+  --> tests/check/choices.lym:35:23
+   |
+35 |     constant circle = Circle
+   |                       ^^^^^^ this leaves out a field
+   |
+help: give a value for each, as in `radius = ...`; Lymra never fills in a field by itself
+
+error[L0413]: `Circle` has no field `depth`
+  --> tests/check/choices.lym:36:39
+   |
+36 |     constant bad = Circle(radius = 1, depth = 2)
+   |                                       ^^^^^ not a field of this type
+   |
+help: use one of the fields the declaration of `Circle` lists
+
+error[L0402]: `match` takes a choice, but this is an `integer64`
+  --> tests/check/choices.lym:37:11
+   |
+37 |     match 5
+   |           ^ not a choice
+   |
+help: tell values of other types apart with `if` and comparisons
+
+error[L0405]: `<` compares numbers, and a choice has no order
+  --> tests/check/choices.lym:41:8
+   |
+41 |     if light < Green
+   |        ^^^^^^^^^^^^^ comparing `Light` values
+   |
+help: compare variants with `==` and `!=`, or tell them apart in a `match`
+
+error[L0405]: `==` compares single values, and the variants of `Shape` hold fields
+  --> tests/check/choices.lym:43:8
+   |
+43 |     if Circle(radius = 1) == Dot
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^ comparing values with fields
+   |
+help: tell the variants apart in a `match`, then compare their fields
+
+error[L0402]: a `Light` cannot be put into text
+  --> tests/check/choices.lym:45:13
+   |
+45 |     print("{light} {area(Dot, 1)} {shape} {dot} {circle} {bad}")
+   |             ^^^^^ text holds numbers, `boolean` values and text
+   |
+help: print it from a `match`, with a `case` for each variant
+
+error[L0413]: this is a `Shape`, which has no fields
+  --> tests/check/choices.lym:46:13
+   |
+46 |     print("{Dot.radius}")
+   |             ^^^ has no fields
+   |
+help: `radius` belongs to the variant `Circle`; read it in a `match`, as in `case Circle(radius)`
+
+error[L0507]: `Dot` is a variant, so nothing can be assigned to it
+  --> tests/check/choices.lym:47:5
+   |
+47 |     Dot = Red
+   |     ^^^ assigned here
+   |
+help: assign to a `variable` instead
+
+error[L0208]: `light` is a constant, so it cannot change
+  --> tests/check/choices.lym:50:13
+   |
+40 |     constant light = Red
+   |              ----- declared as a constant here
+...
+50 |             light = Green
+   |             ^^^^^ changed here
+   |
+help: declare it with `variable` if it has to change
+   |
+40 |     variable light = Red
+
+found 20 errors in tests/check/choices.lym
+run `lymra explain L0415` to read why a rule exists and how to fix it

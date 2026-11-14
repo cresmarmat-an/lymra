@@ -6,14 +6,6 @@ error[L0309]: modules are not available yet
   |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-error[L0309]: choices and `match` are not available yet
- --> tests/check/not_available.lym:6:1
-  |
-6 | choice Shape
-  | ^^^^^^^^^^^^ the compiler adds this in roadmap phase 2
-  |
-help: write this part another way for now; the roadmap in the README lists what each phase adds
-
 error[L0309]: `float32` and `float64` are not available yet
  --> tests/check/not_available.lym:9:15
   |
@@ -46,11 +38,11 @@ error[L0309]: `list` is not available yet
    |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-error[L0309]: choices and `match` are not available yet
+error[L0309]: `packed` choices are not available yet
   --> tests/check/not_available.lym:16:14
    |
 16 |     constant packed Shape shape = make()
-   |              ^^^^^^^^^^^^ the compiler adds this in roadmap phase 2
+   |              ^^^^^^^^^^^^ the compiler adds this in roadmap phase 3
    |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
@@ -94,14 +86,6 @@ error[L0309]: `with` blocks are not available yet
    |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-error[L0309]: choices and `match` are not available yet
-  --> tests/check/not_available.lym:26:5
-   |
-26 |     match shape
-   |     ^^^^^^^^^^^ the compiler adds this in roadmap phase 2
-   |
-help: write this part another way for now; the roadmap in the README lists what each phase adds
-
 error[L0309]: `float32` and `float64` are not available yet
   --> tests/check/not_available.lym:29:18
    |
@@ -110,5 +94,5 @@ error[L0309]: `float32` and `float64` are not available yet
    |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-found 14 errors in tests/check/not_available.lym
+found 12 errors in tests/check/not_available.lym
 run `lymra explain L0309` to read why a rule exists and how to fix it

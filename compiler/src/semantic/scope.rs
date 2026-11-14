@@ -14,6 +14,8 @@ pub(super) enum LocalKind {
     Parameter,
     VariableParameter,
     LoopVariable,
+    /// A field of a variant that a `case` names.
+    CaseBinding,
 }
 
 impl LocalKind {
@@ -28,6 +30,7 @@ impl LocalKind {
             Self::Variable => "variable",
             Self::Parameter | Self::VariableParameter => "parameter",
             Self::LoopVariable => "loop variable",
+            Self::CaseBinding => "case binding",
         }
     }
 }

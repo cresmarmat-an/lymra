@@ -1,6 +1,7 @@
 //! The wording of every error the semantic checker reports.
 
 mod arrays;
+mod choices;
 mod custom_types;
 mod cycles;
 
@@ -9,6 +10,10 @@ pub(super) use arrays::{
     index_not_integer, index_out_of_range, length_argument_count, malformed_array_type,
     negative_length, no_length, not_indexable, not_iterable, part_reference, sized_scalar,
     too_large_for_stack,
+};
+pub(super) use choices::{
+    Stranger, choice_called, field_name_taken, fieldless_variant_called, match_needs_choice,
+    missing_cases, not_a_variant, variant_handled_twice,
 };
 pub(super) use custom_types::{
     compound_constant, field_given_twice, missing_fields, no_fields, unknown_field, unnamed_field,
@@ -243,7 +248,7 @@ pub(super) fn condition_not_boolean(found: &Type, span: Span, source: &str) -> D
         Type::Integer(_) => {
             Help::replace("compare it with a number", span, format!("{source} != 0"))
         }
-        Type::Boolean | Type::String | Type::Array(_) | Type::Custom(_) => {
+        Type::Boolean | Type::String | Type::Array(_) | Type::Custom(_) | Type::Choice(_) => {
             Help::text("write a comparison or another `boolean` here")
         }
     };
@@ -262,7 +267,14 @@ pub(super) fn condition_not_boolean(found: &Type, span: Span, source: &str) -> D
 pub(super) fn print_needs_text(found: &Type, span: Span, source: &str) -> Diagnostic {
     let help = match found {
         Type::Array(_) => Help::text("print its elements one by one, in a loop"),
-        Type::Custom(_) => Help::text("print its fields, as in `print(\"{frog.name}\")`"),
+        Type::Custom(custom) => Help::text(format!(
+            "print its fields, as in `print(\"{{{source}.{}}}\")`",
+            custom
+                .fields
+                .first()
+                .map_or("field", |field| field.name.as_str())
+        )),
+        Type::Choice(_) => Help::text("print from a `match`, with a `case` for each variant"),
         Type::Integer(_) | Type::Boolean | Type::String => Help::replace(
             "turn the value into text with interpolation",
             span,
