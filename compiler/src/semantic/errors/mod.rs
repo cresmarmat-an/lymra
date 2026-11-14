@@ -4,6 +4,7 @@ mod arrays;
 mod choices;
 mod custom_types;
 mod cycles;
+mod floats;
 
 pub(super) use arrays::{
     compound_in_text, empty_array, fill_argument_count, fill_into, fill_without_type,
@@ -19,12 +20,13 @@ pub(super) use custom_types::{
     compound_constant, field_given_twice, missing_fields, no_fields, unknown_field, unnamed_field,
 };
 pub(super) use cycles::{Declared, Dependency, cycle};
+pub(super) use floats::{conversion_never_fits, float_remainder, float_too_large, float_too_small};
 
 use super::BuiltIn;
 use super::evaluation_order::Conflict;
 use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
 use crate::english;
-use crate::ir::{IntegerType, Type};
+use crate::ir::{FloatType, IntegerType, Type};
 use crate::source::Span;
 
 /// Help for a misspelled name: a replacement when a close match exists, otherwise `fallback`.
@@ -209,36 +211,59 @@ pub(super) fn type_mismatch(expected: &Type, found: &Type, span: Span) -> Diagno
     )
 }
 
-/// An integer of one type where another integer type is needed, with the conversion as the fix.
-pub(super) fn integer_mismatch(
-    expected: IntegerType,
+/// A number of one type where a number of another type is needed, with the conversion as the fix.
+pub(super) fn number_mismatch(
+    expected: &Type,
     found: &Type,
     span: Span,
     source: &str,
 ) -> Diagnostic {
-    let target = expected.name();
+    let note = match (expected, found) {
+        (Type::Integer(_), Type::Float(_)) => {
+            "it drops the fraction, and the program stops if the whole part does not fit"
+        }
+        (Type::Float(_), Type::Integer(_)) => "it gives the nearest float",
+        (Type::Float(FloatType::Float32), Type::Float(FloatType::Float64)) => {
+            "it gives the nearest `float32`, and the program stops if the value is beyond the largest one"
+        }
+        (Type::Float(_), Type::Float(_)) => "it gives the same value",
+        _ => "the program stops if the value does not fit",
+    };
     Diagnostic::new(
         ErrorCode::L0402,
         format!(
-            "expected an integer of type `{target}`, found {}",
+            "expected {}, found {}",
+            described(expected),
             described(found)
         ),
         Label::new(span, format!("this is {}", described(found))),
         Help::replace(
-            format!("convert it with `{target}(...)`; the program stops if the value does not fit"),
+            format!("convert it with `{expected}(...)`; {note}"),
             span,
-            format!("{target}({source})"),
+            format!("{expected}({source})"),
         ),
     )
 }
 
-/// An integer literal where a value of another type is needed.
-pub(super) fn literal_mismatch(expected: &Type, span: Span) -> Diagnostic {
+/**
+ * A number literal where a value of another type is needed. A whole number
+ * where a float is needed only lacks its point, as in `2.0`.
+ */
+pub(super) fn literal_mismatch(expected: &Type, span: Span, source: &str) -> Diagnostic {
+    let is_plain = !source.is_empty() && source.bytes().all(|byte| byte.is_ascii_digit());
+    let help = match expected {
+        Type::Float(_) if is_plain => Help::replace(
+            "write it with a point to make it a float",
+            span,
+            format!("{source}.0"),
+        ),
+        _ => Help::text(format!("write {} here", described(expected))),
+    };
     Diagnostic::new(
         ErrorCode::L0402,
         format!("expected {}, found a number", described(expected)),
         Label::new(span, "this is a number"),
-        Help::text(format!("write {} here", described(expected))),
+        help,
     )
 }
 
@@ -247,6 +272,9 @@ pub(super) fn condition_not_boolean(found: &Type, span: Span, source: &str) -> D
     let help = match found {
         Type::Integer(_) => {
             Help::replace("compare it with a number", span, format!("{source} != 0"))
+        }
+        Type::Float(_) => {
+            Help::replace("compare it with a number", span, format!("{source} != 0.0"))
         }
         Type::Boolean | Type::String | Type::Array(_) | Type::Custom(_) | Type::Choice(_) => {
             Help::text("write a comparison or another `boolean` here")
@@ -275,7 +303,7 @@ pub(super) fn print_needs_text(found: &Type, span: Span, source: &str) -> Diagno
                 .map_or("field", |field| field.name.as_str())
         )),
         Type::Choice(_) => Help::text("print from a `match`, with a `case` for each variant"),
-        Type::Integer(_) | Type::Boolean | Type::String => Help::replace(
+        Type::Integer(_) | Type::Float(_) | Type::Boolean | Type::String => Help::replace(
             "turn the value into text with interpolation",
             span,
             format!("\"{{{source}}}\""),
@@ -312,6 +340,12 @@ pub(super) fn operand_mismatch(
             "convert one side, for example with `{}(...)`; the program stops if the value does not fit",
             left_integer.name()
         )),
+        (Type::Float(float), Type::Integer(_)) | (Type::Integer(_), Type::Float(float)) => {
+            Help::text(format!(
+                "convert the integer with `{}(...)`, which gives the nearest float",
+                float.name()
+            ))
+        }
         _ => Help::text(
             "Lymra never converts a value to another type by itself; give both sides the same type",
         ),

@@ -104,10 +104,44 @@ impl IntegerType {
     }
 }
 
+/// The built-in float types: IEEE 754 binary floats of 32 and 64 bits (spec 4.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FloatType {
+    Float32,
+    Float64,
+}
+
+impl FloatType {
+    /// The type a float literal takes when nothing asks for another one.
+    pub const DEFAULT: FloatType = FloatType::Float64;
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Float32 => "float32",
+            Self::Float64 => "float64",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        [Self::Float32, Self::Float64]
+            .into_iter()
+            .find(|ty| ty.name() == name)
+    }
+
+    /// `value` as this type holds it: rounded to the nearest `float32`, or unchanged.
+    pub fn round(self, value: f64) -> f64 {
+        match self {
+            Self::Float32 => f64::from(value as f32),
+            Self::Float64 => value,
+        }
+    }
+}
+
 /// A type the checker knows.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type {
     Integer(IntegerType),
+    Float(FloatType),
     Boolean,
     String,
     /// `array[element, length]`, shared so that copying a type stays cheap.
@@ -214,18 +248,36 @@ impl Type {
     pub const fn as_integer(&self) -> Option<IntegerType> {
         match self {
             Self::Integer(integer) => Some(*integer),
-            Self::Boolean | Self::String | Self::Array(_) | Self::Custom(_) | Self::Choice(_) => {
-                None
-            }
+            Self::Float(_)
+            | Self::Boolean
+            | Self::String
+            | Self::Array(_)
+            | Self::Custom(_)
+            | Self::Choice(_) => None,
+        }
+    }
+
+    pub const fn as_float(&self) -> Option<FloatType> {
+        match self {
+            Self::Float(float) => Some(*float),
+            Self::Integer(_)
+            | Self::Boolean
+            | Self::String
+            | Self::Array(_)
+            | Self::Custom(_)
+            | Self::Choice(_) => None,
         }
     }
 
     pub fn as_array(&self) -> Option<&ArrayType> {
         match self {
             Self::Array(array) => Some(array),
-            Self::Integer(_) | Self::Boolean | Self::String | Self::Custom(_) | Self::Choice(_) => {
-                None
-            }
+            Self::Integer(_)
+            | Self::Float(_)
+            | Self::Boolean
+            | Self::String
+            | Self::Custom(_)
+            | Self::Choice(_) => None,
         }
     }
 
@@ -246,6 +298,8 @@ impl Type {
                 let size = u64::from(integer.bits() / 8);
                 Some(Layout { size, align: size })
             }
+            Self::Float(FloatType::Float32) => Some(Layout { size: 4, align: 4 }),
+            Self::Float(FloatType::Float64) => Some(Layout { size: 8, align: 8 }),
             Self::Boolean => Some(Layout { size: 1, align: 1 }),
             // A text value is a pointer and a length.
             Self::String => Some(Layout { size: 16, align: 8 }),
@@ -287,6 +341,7 @@ impl fmt::Display for Type {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Integer(integer) => formatter.write_str(integer.name()),
+            Self::Float(float) => formatter.write_str(float.name()),
             Self::Boolean => formatter.write_str("boolean"),
             Self::String => formatter.write_str("string"),
             Self::Array(array) => write!(formatter, "array[{}, {}]", array.element, array.length),
@@ -304,14 +359,28 @@ pub enum Value {
         value: i128,
         ty: IntegerType,
     },
+    /// The bits of the value as a `f64`, which holds every `float32` exactly too.
+    Float {
+        bits: u64,
+        ty: FloatType,
+    },
     Boolean(bool),
     Text(String),
 }
 
 impl Value {
+    /// A float of type `ty`, rounded to it.
+    pub fn float(value: f64, ty: FloatType) -> Value {
+        Value::Float {
+            bits: ty.round(value).to_bits(),
+            ty,
+        }
+    }
+
     pub fn ty(&self) -> Type {
         match self {
             Self::Integer { ty, .. } => Type::Integer(*ty),
+            Self::Float { ty, .. } => Type::Float(*ty),
             Self::Boolean(_) => Type::Boolean,
             Self::Text(_) => Type::String,
         }

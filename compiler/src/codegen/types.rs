@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::{INDENT, c_syntax};
-use crate::ir::{ArrayType, ChoiceType, CustomType, Type};
+use crate::ir::{ArrayType, ChoiceType, CustomType, FloatType, Type};
 
 #[derive(Default)]
 pub(super) struct CTypes {
@@ -18,6 +18,8 @@ pub(super) struct CTypes {
     customs: HashMap<String, String>,
     /// The structs, and the fill functions of arrays, in the order C needs them.
     definitions: Vec<String>,
+    /// Whether a float type has been named, so the program uses floats.
+    pub uses_floats: bool,
 }
 
 impl CTypes {
@@ -25,6 +27,13 @@ impl CTypes {
     pub fn name(&mut self, ty: &Type) -> String {
         match ty {
             Type::Integer(integer) => c_syntax::integer_type(*integer).to_owned(),
+            Type::Float(float) => {
+                self.uses_floats = true;
+                match float {
+                    FloatType::Float32 => "float".to_owned(),
+                    FloatType::Float64 => "double".to_owned(),
+                }
+            }
             Type::Boolean => "bool".to_owned(),
             Type::String => "lymra_string".to_owned(),
             Type::Array(array) => self.array_name(array),

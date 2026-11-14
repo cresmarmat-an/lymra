@@ -1,0 +1,12 @@
+#[
+    NaN is not a number, so no integer can hold it: converting one stops the
+    program.
+]#
+
+function divide(float64 top, float64 bottom) returns float64
+    return top / bottom
+
+function main()
+    constant nothing = divide(0.0, 0.0)
+    print("{nothing}")
+    print("{integer64(nothing)}")

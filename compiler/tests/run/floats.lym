@@ -1,0 +1,77 @@
+#[
+    Floats follow IEEE 754 in their own type, rounded after every operation,
+    so every system computes the same floats. Each prints as the shortest
+    decimal that reads back as the same float, the same on every system.
+]#
+
+constant float64 pi = 3.141592653589793
+constant float32 third = 0.33333334
+constant float64 tiny = 5.0e-324
+
+type Sample
+    float32 weight
+    float64 height
+
+choice Reading
+    Measured(float64 value)
+    Missing
+
+function divide(float64 top, float64 bottom) returns float64
+    return top / bottom
+
+function to_integer(float64 value) returns integer64
+    return integer64(value)
+
+function to_byte(float64 value) returns unsigned8
+    return unsigned8(value)
+
+function to_single(float64 value) returns float32
+    return float32(value)
+
+function to_double(unsigned64 value) returns float64
+    return float64(value)
+
+function scale(variable array[float32, 3] values, float32 by)
+    for position in range(0, 3)
+        values[position] = values[position] * by
+
+function noted(string name, float64 value) returns float64
+    print("{name}")
+    return value
+
+function describe(Reading reading) returns float64
+    match reading
+        case Measured(value)
+            return value
+        case Missing
+            return -1.0
+
+function main()
+    variable float64 total = 0.0
+    for _ in range(0, 10)
+        total = total + 0.1
+    print("{total} {0.1 + 0.2} {1.0 / 3.0} {pi} {pi * 2.0} {-pi}")
+    constant float32 single = 0.1
+    print("{single} {single + 0.2} {third} {float64(single)} {float32(1.0 / 3.0)}")
+    print("{0.0001} {0.00001} {123.456} {1.0e15} {1.0e16} {-2.5e-7} {1.0e300} {tiny}")
+    print("{0.0} {-0.0} {100.0} {65536.0} {float32(3.0e38)} {float32(1.0e-45)}")
+
+    constant positive = divide(1.0, 0.0)
+    constant not_a_number = divide(0.0, 0.0)
+    print("{positive} {-positive} {not_a_number} {positive > 1.0e308}")
+    print("{not_a_number == not_a_number} {not_a_number != not_a_number} {not_a_number < 1.0}")
+
+    print("{to_integer(2.9)} {to_integer(-2.9)} {to_byte(255.9)} {to_integer(-9223372036854775808.0)}")
+    print("{float64(9007199254740993)} {float32(16777217)} {to_double(18446744073709551615)}")
+    print("{to_single(1.0e-50)} {to_single(3.4028234e38)} {to_single(positive)} {to_single(not_a_number)}")
+
+    variable sample = Sample(weight = 2.5, height = 1.75)
+    sample.weight = sample.weight * 2.0
+    variable array[float32, 3] values = array(1.5)
+    values[2] = 0.25
+    scale(variable values, 4.0)
+    print("{sample.weight} {sample.height} {values[0]} {values[2]}")
+    print("{describe(Measured(value = 2.25))} {describe(Missing)}")
+
+    constant sum = noted("left", 1.5) + noted("right", 2.25)
+    print("sum {sum}")

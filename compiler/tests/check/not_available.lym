@@ -7,7 +7,7 @@ choice Shape
     Dot
 
 function area(float64 width) returns integer64
-    return 1
+    return integer64(width)
 
 function main()
     constant ratio = 1.5

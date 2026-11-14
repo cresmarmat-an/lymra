@@ -7,7 +7,7 @@ use super::{
 };
 use crate::ast::{self, Mutability, Name, Visibility};
 use crate::diagnostics::ErrorReported;
-use crate::ir::{self, ConstantId, IntegerType, Type, Value};
+use crate::ir::{self, ConstantId, FloatType, IntegerType, Type, Value};
 use crate::similarity;
 use crate::source::Span;
 
@@ -164,7 +164,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         let resolved = match name.text {
             "boolean" => Some(Type::Boolean),
             "string" => Some(Type::String),
-            other => IntegerType::from_name(other).map(Type::Integer),
+            other => IntegerType::from_name(other)
+                .map(Type::Integer)
+                .or_else(|| FloatType::from_name(other).map(Type::Float)),
         };
         match resolved {
             Some(resolved) => {
@@ -182,7 +184,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 let known = IntegerType::ALL
                     .iter()
                     .map(|integer| integer.name())
-                    .chain(["boolean", "string", "array"])
+                    .chain(["float32", "float64", "boolean", "string", "array"])
                     .chain(declared);
                 let suggestion = similarity::closest_match(name.text, known);
                 Err(self.report(errors::unknown_type(

@@ -194,15 +194,16 @@ The names are whole words (Section 2.5), and a number type always states its siz
 Type rules:
 
 - **No conversions behind your back.** A value never changes type by itself. Mixing `integer64` and `unsigned8` in one operation, passing one where the other is expected, or using a number as a condition is error `L0402`. Convert explicitly by calling the type, as in `unsigned8(count)` (Section 5.1). Unlike a cast in C or a conversion in Go, a conversion never cuts a value down to fit: if the value does not fit, the program stops with a runtime error. A conversion that cannot fail, such as `unsigned8` to `integer64`, costs nothing.
-- **Literals take the type of their place.** An integer literal has no type of its own. It takes the type its context asks for, such as a declared type or the other side of an operator, and `integer64` when nothing asks. It has to fit (`L0404`). Arithmetic on literals is exact and happens while compiling, so `constant unsigned8 small = 300 - 100` is fine.
+- **Literals take the type of their place.** An integer literal has no type of its own. It takes the type its context asks for, such as a declared type or the other side of an operator, and `integer64` when nothing asks. It has to fit (`L0404`). Arithmetic on integer literals is exact and happens while compiling, so `constant unsigned8 small = 300 - 100` is fine. A float literal takes `float32` or `float64` the same way, `float64` when nothing asks, and is rounded once from its digits to the nearest float of that type. One beyond the largest float of its type, or one that is not zero but would round to zero, is `L0404`. An integer literal never becomes a float: write `2.0`.
 - **Text is printed through interpolation.** `print` takes a `string`. Other values are turned into text by interpolating them: `print("{count}")`.
 
 | Operators | Work on | Result |
 |---|---|---|
-| `+` `-` `*` `/` `%` | two integers of the same type | that type |
-| `-` in front of a value | a signed integer | the same type |
-| `<` `<=` `>` `>=` | two integers of the same type, or two `string` values | `boolean` |
-| `==` `!=` | two integers of the same type, two `boolean` values, or two `string` values | `boolean` |
+| `+` `-` `*` `/` | two numbers of the same type | that type |
+| `%` | two integers of the same type | that type |
+| `-` in front of a value | a signed integer or a float | the same type |
+| `<` `<=` `>` `>=` | two numbers of the same type, or two `string` values | `boolean` |
+| `==` `!=` | two numbers of the same type, two `boolean` values, or two `string` values | `boolean` |
 | `and` `or` `not` | `boolean` values | `boolean` |
 
 Text compares by its UTF-8 bytes, one at a time, which is the order of the characters' code points: `"apple" < "banana"`, every capital letter comes before every small one, and a text that starts another comes first, as `"app" < "apple"`. The order is the same on every system, whatever its language settings.
@@ -213,9 +214,15 @@ The parts of an expression run from left to right: the operands of an operator, 
 
 Division truncates toward zero, and a remainder takes the sign of the dividend: `-7 / 2` is `-3` and `-7 % 2` is `-1`. This matches C.
 
+Floats follow IEEE 754. Every operation is rounded to the nearest float of its type, ties to even, and to nothing wider: the compiler keeps C compilers from computing in 80 bits on 32-bit x86 and from fusing a multiply and an add into one rounding. So a program computes the same floats on every system. Values known while compiling are computed the same way, so `0.1 + 0.2` is `0.30000000000000004` whether it is computed now or when the program runs. An operation that overflows gives infinity and `0.0 / 0.0` gives NaN, values a float can hold, so float arithmetic never stops the program; only a result known while compiling that would be infinity or NaN is an error (`L0404`, or `L0406` for a division by zero). NaN is unequal to every value, itself included, and every comparison with it but `!=` is false.
+
+Converting with `float32(...)` or `float64(...)` turns an integer into the nearest float and a `float32` into the same `float64`. A `float64` becomes the nearest `float32`, and one beyond the largest `float32` stops the program. A float converted to an integer type loses its fraction, rounding toward zero as in C, and the program stops if the whole part does not fit the type or the float is NaN, where C would make up a number.
+
+A float is written as the shortest decimal that reads back as the same float, and of two as close, the one whose last digit is even: `0.1`, `0.30000000000000004`, `100.0`. Between 0.0001 and 1e16 it is written plainly, with a digit on each side of the point; outside that it takes an exponent, as `1.0e16` or `2.5e-7`. Either way it is a Lymra float literal for the same float. The others are written `infinity`, `-infinity`, `NaN` and `-0.0`. Lymra's runtime finds the digits itself, with the Schubfach algorithm, so no C library can write them differently.
+
 ### 4.2 Integer overflow
 
-Overflow is a runtime trap in every build mode, including `speed`. If you want wrapping, you have to ask for it with `wrapping_add`, `wrapping_multiply`, and so on. Rust wraps silently in release builds. Lymra doesn't, because a silent wrong number is a bug that compiles.
+Integer overflow is a runtime trap in every build mode, including `speed`. If you want wrapping, you have to ask for it with `wrapping_add`, `wrapping_multiply`, and so on. Rust wraps silently in release builds. Lymra doesn't, because a silent wrong number is a bug that compiles.
 
 - Every `+`, `-`, `*`, `/` and `%` on integers is checked. Division by zero is checked too, and so is the one division whose result does not fit, the lowest value of a signed type divided by `-1`.
 - When every value in an operation is known while compiling, the compiler does the check itself: an overflow is error `L0404`, and a division by a value that is always zero is error `L0406`.

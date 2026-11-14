@@ -1,0 +1,12 @@
+#[
+    A float becomes an integer by dropping its fraction. When the whole part
+    does not fit the integer type, the program stops instead of making up a
+    number, as C would.
+]#
+
+function to_byte(float64 value) returns integer8
+    return integer8(value)
+
+function main()
+    print("{to_byte(127.9)}")
+    print("{to_byte(128.0)}")

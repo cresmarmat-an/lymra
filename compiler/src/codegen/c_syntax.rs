@@ -1,6 +1,6 @@
 //! How Lymra types, names and values are written in C.
 
-use crate::ir::{IntegerType, Value};
+use crate::ir::{FloatType, IntegerType, Value};
 
 pub(super) fn integer_type(ty: IntegerType) -> &'static str {
     match ty {
@@ -112,10 +112,45 @@ pub(super) fn text_value(text: &str) -> String {
     format!("((lymra_string){})", string_fields(text))
 }
 
+/**
+ * A finite float as a C hexadecimal literal, which says exactly which float
+ * it is; decimal digits would leave the rounding to the C compiler. A
+ * `float32` takes the `f` suffix. Every `float32` is a `float64`, so `bits`
+ * are a `float64`'s either way.
+ */
+pub(super) fn float_literal(bits: u64, ty: FloatType) -> String {
+    let sign = if bits >> 63 == 1 { "-" } else { "" };
+    let suffix = match ty {
+        FloatType::Float32 => "f",
+        FloatType::Float64 => "",
+    };
+    let magnitude = bits & !(1 << 63);
+    if magnitude == 0 {
+        return format!("{sign}0x0p+0{suffix}");
+    }
+    let biased = magnitude >> 52;
+    let fraction = magnitude & ((1 << 52) - 1);
+    // A subnormal has no leading one, and the exponent of the smallest normal.
+    let (lead, exponent) = if biased == 0 {
+        (0, -1022)
+    } else {
+        (1, biased as i64 - 1023)
+    };
+    let digits = format!("{fraction:013x}");
+    let digits = digits.trim_end_matches('0');
+    let point = if digits.is_empty() {
+        String::new()
+    } else {
+        format!(".{digits}")
+    };
+    format!("{sign}0x{lead}{point}p{exponent:+}{suffix}")
+}
+
 /// A value inside a function body.
 pub(super) fn value(value: &Value) -> String {
     match value {
         Value::Integer { value, ty } => integer_literal(*value, *ty),
+        Value::Float { bits, ty } => float_literal(*bits, *ty),
         Value::Boolean(true) => "true".to_owned(),
         Value::Boolean(false) => "false".to_owned(),
         Value::Text(text) => text_value(text),
@@ -126,13 +161,39 @@ pub(super) fn value(value: &Value) -> String {
 pub(super) fn static_initializer(value: &Value) -> String {
     match value {
         Value::Text(text) => string_fields(text),
-        Value::Integer { .. } | Value::Boolean(_) => self::value(value),
+        Value::Integer { .. } | Value::Float { .. } | Value::Boolean(_) => self::value(value),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn floats_are_written_exactly_in_hexadecimal() {
+        let literal = |value: f64, ty| float_literal(value.to_bits(), ty);
+        assert_eq!(literal(0.0, FloatType::Float64), "0x0p+0");
+        assert_eq!(literal(-0.0, FloatType::Float64), "-0x0p+0");
+        assert_eq!(literal(1.0, FloatType::Float64), "0x1p+0");
+        assert_eq!(literal(-2.5, FloatType::Float64), "-0x1.4p+1");
+        assert_eq!(literal(0.1, FloatType::Float64), "0x1.999999999999ap-4");
+        assert_eq!(
+            literal(f64::from(0.1_f32), FloatType::Float32),
+            "0x1.99999ap-4f"
+        );
+        assert_eq!(
+            literal(f64::MAX, FloatType::Float64),
+            "0x1.fffffffffffffp+1023"
+        );
+        assert_eq!(
+            literal(5e-324, FloatType::Float64),
+            "0x0.0000000000001p-1022"
+        );
+        assert_eq!(
+            literal(f64::from(f32::from_bits(1)), FloatType::Float32),
+            "0x1p-149f"
+        );
+    }
 
     #[test]
     fn strings_escape_every_byte_c_could_misread() {

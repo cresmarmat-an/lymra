@@ -6,22 +6,6 @@ error[L0309]: modules are not available yet
   |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-error[L0309]: `float32` and `float64` are not available yet
- --> tests/check/not_available.lym:9:15
-  |
-9 | function area(float64 width) returns integer64
-  |               ^^^^^^^ the compiler adds this in roadmap phase 2
-  |
-help: write this part another way for now; the roadmap in the README lists what each phase adds
-
-error[L0309]: `float32` and `float64` are not available yet
-  --> tests/check/not_available.lym:13:22
-   |
-13 |     constant ratio = 1.5
-   |                      ^^^ the compiler adds this in roadmap phase 2
-   |
-help: write this part another way for now; the roadmap in the README lists what each phase adds
-
 error[L0309]: `list`, `stack` and `view` are not available yet
   --> tests/check/not_available.lym:14:14
    |
@@ -86,13 +70,5 @@ error[L0309]: `with` blocks are not available yet
    |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-error[L0309]: `float32` and `float64` are not available yet
-  --> tests/check/not_available.lym:29:18
-   |
-29 |     print("{area(1.0)} {same} {counter} {evens} {size}")
-   |                  ^^^ the compiler adds this in roadmap phase 2
-   |
-help: write this part another way for now; the roadmap in the README lists what each phase adds
-
-found 12 errors in tests/check/not_available.lym
+found 9 errors in tests/check/not_available.lym
 run `lymra explain L0309` to read why a rule exists and how to fix it

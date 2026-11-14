@@ -67,7 +67,7 @@ impl<'src> Checker<'src, '_> {
         match self.constant_value(id, Some(named.span))? {
             Value::Integer { value, .. } => u64::try_from(value)
                 .map_err(|_| self.report(errors::negative_length(name.text, value, named.span))),
-            Value::Boolean(_) | Value::Text(_) => Err(malformed(self)),
+            Value::Float { .. } | Value::Boolean(_) | Value::Text(_) => Err(malformed(self)),
         }
     }
 
@@ -175,7 +175,11 @@ impl<'src> Checker<'src, '_> {
         let known = match &operand.ty {
             Type::Array(array) => (!operand.has_effects()).then_some(array.length),
             Type::String => None,
-            Type::Integer(_) | Type::Boolean | Type::Custom(_) | Type::Choice(_) => {
+            Type::Integer(_)
+            | Type::Float(_)
+            | Type::Boolean
+            | Type::Custom(_)
+            | Type::Choice(_) => {
                 return Err(self.report(errors::no_length(&operand.ty, operand.span)));
             }
         };

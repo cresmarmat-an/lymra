@@ -1,0 +1,133 @@
+error[L0404]: this is beyond the largest `float32`, so it would be infinity
+ --> tests/check/floats.lym:1:25
+  |
+1 | constant float32 huge = 1.0e39
+  |                         ^^^^^^ larger than about 3.4e38
+  |
+help: a `float32` goes up to about 3.4e38; use `float64`, which goes up to about 1.8e308
+
+error[L0404]: this is too close to zero for a `float32`, so it would be 0.0
+ --> tests/check/floats.lym:2:25
+  |
+2 | constant float32 dust = 1.0e-50
+  |                         ^^^^^^^ rounds to zero
+  |
+help: a `float32` above zero is at least about 1.4e-45; use `float64`, or write 0.0
+
+error[L0404]: this is too close to zero for a `float64`, so it would be 0.0
+ --> tests/check/floats.lym:3:28
+  |
+3 | constant float64 nothing = 1.0e-400
+  |                            ^^^^^^^^ rounds to zero
+  |
+help: a `float64` above zero is at least about 4.9e-324; write 0.0, or scale the values up
+
+error[L0404]: this is beyond the largest `float64`, so it would be infinity
+ --> tests/check/floats.lym:4:25
+  |
+4 | constant float64 over = 1.0e308 * 10.0
+  |                         ^^^^^^^^^^^^^^ larger than about 1.8e308
+  |
+help: a `float64` goes up to about 1.8e308; scale the values down, for example by measuring in larger units
+
+error[L0406]: division by zero
+ --> tests/check/floats.lym:5:33
+  |
+5 | constant float64 broken = 1.0 / 0.0
+  |                                 ^^^ this is always zero
+  |
+help: divide by a value that is not zero; the program would stop here every time it ran this line
+
+error[L0402]: expected a `float64`, found a number
+ --> tests/check/floats.lym:6:26
+  |
+6 | constant float64 whole = 1
+  |                          ^ this is a number
+  |
+help: write it with a point to make it a float
+  |
+6 | constant float64 whole = 1.0
+
+error[L0402]: expected an `integer64`, found a `float64`
+ --> tests/check/floats.lym:7:28
+  |
+7 | constant integer64 count = 2.5
+  |                            ^^^ this is a `float64`
+  |
+help: convert it with `integer64(...)`; it drops the fraction, and the program stops if the whole part does not fit
+  |
+7 | constant integer64 count = integer64(2.5)
+
+error[L0402]: expected a `float32`, found a `float64`
+  --> tests/check/floats.lym:13:31
+   |
+13 |     constant float32 narrow = wide
+   |                               ^^^^ this is a `float64`
+   |
+help: convert it with `float32(...)`; it gives the nearest `float32`, and the program stops if the value is beyond the largest one
+   |
+13 |     constant float32 narrow = float32(wide)
+
+error[L0402]: expected an `integer64`, found a `float64`
+  --> tests/check/floats.lym:14:34
+   |
+14 |     constant integer64 rounded = wide
+   |                                  ^^^^ this is a `float64`
+   |
+help: convert it with `integer64(...)`; it drops the fraction, and the program stops if the whole part does not fit
+   |
+14 |     constant integer64 rounded = integer64(wide)
+
+error[L0405]: `%` works on integers, and these are `float64` values
+  --> tests/check/floats.lym:16:13
+   |
+16 |     print("{wide % 2.0} {items + 1.5} {integer8(300.0)} {float32(big)}")
+   |             ^^^^^^^^^^ a remainder of floats
+   |
+help: convert to an integer type first, as in `integer64(value) % 3`, if whole numbers are meant
+
+error[L0402]: the two sides of `+` have different types
+  --> tests/check/floats.lym:16:34
+   |
+16 |     print("{wide % 2.0} {items + 1.5} {integer8(300.0)} {float32(big)}")
+   |                                  ^^^ this is a `float64`
+   |                          ----- this is an `integer64`
+   |
+help: convert the integer with `float64(...)`, which gives the nearest float
+
+error[L0404]: `300.0` does not fit an `integer8`
+  --> tests/check/floats.lym:16:49
+   |
+16 |     print("{wide % 2.0} {items + 1.5} {integer8(300.0)} {float32(big)}")
+   |                                                 ^^^^^ known now, and outside the target type
+   |
+help: use a value the target type holds; the program would stop here every time it ran this line
+
+error[L0404]: `big` does not fit a `float32`
+  --> tests/check/floats.lym:16:66
+   |
+16 |     print("{wide % 2.0} {items + 1.5} {integer8(300.0)} {float32(big)}")
+   |                                                                  ^^^ known now, and outside the target type
+   |
+help: use a value the target type holds; the program would stop here every time it ran this line
+
+error[L0402]: a condition has to be a `boolean`, but this is a `float64`
+  --> tests/check/floats.lym:17:8
+   |
+17 |     if wide
+   |        ^^^^ not a `boolean`
+   |
+help: compare it with a number
+   |
+17 |     if wide != 0.0
+
+error[L0405]: `range` works on integers, and these are `float64` values
+  --> tests/check/floats.lym:19:24
+   |
+19 |     for index in range(0.0, 3.0)
+   |                        ^^^^^^^^ floats
+   |
+help: convert them to an integer type, as in `integer64(value)`
+
+found 15 errors in tests/check/floats.lym
+run `lymra explain L0404` to read why a rule exists and how to fix it

@@ -6,7 +6,7 @@ error[L0207]: `integer32` is the name of a built-in type
   |
 help: choose another name
 
-error[L0402]: expected an integer of type `unsigned8`, found an `integer64`
+error[L0402]: expected an `unsigned8`, found an `integer64`
  --> tests/check/conversions.lym:8:32
   |
 8 |     constant unsigned8 small = count
@@ -32,13 +32,13 @@ error[L0501]: `integer32` takes 1 argument, but 2 were given
    |
 help: write `integer32(value)`
 
-error[L0405]: `unsigned8` converts integers, but this is a `boolean`
+error[L0405]: `unsigned8` converts numbers, but this is a `boolean`
   --> tests/check/conversions.lym:11:23
    |
 11 |     print("{unsigned8(flag)}")
-   |                       ^^^^ not an integer
+   |                       ^^^^ not a number
    |
-help: only integers can be converted between integer types
+help: only integers and floats can be converted to a number type
 
 error[L0404]: `300` does not fit in `unsigned8`
   --> tests/check/conversions.lym:12:23
@@ -117,14 +117,6 @@ error[L0403]: unknown type `integer128`
    |
 help: integer types have 8, 16, 32 or 64 bits: `integer8` to `integer64`, `unsigned8` to `unsigned64`
 
-error[L0309]: `float32` and `float64` are not available yet
-  --> tests/check/conversions.lym:21:50
-   |
-21 |     print("{integer(count)} {integer128(count)} {float64(count)}")
-   |                                                  ^^^^^^^ the compiler adds this in roadmap phase 2
-   |
-help: write this part another way for now; the roadmap in the README lists what each phase adds
-
 error[L0305]: `int` is not a Lymra type
   --> tests/check/conversions.lym:22:13
    |
@@ -171,5 +163,5 @@ error[L0507]: `integer32` is a type, so nothing can be assigned to it
    |
 help: assign to a `variable` instead
 
-found 20 errors in tests/check/conversions.lym
+found 19 errors in tests/check/conversions.lym
 run `lymra explain L0207` to read why a rule exists and how to fix it

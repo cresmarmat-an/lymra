@@ -47,9 +47,12 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         match self.declared_type(id, reference)? {
             Type::Choice(choice) => Ok(choice),
             // A variant always belongs to a choice; anything else was reported where it was declared.
-            Type::Integer(_) | Type::Boolean | Type::String | Type::Array(_) | Type::Custom(_) => {
-                Err(ErrorReported)
-            }
+            Type::Integer(_)
+            | Type::Float(_)
+            | Type::Boolean
+            | Type::String
+            | Type::Array(_)
+            | Type::Custom(_) => Err(ErrorReported),
         }
     }
 

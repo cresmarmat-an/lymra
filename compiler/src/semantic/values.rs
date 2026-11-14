@@ -1,15 +1,20 @@
 /*!
  * Compile-time arithmetic.
  *
- * Literals are computed exactly before they get a type, as in `200 + 100`,
- * so only the final value has to fit the type the context asks for. Values of
- * a known type, such as top-level constants, are computed with that type's
- * range, so an expression that would always overflow is caught here instead
- * of at run time.
+ * Integer literals are computed exactly before they get a type, as in
+ * `200 + 100`, so only the final value has to fit the type the context asks
+ * for. Values of a known type, such as top-level constants, are computed with
+ * that type's range, so an expression that would always overflow is caught
+ * here instead of at run time.
+ *
+ * Floats are computed as the program computes them: each operation in the
+ * type of its operands, rounded after each step, so a value known while
+ * compiling is the value the program would have. One that is not a finite
+ * number would be infinity or NaN, and is an error.
  */
 
 use crate::ast::{self, BinaryOperator, UnaryOperator};
-use crate::ir::{ArithmeticOperator, ComparisonOperator, IntegerType, Value};
+use crate::ir::{ArithmeticOperator, ComparisonOperator, FloatType, IntegerType, Value};
 use crate::source::Span;
 
 /// Why computing a value of a known type failed.
@@ -26,6 +31,17 @@ pub(super) enum LiteralError {
     DivisionByZero(Span),
     /// The span of the part whose value is too large to compute with.
     TooLarge(Span),
+}
+
+/// Why computing an expression made only of float literals failed, and where.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FloatLiteralError {
+    /// The span of the divisor that is zero.
+    DivisionByZero(Span),
+    /// The span of the part whose value is beyond the largest float of the type.
+    TooLarge(Span),
+    /// The span of a literal that is not zero but rounds to zero in the type.
+    TooSmall(Span),
 }
 
 pub(super) fn arithmetic_operator(operator: BinaryOperator) -> Option<ArithmeticOperator> {
@@ -119,6 +135,131 @@ pub(super) fn fold_negate(value: i128, ty: IntegerType) -> Result<i128, FoldErro
         .ok_or(FoldError::Overflow)
 }
 
+/// Whether an expression is made only of literals of one kind, so its type comes from its context.
+pub(super) fn is_literal(expr: &ast::Expr<'_>) -> bool {
+    literal_integer(expr).is_some() || is_float_literal(expr)
+}
+
+/// Whether an expression is made only of float literals, `-` and arithmetic other than `%`.
+fn is_float_literal(expr: &ast::Expr<'_>) -> bool {
+    match &expr.kind {
+        ast::ExprKind::Float(_) => true,
+        ast::ExprKind::Unary {
+            operator: UnaryOperator::Negate,
+            operand,
+        } => is_float_literal(operand),
+        ast::ExprKind::Binary {
+            operator,
+            left,
+            right,
+        } => {
+            arithmetic_operator(*operator)
+                .is_some_and(|operator| operator != ArithmeticOperator::Remainder)
+                && is_float_literal(left)
+                && is_float_literal(right)
+        }
+        _ => false,
+    }
+}
+
+/**
+ * The value, in type `ty`, of an expression made only of float literals, `-`
+ * and arithmetic other than `%`, which floats do not have. `text` gives the
+ * source of a span: a `float32` literal is rounded once from its digits, as
+ * rounding through `float64` first can miss the nearest `float32`. Returns
+ * `None` for any other expression.
+ */
+pub(super) fn literal_float<'text>(
+    expr: &ast::Expr<'_>,
+    ty: FloatType,
+    text: &impl Fn(Span) -> &'text str,
+) -> Option<Result<f64, FloatLiteralError>> {
+    match &expr.kind {
+        ast::ExprKind::Float(value) => {
+            Some(float_literal_value(text(expr.span), *value, ty, expr.span))
+        }
+        ast::ExprKind::Unary {
+            operator: UnaryOperator::Negate,
+            operand,
+        } => literal_float(operand, ty, text).map(|value| value.map(|value| -value)),
+        ast::ExprKind::Binary {
+            operator,
+            left,
+            right,
+        } => {
+            let operator = arithmetic_operator(*operator)
+                .filter(|operator| *operator != ArithmeticOperator::Remainder)?;
+            let left_value = literal_float(left, ty, text)?;
+            let right_value = literal_float(right, ty, text)?;
+            Some(left_value.and_then(|left_value| {
+                let right_value = right_value?;
+                fold_float(operator, left_value, right_value, ty).map_err(|error| match error {
+                    FoldError::DivisionByZero => FloatLiteralError::DivisionByZero(right.span),
+                    FoldError::Overflow => FloatLiteralError::TooLarge(expr.span),
+                })
+            }))
+        }
+        _ => None,
+    }
+}
+
+/// The float a literal written as `written` stands for in type `ty`. `value` is its nearest `float64`.
+pub(super) fn float_literal_value(
+    written: &str,
+    value: f64,
+    ty: FloatType,
+    span: Span,
+) -> Result<f64, FloatLiteralError> {
+    let rounded = match ty {
+        FloatType::Float64 => value,
+        FloatType::Float32 => written
+            .replace('_', "")
+            .parse::<f32>()
+            .map_or(f64::INFINITY, f64::from),
+    };
+    if !rounded.is_finite() {
+        return Err(FloatLiteralError::TooLarge(span));
+    }
+    let digits = written.split('e').next().unwrap_or(written);
+    let written_zero = !digits.bytes().any(|byte| (b'1'..=b'9').contains(&byte));
+    if rounded == 0.0 && !written_zero {
+        return Err(FloatLiteralError::TooSmall(span));
+    }
+    Ok(rounded)
+}
+
+/// Arithmetic on two floats of `ty`, rounded to `ty` as the program rounds it. The result has to be a finite number.
+pub(super) fn fold_float(
+    operator: ArithmeticOperator,
+    left: f64,
+    right: f64,
+    ty: FloatType,
+) -> Result<f64, FoldError> {
+    if operator == ArithmeticOperator::Divide && right == 0.0 {
+        return Err(FoldError::DivisionByZero);
+    }
+    let result = match ty {
+        FloatType::Float64 => compute_float(operator, left, right),
+        // Every `float32` is a `float64`, and one operation in `float64` rounded to `float32` gives the `float32` result.
+        FloatType::Float32 => ty.round(compute_float(operator, left, right)),
+    };
+    if result.is_finite() {
+        Ok(result)
+    } else {
+        Err(FoldError::Overflow)
+    }
+}
+
+fn compute_float(operator: ArithmeticOperator, left: f64, right: f64) -> f64 {
+    match operator {
+        ArithmeticOperator::Add => left + right,
+        ArithmeticOperator::Subtract => left - right,
+        ArithmeticOperator::Multiply => left * right,
+        ArithmeticOperator::Divide => left / right,
+        ArithmeticOperator::Remainder => left % right,
+    }
+}
+
 /// Compares two known values of the same type. Returns `None` for a comparison the type does not support.
 pub(super) fn fold_compare(
     operator: ComparisonOperator,
@@ -128,6 +269,10 @@ pub(super) fn fold_compare(
     let ordering = match (left, right) {
         (Value::Integer { value: left, .. }, Value::Integer { value: right, .. }) => {
             left.cmp(right)
+        }
+        // Known floats are finite numbers, so they always compare.
+        (Value::Float { bits: left, .. }, Value::Float { bits: right, .. }) => {
+            f64::from_bits(*left).partial_cmp(&f64::from_bits(*right))?
         }
         (Value::Boolean(left), Value::Boolean(right)) if operator.is_equality() => left.cmp(right),
         // Text orders by its UTF-8 bytes, as the generated code compares it.

@@ -1,0 +1,9 @@
+exit status 70
+--- standard output
+3.4028235e38
+--- standard error
+error: conversion out of range
+ --> tests/run/float_narrowing.lym:7:12
+  |
+7 |     return float32(value)
+  |            ^^^^^^^^^^^^^^

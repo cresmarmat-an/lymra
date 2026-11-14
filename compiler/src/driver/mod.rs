@@ -196,6 +196,7 @@ impl Compiler {
                 if abilities.probes_stack {
                     command.arg("-fstack-clash-protection");
                 }
+                command.args(&abilities.float_options);
                 if warnings == Warnings::Strict {
                     command.args(["-Wall", "-Wextra", "-Wpedantic", "-Werror"]);
                 }

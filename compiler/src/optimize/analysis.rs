@@ -225,6 +225,7 @@ impl Analyzer<'_> {
             ExprKind::Length(operand) => match &operand.ty {
                 Type::Array(array) => Interval::exact(i128::from(array.length)),
                 Type::Integer(_)
+                | Type::Float(_)
                 | Type::Boolean
                 | Type::String
                 | Type::Custom(_)

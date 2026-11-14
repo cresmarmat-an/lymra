@@ -46,7 +46,7 @@ pub(in crate::semantic) fn no_fields(found: &Type, object: Span, field: &str) ->
                 "a choice holds fields only in its variants; read them in a `match` case".to_owned()
             }
         },
-        Type::Integer(_) | Type::Boolean | Type::String | Type::Custom(_) => {
+        Type::Integer(_) | Type::Float(_) | Type::Boolean | Type::String | Type::Custom(_) => {
             format!("only a value of a type declared with `type` has fields such as `{field}`")
         }
     };

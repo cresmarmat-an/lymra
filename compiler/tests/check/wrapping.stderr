@@ -13,7 +13,7 @@ error[L0405]: `wrapping_multiply` works on numbers, but this is a `boolean`
 5 |     print("{wrapping_multiply(true, 1)}")
   |                               ^^^^ not a number
   |
-help: arithmetic needs integer types such as `integer64`
+help: arithmetic needs number types such as `integer64` or `float64`
 
 error[L0501]: `wrapping_subtract` takes 2 arguments, but 1 was given
  --> tests/check/wrapping.lym:6:30

@@ -39,7 +39,7 @@ error[L0402]: the two sides of `+` have different types
    |
 help: convert one side, for example with `integer64(...)`; the program stops if the value does not fit
 
-error[L0402]: expected an integer of type `unsigned8`, found an `integer64`
+error[L0402]: expected an `unsigned8`, found an `integer64`
   --> tests/check/types.lym:12:39
    |
 12 |     constant also_mixed = takes_small(count)

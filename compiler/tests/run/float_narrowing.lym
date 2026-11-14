@@ -1,0 +1,11 @@
+#[
+    A `float64` becomes the nearest `float32`. One beyond the largest
+    `float32` would become infinity, so the program stops instead.
+]#
+
+function to_single(float64 value) returns float32
+    return float32(value)
+
+function main()
+    print("{to_single(3.4028235e38)}")
+    print("{to_single(3.5e38)}")

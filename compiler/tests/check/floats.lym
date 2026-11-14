@@ -1,0 +1,21 @@
+constant float32 huge = 1.0e39
+constant float32 dust = 1.0e-50
+constant float64 nothing = 1.0e-400
+constant float64 over = 1.0e308 * 10.0
+constant float64 broken = 1.0 / 0.0
+constant float64 whole = 1
+constant integer64 count = 2.5
+constant float64 big = 1.0e300
+
+function main()
+    constant wide = 2.5
+    constant items = 3
+    constant float32 narrow = wide
+    constant integer64 rounded = wide
+    constant float64 widened = count
+    print("{wide % 2.0} {items + 1.5} {integer8(300.0)} {float32(big)}")
+    if wide
+        print("yes")
+    for index in range(0.0, 3.0)
+        print("{index}")
+    print("{huge} {dust} {nothing} {over} {broken} {whole} {narrow} {rounded} {widened}")

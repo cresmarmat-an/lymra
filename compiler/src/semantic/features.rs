@@ -21,7 +21,6 @@ const FUTURE_FUNCTIONS: [(&str, u8); 12] = [
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Feature {
-    Floats,
     Packed,
     NamedArguments,
     TextBuilding,
@@ -50,7 +49,6 @@ impl Feature {
     /// The type name `name` belongs to a later phase, if it does.
     pub fn future_type(name: &str) -> Option<Feature> {
         match name {
-            "float32" | "float64" => Some(Feature::Floats),
             "list" | "stack" | "view" => Some(Feature::Lists),
             "pool" | "handle" => Some(Feature::Pools),
             _ => None,
@@ -59,7 +57,6 @@ impl Feature {
 
     fn message(self) -> String {
         let subject = match self {
-            Self::Floats => "`float32` and `float64` are",
             Self::Packed => "`packed` choices are",
             Self::NamedArguments => "named arguments are",
             Self::TextBuilding => {
@@ -82,7 +79,7 @@ impl Feature {
 
     fn phase(self) -> u8 {
         match self {
-            Self::Floats | Self::NamedArguments => 2,
+            Self::NamedArguments => 2,
             Self::TextBuilding
             | Self::Packed
             | Self::Lists
@@ -128,11 +125,8 @@ mod tests {
 
     #[test]
     fn messages_name_the_phase() {
-        let diagnostic = Feature::Floats.diagnostic(Span::new(0, 7));
-        assert_eq!(
-            diagnostic.message,
-            "`float32` and `float64` are not available yet"
-        );
+        let diagnostic = Feature::NamedArguments.diagnostic(Span::new(0, 7));
+        assert_eq!(diagnostic.message, "named arguments are not available yet");
         assert_eq!(
             diagnostic.primary.text,
             "the compiler adds this in roadmap phase 2"

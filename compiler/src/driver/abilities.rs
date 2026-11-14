@@ -20,19 +20,40 @@ pub(super) struct Abilities {
     pub probes_stack: bool,
     /// The option that gives a program `PROGRAM_STACK_SIZE` of stack, where the system's default is smaller.
     pub stack_option: Option<String>,
+    /**
+     * The options that make every float operation round to its own type, so
+     * a program computes the same floats on every system: no fusing of a
+     * multiply and an add, which processors with fused multiply-add would
+     * round once instead of twice, and on 32-bit x86, SSE2 instead of the x87
+     * unit, which keeps floats wider than their type.
+     */
+    pub float_options: Vec<&'static str>,
 }
+
+/// Turns off fusing, which Clang does by default where the processor can.
+const NO_CONTRACTION: [&str; 1] = ["-ffp-contract=off"];
+
+/// Selects SSE2 for floats. Only compilers for x86 take these.
+const SSE_MATH: [&str; 2] = ["-msse2", "-mfpmath=sse"];
 
 impl Abilities {
     pub fn of(compiler: &Compiler) -> Self {
+        let float_options = [&NO_CONTRACTION[..], &SSE_MATH[..]]
+            .into_iter()
+            .filter(|options| accepts(compiler, options))
+            .flatten()
+            .copied()
+            .collect();
         Self {
-            probes_stack: accepts(compiler, "-fstack-clash-protection"),
+            probes_stack: accepts(compiler, &["-fstack-clash-protection"]),
             stack_option: target(compiler).and_then(|target| stack_option(&target)),
+            float_options,
         }
     }
 }
 
-/// Whether `compiler` builds a clean file with `option` added and every warning an error.
-fn accepts(compiler: &Compiler, option: &str) -> bool {
+/// Whether `compiler` builds a clean file with `options` added and every warning an error.
+fn accepts(compiler: &Compiler, options: &[&str]) -> bool {
     let Ok(workspace) = TemporaryDirectory::new() else {
         return false;
     };
@@ -42,7 +63,9 @@ fn accepts(compiler: &Compiler, option: &str) -> bool {
     }
     Command::new(&compiler.program)
         .args(&compiler.leading_arguments)
-        .args(["-std=c11", "-Werror", option, "-c", "-o"])
+        .args(["-std=c11", "-Werror"])
+        .args(options)
+        .args(["-c", "-o"])
         .arg(workspace.path().join("probe.o"))
         .arg(&source)
         .stdin(Stdio::null())

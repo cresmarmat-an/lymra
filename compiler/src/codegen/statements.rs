@@ -3,7 +3,8 @@
 use super::expressions::{Bounds, is_addressable};
 use super::{Generator, INDENT, Writer, c_syntax, local_access};
 use crate::ir::{
-    Block, Branch, Case, Expr, Function, LocalId, Place, PlaceStep, PrintPart, Statement, TextForm,
+    Block, Branch, Case, Expr, FloatType, Function, LocalId, Place, PlaceStep, PrintPart,
+    Statement, TextForm,
 };
 
 impl Generator<'_, '_> {
@@ -369,6 +370,7 @@ impl Generator<'_, '_> {
                     Some(format!("lymra_write_text({})", c_syntax::text_value(text)))
                 }
                 PrintPart::Value { value, form } => {
+                    self.writes_floats |= matches!(form, TextForm::Float(_));
                     let code = self.expr(function, value, writer);
                     let code = if value.has_effects() {
                         self.temporary(&value.ty, &code, writer)
@@ -393,5 +395,7 @@ fn write_value(form: TextForm, value: &str) -> String {
         TextForm::Boolean => format!("lymra_write_boolean({value})"),
         TextForm::Signed => format!("lymra_write_signed((int64_t)({value}))"),
         TextForm::Unsigned => format!("lymra_write_unsigned((uint64_t)({value}))"),
+        TextForm::Float(FloatType::Float32) => format!("lymra_write_float32({value})"),
+        TextForm::Float(FloatType::Float64) => format!("lymra_write_float64({value})"),
     }
 }

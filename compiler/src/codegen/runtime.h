@@ -20,12 +20,30 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 
+#include <float.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/*
+ * Floats give the same results on every system only when each operation is
+ * rounded to its own type: not kept wider, as the x87 unit of 32-bit x86
+ * does, and not fused with the next one, as a multiply and an add can be on
+ * processors with fused multiply-add. The compiler driver asks GCC and Clang
+ * for that; MSVC is told here, and a build that would still keep floats
+ * wider stops. A program without floats is not affected.
+ */
+#if defined(LYMRA_USES_FLOATS)
+#if defined(_MSC_VER)
+#pragma fp_contract(off)
+#endif
+#if defined(FLT_EVAL_METHOD) && FLT_EVAL_METHOD != 0 && FLT_EVAL_METHOD != -1
+#error "Lymra programs need floats computed in their own type: build with SSE2 math, as -msse2 -mfpmath=sse"
+#endif
+#endif
 
 #if defined(LYMRA_POSIX)
 #include <errno.h>
@@ -554,6 +572,35 @@ LYMRA_UNUSED static inline uint64_t lymra_check_unsigned(uint64_t value, uint64_
     }
     return value;
 }
+
+#if defined(LYMRA_USES_FLOATS)
+/*
+ * Checks a conversion from a float to an integer: the value has to lie
+ * strictly between `below` and `above`, the nearest floats outside the range
+ * whose values keep their whole part inside the target type. NaN lies
+ * nowhere and fails too.
+ */
+LYMRA_UNUSED static inline double lymra_check_float(double value, double below, double above, const char *site) {
+    if (!(value > below && value < above)) {
+        lymra_trap(LYMRA_CONVERSION_OUT_OF_RANGE, site);
+    }
+    return value;
+}
+
+/*
+ * Converts a `float64` to the nearest `float32`. A finite value at or above
+ * the halfway point between the largest `float32` and 2^128 would become
+ * infinity, so it stops the program; infinity and NaN stay what they are.
+ */
+LYMRA_UNUSED static inline float lymra_narrow_float(double value, const char *site) {
+    /* A value minus itself is zero exactly when the value is finite; the math library is not needed. */
+    bool finite = value - value == 0.0;
+    if (finite && (value >= 0x1.ffffffp+127 || value <= -0x1.ffffffp+127)) {
+        lymra_trap(LYMRA_CONVERSION_OUT_OF_RANGE, site);
+    }
+    return (float)value;
+}
+#endif
 
 /*
  * Orders two texts by their UTF-8 bytes, which is the order of their

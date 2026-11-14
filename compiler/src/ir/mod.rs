@@ -9,7 +9,9 @@
 
 mod types;
 
-pub use types::{ArrayType, ChoiceType, CustomType, FieldType, IntegerType, Layout, Type, Value};
+pub use types::{
+    ArrayType, ChoiceType, CustomType, FieldType, FloatType, IntegerType, Layout, Type, Value,
+};
 
 use crate::ast::OptimizeMode;
 use crate::source::Span;
@@ -194,6 +196,8 @@ pub enum TextForm {
     Boolean,
     Signed,
     Unsigned,
+    /// The shortest decimal that reads back as the same float, written the same way on every system.
+    Float(FloatType),
 }
 
 impl TextForm {
@@ -204,6 +208,7 @@ impl TextForm {
             Type::Boolean => Some(Self::Boolean),
             Type::Integer(integer) if integer.is_signed() => Some(Self::Signed),
             Type::Integer(_) => Some(Self::Unsigned),
+            Type::Float(float) => Some(Self::Float(*float)),
             Type::Array(_) | Type::Custom(_) | Type::Choice(_) => None,
         }
     }

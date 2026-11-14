@@ -9,6 +9,7 @@
 
 use super::errors::{self, described};
 use super::features::Feature;
+use super::floats::Number;
 use super::items::is_sized_integer_name;
 use super::places::place_parts;
 use super::scope::{Local, LocalKind};
@@ -18,7 +19,8 @@ use crate::ast::{self, ArgumentKind, BinaryOperator, UnaryOperator};
 use crate::diagnostics::{Diagnostic, ErrorReported, Help};
 use crate::foreign_types::translate_type;
 use crate::ir::{
-    self, ArithmeticOperator, ComparisonOperator, IntegerType, LogicOperator, Type, Value,
+    self, ArithmeticOperator, ComparisonOperator, FloatType, IntegerType, LogicOperator, Type,
+    Value,
 };
 use crate::source::Span;
 
@@ -56,7 +58,7 @@ fn classify(operator: BinaryOperator) -> OperatorClass {
     }
 }
 
-fn literal(value: Value, span: Span) -> ir::Expr {
+pub(super) fn literal(value: Value, span: Span) -> ir::Expr {
     ir::Expr {
         ty: value.ty(),
         kind: ir::ExprKind::Literal(value),
@@ -79,13 +81,13 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         match expected {
             Some(expected) if checked.ty != *expected => {
                 // A literal has no type of its own until a context gives it one, so it is just "a number" here.
-                let error = match (expected, &checked.ty) {
+                let source = self.text(expr.span);
+                let error = match (Number::of(expected), Number::of(&checked.ty)) {
                     _ if values::literal_integer(expr).is_some() => {
-                        errors::literal_mismatch(expected, expr.span)
+                        errors::literal_mismatch(expected, expr.span, source)
                     }
-                    (Type::Integer(target), Type::Integer(_)) => {
-                        let source = self.text(expr.span);
-                        errors::integer_mismatch(*target, &checked.ty, expr.span, source)
+                    (Some(_), Some(_)) => {
+                        errors::number_mismatch(expected, &checked.ty, expr.span, source)
                     }
                     _ => errors::type_mismatch(expected, &checked.ty, expr.span),
                 };
@@ -104,11 +106,14 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         if let Some(value) = values::literal_integer(expr) {
             return self.integer_literal(expr, value, hint);
         }
+        if let Some(checked) = self.check_float_literal(expr, hint) {
+            return checked;
+        }
         match &expr.kind {
             ast::ExprKind::Integer(value) => {
                 self.integer_literal(expr, Ok(i128::from(*value)), hint)
             }
-            ast::ExprKind::Float(_) => Err(self.report(Feature::Floats.diagnostic(expr.span))),
+            ast::ExprKind::Float(value) => self.check_float_number(*value, expr.span, hint),
             ast::ExprKind::Bool(value) => Ok(literal(Value::Boolean(*value), expr.span)),
             ast::ExprKind::Text(parts) => self.check_text(parts, expr.span),
             ast::ExprKind::Name(name) => self.check_name(name, expr.span),
@@ -316,7 +321,10 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 ))
             }
             UnaryOperator::Negate => {
-                let ty = self.negatable_type(&operand)?;
+                let ty = match self.negatable_type(&operand)? {
+                    Number::Integer(ty) => ty,
+                    Number::Float(ty) => return Ok(self.negate_float(operand, ty, span)),
+                };
                 if let Some(Value::Integer { value, .. }) = self.known_value(&operand) {
                     return match values::fold_negate(value, ty) {
                         Ok(negated) => Ok(literal(Value::Integer { value: negated, ty }, span)),
@@ -332,9 +340,11 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }
     }
 
-    fn negatable_type(&mut self, operand: &ir::Expr) -> CheckResult<IntegerType> {
+    /// The type of a value `-` can negate: a signed integer or a float.
+    fn negatable_type(&mut self, operand: &ir::Expr) -> CheckResult<Number> {
         let (message, help) = match &operand.ty {
-            Type::Integer(ty) if ty.is_signed() => return Ok(*ty),
+            Type::Integer(ty) if ty.is_signed() => return Ok(Number::Integer(*ty)),
+            Type::Float(ty) => return Ok(Number::Float(*ty)),
             Type::Integer(ty) => (
                 format!(
                     "`-` cannot negate an unsigned value, and this is {}",
@@ -387,8 +397,8 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         left: &ast::Expr<'src>,
         right: &ast::Expr<'src>,
     ) -> CheckResult<(ir::Expr, ir::Expr)> {
-        let left_is_literal = values::literal_integer(left).is_some();
-        let right_is_literal = values::literal_integer(right).is_some();
+        let left_is_literal = values::is_literal(left);
+        let right_is_literal = values::is_literal(right);
         if left_is_literal && !right_is_literal {
             let right = self.check_expr_with_hint(right, None);
             let hint = right.as_ref().ok().map(|right| &right.ty);
@@ -412,9 +422,30 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         left: &ir::Expr,
         right: &ir::Expr,
     ) -> CheckResult<IntegerType> {
+        match self.shared_number_type(symbol, left, right)? {
+            Number::Integer(ty) => Ok(ty),
+            Number::Float(ty) => Err(self.report(errors::operator_type(
+                format!(
+                    "`{symbol}` works on integers, and these are `{}` values",
+                    ty.name()
+                ),
+                Span::new(left.span.start, right.span.end),
+                "floats".to_owned(),
+                "convert them to an integer type, as in `integer64(value)`",
+            ))),
+        }
+    }
+
+    /// The number type both operands share: one integer type or one float type. `symbol` names the operation.
+    pub(super) fn shared_number_type(
+        &mut self,
+        symbol: &str,
+        left: &ir::Expr,
+        right: &ir::Expr,
+    ) -> CheckResult<Number> {
         let mut failed = false;
         for operand in [left, right] {
-            if operand.ty.as_integer().is_none() {
+            if Number::of(&operand.ty).is_none() {
                 let help = match operand.ty {
                     Type::String => {
                         "to put text together, interpolate it: `print(\"{first}{second}\")`"
@@ -428,8 +459,8 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     Type::Choice(_) => {
                         "arithmetic works on single numbers; read the fields in a `match` first"
                     }
-                    Type::Boolean | Type::Integer(_) => {
-                        "arithmetic needs integer types such as `integer64`"
+                    Type::Boolean | Type::Integer(_) | Type::Float(_) => {
+                        "arithmetic needs number types such as `integer64` or `float64`"
                     }
                 };
                 self.report(errors::operator_type(
@@ -447,8 +478,8 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         if failed {
             return Err(ErrorReported);
         }
-        match (&left.ty, &right.ty) {
-            (Type::Integer(shared), Type::Integer(other)) if shared == other => Ok(*shared),
+        match (Number::of(&left.ty), Number::of(&right.ty)) {
+            (Some(shared), Some(other)) if shared == other => Ok(shared),
             _ => Err(self.report(errors::operand_mismatch(
                 symbol,
                 (&left.ty, left.span),
@@ -464,7 +495,12 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         right: ir::Expr,
         span: Span,
     ) -> CheckResult<ir::Expr> {
-        let ty = self.shared_integer_type(operator.symbol(), &left, &right)?;
+        let ty = match self.shared_number_type(operator.symbol(), &left, &right)? {
+            Number::Integer(ty) => ty,
+            Number::Float(ty) => {
+                return self.check_float_arithmetic(operator, left, right, ty, span);
+            }
+        };
         let divides = matches!(
             operator,
             ArithmeticOperator::Divide | ArithmeticOperator::Remainder
@@ -570,7 +606,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     "tell the variants apart in a `match`, then compare their fields",
                 )));
             }
-            Type::Integer(_) | Type::Boolean | Type::String => {}
+            Type::Integer(_) | Type::Float(_) | Type::Boolean | Type::String => {}
         }
         if let (Some(left_value), Some(right_value)) =
             (self.known_value(&left), self.known_value(&right))
@@ -712,7 +748,10 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         hint: Option<&Type>,
     ) -> CheckResult<CheckedCall<'src>> {
         if let Some(target) = IntegerType::from_name(name) {
-            return self.check_conversion(target, name, call, span);
+            return self.check_conversion(Number::Integer(target), name, call, span);
+        }
+        if let Some(target) = FloatType::from_name(name) {
+            return self.check_conversion(Number::Float(target), name, call, span);
         }
         match name {
             "print" => return self.check_print(call, span),
@@ -743,13 +782,14 @@ impl<'src, 'ast> Checker<'src, 'ast> {
     }
 
     /**
-     * Checks a conversion such as `unsigned8(count)`. It is checked at
-     * run time only when some value of the operand's type does not fit the
-     * target type; a known value is converted now.
+     * Checks a conversion such as `unsigned8(count)` or `float64(count)`.
+     * Between integers it is checked at run time only when some value of the
+     * operand's type does not fit the target type; a known value is
+     * converted now. A conversion with a float is in `floats`.
      */
     fn check_conversion(
         &mut self,
-        target: IntegerType,
+        target: Number,
         name: &'src str,
         call: &ast::Call<'src>,
         span: Span,
@@ -765,17 +805,22 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         };
         let value = self.single_value_argument(argument, "value")?;
         // A literal takes the target type directly, so it is checked against the target's range.
-        let operand = self.check_expr_with_hint(value, Some(&Type::Integer(target)))?;
-        let Type::Integer(source) = operand.ty else {
+        let operand = self.check_expr_with_hint(value, Some(&target.ty()))?;
+        let Some(source) = Number::of(&operand.ty) else {
             return Err(self.report(errors::operator_type(
                 format!(
-                    "`{name}` converts integers, but this is {}",
+                    "`{name}` converts numbers, but this is {}",
                     described(&operand.ty)
                 ),
                 operand.span,
-                "not an integer".to_owned(),
-                "only integers can be converted between integer types",
+                "not a number".to_owned(),
+                "only integers and floats can be converted to a number type",
             )));
+        };
+        let (Number::Integer(source), Number::Integer(target)) = (source, target) else {
+            return self
+                .convert_float(operand, source, target, span)
+                .map(CheckedCall::Value);
         };
         if let Some(Value::Integer { value: known, .. }) = self.known_value(&operand) {
             if !target.contains(known) {

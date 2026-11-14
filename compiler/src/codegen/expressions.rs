@@ -13,8 +13,8 @@
 use super::types::fill_function;
 use super::{Generator, INDENT, Writer, c_syntax, local_access};
 use crate::ir::{
-    Argument, ArithmeticOperator, Call, Expr, ExprKind, FieldValue, Function, IntegerType,
-    LogicOperator, Type,
+    Argument, ArithmeticOperator, Call, Expr, ExprKind, FieldValue, FloatType, Function,
+    IntegerType, LogicOperator, Type,
 };
 use crate::source::Span;
 
@@ -56,7 +56,7 @@ impl Generator<'_, '_> {
             ExprKind::Negate { operand, checked } => {
                 let operand = self.expr(function, operand, writer);
                 if !checked {
-                    // The optimizer proved the operand is not the type's lowest value.
+                    // A float never fails; for an integer, the optimizer proved it is not the type's lowest value.
                     return format!("(({})(-{operand}))", self.types.name(&expr.ty));
                 }
                 let site = self.site(expr.span);
@@ -71,9 +71,10 @@ impl Generator<'_, '_> {
                 let (left, right) = self.pair(function, left, right, writer);
                 if !checked {
                     /*
-                     * The optimizer proved the result fits the type and no divisor is
-                     * zero. C computes small types in `int`, which holds every value
-                     * of them, so the cast back loses nothing.
+                     * Float arithmetic never fails. For integers, the optimizer
+                     * proved the result fits the type and no divisor is zero; C
+                     * computes small types in `int`, which holds every value of
+                     * them, so the cast back loses nothing.
                      */
                     return format!(
                         "(({})({left} {} {right}))",
@@ -143,6 +144,7 @@ impl Generator<'_, '_> {
                     // The array is computed for its effects; its length is part of its type.
                     Type::Array(array) => format!("((void)({code}), INT64_C({}))", array.length),
                     Type::Integer(_)
+                    | Type::Float(_)
                     | Type::Boolean
                     | Type::String
                     | Type::Custom(_)
@@ -332,7 +334,11 @@ impl Generator<'_, '_> {
                 "({left}).{tag} {symbol} ({right}).{tag}",
                 tag = c_syntax::TAG
             ),
-            Type::Integer(_) | Type::Boolean | Type::Array(_) | Type::Custom(_) => {
+            Type::Integer(_)
+            | Type::Float(_)
+            | Type::Boolean
+            | Type::Array(_)
+            | Type::Custom(_) => {
                 format!("{left} {symbol} {right}")
             }
         }
@@ -460,14 +466,26 @@ impl Generator<'_, '_> {
     ) -> String {
         let target_type = self.types.name(&target.ty);
         let value = self.expr(function, operand, writer);
-        let (Some(source), Some(destination)) = (operand.ty.as_integer(), target.ty.as_integer())
-        else {
-            return format!("(({target_type})({value}))");
-        };
         if !checked {
             return format!("(({target_type})({value}))");
         }
         let site = self.site(target.span);
+        let (Some(source), Some(destination)) = (operand.ty.as_integer(), target.ty.as_integer())
+        else {
+            return match target.ty.as_integer() {
+                // To an integer: the whole part has to fit, which leaves out NaN.
+                Some(destination) => {
+                    let (below, above) = float_bounds(destination);
+                    format!(
+                        "(({target_type})lymra_check_float((double)({value}), {}, {}, {site}))",
+                        c_syntax::float_literal(below.to_bits(), FloatType::Float64),
+                        c_syntax::float_literal(above.to_bits(), FloatType::Float64)
+                    )
+                }
+                // From `float64` to `float32`: the only float conversion that can fail.
+                None => format!("lymra_narrow_float({value}, {site})"),
+            };
+        };
         let maximum = destination.maximum().min(source.maximum());
         if source.is_signed() {
             let minimum = destination.minimum().max(source.minimum());
@@ -483,4 +501,20 @@ impl Generator<'_, '_> {
             )
         }
     }
+}
+
+/**
+ * The floats just outside an integer type: a float strictly between them
+ * keeps its whole part inside the type, and every other float, NaN too, does
+ * not. Below the lowest value of a signed 64-bit type, the next float down is
+ * 2048 lower; every other bound is exact.
+ */
+fn float_bounds(ty: IntegerType) -> (f64, f64) {
+    let above = 2.0_f64.powi(ty.bits() as i32 - i32::from(ty.is_signed()));
+    let below = match (ty.is_signed(), ty.bits()) {
+        (false, _) => -1.0,
+        (true, 64) => -(2.0_f64.powi(63)) - 2048.0,
+        (true, _) => ty.minimum() as f64 - 1.0,
+    };
+    (below, above)
 }

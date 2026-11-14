@@ -64,6 +64,8 @@ pub fn run(
 #[derive(Clone, Debug)]
 enum Slot {
     Integer(i128),
+    /// The generator writes no floats, so only values and comparisons of them are run.
+    Float(f64),
     Boolean(bool),
     Text(String),
     /// The elements of an array, or the fields of a value of a declared type, in order.
@@ -636,6 +638,7 @@ fn element_mut<'slot>(slot: &'slot mut Slot, positions: &[usize]) -> Eval<&'slot
 fn from_value(value: &Value) -> Slot {
     match value {
         Value::Integer { value, .. } => Slot::Integer(*value),
+        Value::Float { bits, .. } => Slot::Float(f64::from_bits(*bits)),
         Value::Boolean(value) => Slot::Boolean(*value),
         Value::Text(text) => Slot::Text(text.clone()),
     }
@@ -646,11 +649,22 @@ fn describe(slot: &Slot) -> String {
         Slot::Integer(value) => value.to_string(),
         Slot::Boolean(value) => value.to_string(),
         Slot::Text(text) => text.clone(),
-        Slot::Compound(_) | Slot::Variant { .. } | Slot::Unset => "?".to_owned(),
+        Slot::Float(_) | Slot::Compound(_) | Slot::Variant { .. } | Slot::Unset => "?".to_owned(),
     }
 }
 
 fn compare(operator: ComparisonOperator, left: &Slot, right: &Slot) -> bool {
+    // NaN is unordered: only `!=` holds for it, as IEEE 754 and the generated C say.
+    if let (Slot::Float(left), Slot::Float(right)) = (left, right) {
+        return match operator {
+            ComparisonOperator::Equal => left == right,
+            ComparisonOperator::NotEqual => left != right,
+            ComparisonOperator::Less => left < right,
+            ComparisonOperator::LessEqual => left <= right,
+            ComparisonOperator::Greater => left > right,
+            ComparisonOperator::GreaterEqual => left >= right,
+        };
+    }
     let ordering = match (left, right) {
         (Slot::Integer(left), Slot::Integer(right)) => left.cmp(right),
         (Slot::Boolean(left), Slot::Boolean(right)) => left.cmp(right),

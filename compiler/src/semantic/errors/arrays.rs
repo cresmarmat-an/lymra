@@ -193,9 +193,11 @@ pub(in crate::semantic) fn compound_in_text(found: &Type, span: Span, source: &s
                 .map_or("field", |field| field.name.as_str())
         ),
         Type::Choice(_) => "print it from a `match`, with a `case` for each variant".to_owned(),
-        Type::Integer(_) | Type::Boolean | Type::String | Type::Array(_) => format!(
-            "put its elements in one by one, as in `{{{source}[0]}}`, or print them in a loop"
-        ),
+        Type::Integer(_) | Type::Float(_) | Type::Boolean | Type::String | Type::Array(_) => {
+            format!(
+                "put its elements in one by one, as in `{{{source}[0]}}`, or print them in a loop"
+            )
+        }
     };
     Diagnostic::new(
         ErrorCode::L0402,
@@ -213,9 +215,12 @@ pub(in crate::semantic) fn not_iterable(found: &Type, span: Span, source: &str) 
             span,
             format!("range(0, {source})"),
         ),
-        Type::Boolean | Type::String | Type::Array(_) | Type::Custom(_) | Type::Choice(_) => {
-            Help::text("loop over `range(start, end)` or over an array")
-        }
+        Type::Float(_)
+        | Type::Boolean
+        | Type::String
+        | Type::Array(_)
+        | Type::Custom(_)
+        | Type::Choice(_) => Help::text("loop over `range(start, end)` or over an array"),
     };
     Diagnostic::new(
         ErrorCode::L0405,

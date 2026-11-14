@@ -1,0 +1,9 @@
+exit status 70
+--- standard output
+NaN
+--- standard error
+error: conversion out of range
+  --> tests/run/float_not_a_number.lym:12:13
+   |
+12 |     print("{integer64(nothing)}")
+   |             ^^^^^^^^^^^^^^^^^^

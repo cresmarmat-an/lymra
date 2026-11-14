@@ -434,7 +434,11 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 array: checked,
             }),
             Type::String => Err(self.report(Feature::ForEach.diagnostic(iterable.span))),
-            Type::Integer(_) | Type::Boolean | Type::Custom(_) | Type::Choice(_) => {
+            Type::Integer(_)
+            | Type::Float(_)
+            | Type::Boolean
+            | Type::Custom(_)
+            | Type::Choice(_) => {
                 let source = self.text(iterable.span);
                 Err(self.report(errors::not_iterable(&checked.ty, iterable.span, source)))
             }

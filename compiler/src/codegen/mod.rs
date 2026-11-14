@@ -23,6 +23,8 @@ use crate::source::{SourceFile, Span};
 use types::CTypes;
 
 const RUNTIME: &str = include_str!("runtime.h");
+/// The part of the runtime that writes floats as text, added to a program that does.
+const RUNTIME_FLOATS: &str = include_str!("runtime_floats.h");
 const INDENT: &str = "    ";
 
 /// The largest frame the runtime is told about. A frame anywhere near it cannot run, so a larger one changes nothing.
@@ -38,6 +40,7 @@ pub fn generate(program: &Program<'_>, source: &SourceFile) -> String {
         types: CTypes::default(),
         frame: 0,
         largest_frame: 0,
+        writes_floats: false,
     };
     let functions: Vec<String> = program
         .functions
@@ -60,8 +63,15 @@ pub fn generate(program: &Program<'_>, source: &SourceFile) -> String {
         "#define LYMRA_LARGEST_FRAME ((size_t){})\n\n",
         generator.largest_frame.min(FRAME_CEILING)
     ));
+    if generator.writes_floats || generator.types.uses_floats {
+        output.push_str("#define LYMRA_USES_FLOATS 1\n\n");
+    }
     output.push_str(RUNTIME);
-    section(&mut output, "Arrays", generator.types.definitions());
+    if generator.writes_floats {
+        output.push('\n');
+        output.push_str(RUNTIME_FLOATS);
+    }
+    section(&mut output, "Types", generator.types.definitions());
     section(
         &mut output,
         "Places that can stop the program",
@@ -137,6 +147,8 @@ struct Generator<'program, 'src> {
      * since the C compiler may copy one through a hidden temporary.
      */
     largest_frame: u64,
+    /// Whether the program writes a float as text, which needs the runtime's float printer.
+    writes_floats: bool,
 }
 
 impl Generator<'_, '_> {

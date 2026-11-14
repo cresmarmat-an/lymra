@@ -17,6 +17,7 @@ mod errors;
 mod evaluation_order;
 mod expressions;
 mod features;
+mod floats;
 mod items;
 mod places;
 mod scope;
