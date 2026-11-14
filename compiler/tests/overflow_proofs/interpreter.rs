@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 
 use lymra::ir::{
     Argument, ArithmeticOperator, Block, Call, ComparisonOperator, Expr, ExprKind, FunctionId,
-    IntegerType, LocalId, LogicOperator, PlaceIndex, PrintPart, Program, Statement, Value,
+    IntegerType, LocalId, LogicOperator, PlaceStep, PrintPart, Program, Statement, Type, Value,
 };
 use lymra::source::Span;
 
@@ -65,7 +65,8 @@ enum Slot {
     Integer(i128),
     Boolean(bool),
     Text(String),
-    Array(Vec<Slot>),
+    /// The elements of an array, or the fields of a value of a declared type, in order.
+    Compound(Vec<Slot>),
     /// A local before its declaration runs, or the result of a function that returns nothing.
     Unset,
 }
@@ -177,7 +178,7 @@ impl Interpreter<'_, '_> {
                 slots[*local] = self.expr(value, slots)?;
             }
             Statement::Assign { target, value } => {
-                let positions = self.positions(&target.indexes, slots)?;
+                let positions = self.positions(&target.steps, slots)?;
                 let value = self.expr(value, slots)?;
                 *element_mut(&mut slots[target.local], &positions)? = value;
             }
@@ -296,12 +297,17 @@ impl Interpreter<'_, '_> {
         Ok(Flow::Next)
     }
 
-    /// Computes and checks the indexes of an assignment's target, in order.
-    fn positions(&mut self, indexes: &[PlaceIndex], slots: &mut [Slot]) -> Eval<Vec<usize>> {
-        let mut positions = Vec::with_capacity(indexes.len());
-        for index in indexes {
-            let value = self.integer(&index.value, slots)?;
-            positions.push(check_index(value, index.length, index.checked, index.span)?);
+    /// Computes and checks the steps of an assignment's target, in order.
+    fn positions(&mut self, steps: &[PlaceStep], slots: &mut [Slot]) -> Eval<Vec<usize>> {
+        let mut positions = Vec::with_capacity(steps.len());
+        for step in steps {
+            positions.push(match step {
+                PlaceStep::Index(index) => {
+                    let value = self.integer(&index.value, slots)?;
+                    check_index(value, index.length, index.checked, index.span)?
+                }
+                PlaceStep::Field(field) => *field,
+            });
         }
         Ok(positions)
     }
@@ -309,16 +315,21 @@ impl Interpreter<'_, '_> {
     /// Where a `for` loop over `array` reads its elements: storage when `array` names some, as the C does.
     fn elements(&mut self, array: &Expr, slots: &mut [Slot]) -> Eval<Elements> {
         match stored_path(array) {
-            Some((local, indexes)) => {
-                let mut positions = Vec::with_capacity(indexes.len());
-                for (index, length, checked, span) in indexes {
-                    let value = self.integer(index, slots)?;
-                    positions.push(check_index(value, length, checked, span)?);
+            Some((local, steps)) => {
+                let mut positions = Vec::with_capacity(steps.len());
+                for step in steps {
+                    positions.push(match step {
+                        Stored::Index(index, length, checked, span) => {
+                            let value = self.integer(index, slots)?;
+                            check_index(value, length, checked, span)?
+                        }
+                        Stored::Field(field) => field,
+                    });
                 }
                 Ok(Elements::Stored { local, positions })
             }
             None => match self.expr(array, slots)? {
-                Slot::Array(values) => Ok(Elements::Computed(values)),
+                Slot::Compound(values) => Ok(Elements::Computed(values)),
                 other => Err(Stop::Unsound(format!("a loop over {other:?}"))),
             },
         }
@@ -379,7 +390,7 @@ impl Interpreter<'_, '_> {
                 let index = self.integer(index, slots)?;
                 let position = check_index(index, *length, *checked, expr.span)?;
                 return match array {
-                    Slot::Array(mut values) if position < values.len() => {
+                    Slot::Compound(mut values) if position < values.len() => {
                         Ok(values.swap_remove(position))
                     }
                     other => Err(Stop::Unsound(format!("element {position} of {other:?}"))),
@@ -403,11 +414,39 @@ impl Interpreter<'_, '_> {
                     .as_array()
                     .and_then(|array| usize::try_from(array.length).ok())
                     .ok_or_else(|| Stop::Unsound("a fill without an array type".to_owned()))?;
-                return Ok(Slot::Array(vec![value; length]));
+                return Ok(Slot::Compound(vec![value; length]));
+            }
+            ExprKind::Construct(fields) => {
+                let count = match &expr.ty {
+                    Type::Custom(custom) => custom.fields.len(),
+                    other => return Err(Stop::Unsound(format!("a construction of {other}"))),
+                };
+                let mut values = vec![Slot::Unset; count];
+                for field in fields {
+                    let value = self.expr(&field.value, slots)?;
+                    match values.get_mut(field.field) {
+                        Some(slot) => *slot = value,
+                        None => {
+                            return Err(Stop::Unsound(format!(
+                                "field {} past the end",
+                                field.field
+                            )));
+                        }
+                    }
+                }
+                return Ok(Slot::Compound(values));
+            }
+            ExprKind::Field { object, field } => {
+                return match self.expr(object, slots)? {
+                    Slot::Compound(mut values) if *field < values.len() => {
+                        Ok(values.swap_remove(*field))
+                    }
+                    other => Err(Stop::Unsound(format!("field {field} of {other:?}"))),
+                };
             }
             ExprKind::Length(operand) => {
                 return match self.expr(operand, slots)? {
-                    Slot::Array(values) => Ok(Slot::Integer(values.len() as i128)),
+                    Slot::Compound(values) => Ok(Slot::Integer(values.len() as i128)),
                     Slot::Text(text) => Ok(Slot::Integer(text.len() as i128)),
                     other => Err(Stop::Unsound(format!("the length of {other:?}"))),
                 };
@@ -511,10 +550,14 @@ fn check_index(index: i128, length: u64, checked: bool, span: Span) -> Eval<usiz
     )))
 }
 
-type StoredIndex<'expr> = (&'expr Expr, u64, bool, Span);
+/// One step from a local to the array a `for` loop reads: an index with its length, check and place, or a field.
+enum Stored<'expr> {
+    Index(&'expr Expr, u64, bool, Span),
+    Field(usize),
+}
 
-/// The local an array expression names, and the indexes that lead from it to the array, if it names one.
-fn stored_path(expr: &Expr) -> Option<(LocalId, Vec<StoredIndex<'_>>)> {
+/// The local an array expression names, and the steps that lead from it to the array, if it names one.
+fn stored_path(expr: &Expr) -> Option<(LocalId, Vec<Stored<'_>>)> {
     match &expr.kind {
         ExprKind::Local(local) => Some((*local, Vec::new())),
         ExprKind::Index {
@@ -523,9 +566,14 @@ fn stored_path(expr: &Expr) -> Option<(LocalId, Vec<StoredIndex<'_>>)> {
             length,
             checked,
         } => {
-            let (local, mut indexes) = stored_path(array)?;
-            indexes.push((index, *length, *checked, expr.span));
-            Some((local, indexes))
+            let (local, mut steps) = stored_path(array)?;
+            steps.push(Stored::Index(index, *length, *checked, expr.span));
+            Some((local, steps))
+        }
+        ExprKind::Field { object, field } => {
+            let (local, mut steps) = stored_path(object)?;
+            steps.push(Stored::Field(*field));
+            Some((local, steps))
         }
         _ => None,
     }
@@ -537,7 +585,7 @@ fn element_mut<'slot>(slot: &'slot mut Slot, positions: &[usize]) -> Eval<&'slot
         return Ok(slot);
     };
     match slot {
-        Slot::Array(values) => match values.get_mut(first) {
+        Slot::Compound(values) => match values.get_mut(first) {
             Some(element) => element_mut(element, rest),
             None => Err(Stop::Unsound(format!("element {first} past the end"))),
         },
@@ -558,7 +606,7 @@ fn describe(slot: &Slot) -> String {
         Slot::Integer(value) => value.to_string(),
         Slot::Boolean(value) => value.to_string(),
         Slot::Text(text) => text.clone(),
-        Slot::Array(_) | Slot::Unset => "?".to_owned(),
+        Slot::Compound(_) | Slot::Unset => "?".to_owned(),
     }
 }
 

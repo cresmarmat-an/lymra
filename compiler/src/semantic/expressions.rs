@@ -10,6 +10,7 @@
 use super::errors::{self, described};
 use super::features::Feature;
 use super::items::is_sized_integer_name;
+use super::places::place_parts;
 use super::scope::{Local, LocalKind};
 use super::values::{self, FoldError, LiteralError};
 use super::{BuiltIn, CheckResult, Checker, DISCARD, Global};
@@ -125,7 +126,12 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     Err(self.report(errors::no_value(function, expr.span)))
                 }
             },
-            ast::ExprKind::Field { object, .. } => Err(self.reject_field(object, expr.span)),
+            ast::ExprKind::Field { object, field } => {
+                if self.names_module(object) {
+                    return Err(self.report(Feature::Modules.diagnostic(expr.span)));
+                }
+                self.check_field(object, *field, expr.span)
+            }
             ast::ExprKind::Index { object, index } => self.check_index(object, index, expr.span),
         }
     }
@@ -133,8 +139,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
     /**
      * Checks `value` against the type of the place it goes to, if there is
      * one. When that type failed to resolve, which was reported already, the
-     * value is only checked for mistakes of its own: an `array(value)` there
-     * has no length to take, and saying so would report the same mistake twice.
+     * value is only checked for mistakes of its own.
      */
     pub(super) fn check_against(
         &mut self,
@@ -145,39 +150,25 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             None => self.check_expr(value, None),
             Some(Ok(ty)) => self.check_expr(value, Some(ty)),
             Some(Err(ErrorReported)) => {
-                self.check_untyped(value);
+                self.check_for_errors(value);
                 Err(ErrorReported)
             }
         }
     }
 
-    /// Checks a value whose type failed to resolve for its own mistakes. See `check_against`.
-    pub(super) fn check_untyped(&mut self, value: &ast::Expr<'src>) {
-        match &value.kind {
-            ast::ExprKind::Call(call)
-                if matches!(call.callee.kind, ast::ExprKind::Name("array")) =>
-            {
-                for argument in &call.arguments {
-                    match &argument.kind {
-                        ArgumentKind::Positional(inner)
-                        | ArgumentKind::Mutable(inner)
-                        | ArgumentKind::Named { value: inner, .. } => self.check_untyped(inner),
-                    }
-                }
-            }
-            _ => self.check_for_errors(value),
-        }
-    }
-
     /**
      * Checks an expression for its own errors and drops the result. Used
-     * where the statement around it is rejected for another reason, so the
-     * expression's own mistakes are still reported and its bindings count
-     * as read.
+     * where the statement around it is rejected for another reason, or where
+     * the type of the place it goes failed to resolve, so the expression's
+     * own mistakes are still reported and its bindings count as read. What
+     * the place would need is unknown, so a mistake that depends on it, such
+     * as an `array(value)` with no length to take, is not reported twice.
      */
     pub(super) fn check_for_errors(&mut self, expr: &ast::Expr<'src>) {
+        let outer = std::mem::replace(&mut self.destination_unknown, true);
         // Errors inside are reported by the check itself; there is no value to use.
         let _ = self.check_expr_with_hint(expr, None);
+        self.destination_unknown = outer;
     }
 
     fn integer_literal(
@@ -195,9 +186,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 return Err(self.report(errors::literal_too_large(span)));
             }
         };
-        let ty = hint
-            .and_then(Type::as_integer)
-            .unwrap_or(IntegerType::DEFAULT);
+        let ty = self.literal_type(hint, value);
         if !ty.contains(value) {
             let text = self.text(expr.span);
             let shown = if text == value.to_string() {
@@ -208,6 +197,27 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             return Err(self.report(errors::out_of_range(&shown, ty, expr.span)));
         }
         Ok(literal(Value::Integer { value, ty }, expr.span))
+    }
+
+    /**
+     * The type of an integer literal: the one `hint` asks for, else the
+     * default. Where the place the value goes is unknown, a literal too large
+     * for the default may still suit it, so it takes an `unsigned64` if that
+     * holds it.
+     */
+    fn literal_type(&self, hint: Option<&Type>, value: i128) -> IntegerType {
+        if let Some(ty) = hint.and_then(Type::as_integer) {
+            return ty;
+        }
+        let widest = IntegerType::Unsigned64;
+        if self.destination_unknown
+            && !IntegerType::DEFAULT.contains(value)
+            && widest.contains(value)
+        {
+            widest
+        } else {
+            IntegerType::DEFAULT
+        }
     }
 
     /// Text without interpolation is a value. Text with interpolation can only be printed for now.
@@ -260,6 +270,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 })
             }
             Some(Global::Function(_)) => Err(self.report(errors::function_as_value(name, span))),
+            Some(Global::Type(_)) => Err(self.report(errors::type_as_value(name, span))),
             None => match BuiltIn::of(name) {
                 Some(BuiltIn::Function) => Err(self.report(errors::function_as_value(name, span))),
                 Some(BuiltIn::Type) => Err(self.report(errors::type_as_value(name, span))),
@@ -335,7 +346,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 "`-` works on numbers, but this is a `boolean`".to_owned(),
                 "to flip a `boolean`, use `not`".to_owned(),
             ),
-            Type::String | Type::Array(_) => (
+            Type::String | Type::Array(_) | Type::Custom(_) => (
                 format!(
                     "`-` works on numbers, but this is {}",
                     described(&operand.ty)
@@ -407,6 +418,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     }
                     Type::Array(_) => {
                         "arithmetic works on single numbers; work on the elements one by one"
+                    }
+                    Type::Custom(_) => {
+                        "arithmetic works on single numbers; work on the fields one by one"
                     }
                     Type::Boolean | Type::Integer(_) => {
                         "arithmetic needs integer types such as `integer64`"
@@ -512,6 +526,17 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     "compare the elements one by one in a loop",
                 )));
             }
+            Type::Custom(custom) => {
+                return Err(self.report(errors::operator_type(
+                    format!(
+                        "`{symbol}` compares single values, and these are `{}` values",
+                        custom.name
+                    ),
+                    span,
+                    "comparing values with fields".to_owned(),
+                    "compare the fields one by one",
+                )));
+            }
             Type::Integer(_) | Type::Boolean | Type::String => {}
         }
         if let (Some(left_value), Some(right_value)) =
@@ -579,19 +604,17 @@ impl<'src, 'ast> Checker<'src, 'ast> {
     }
 
     /// Reports `object.field`: a field of a value, or a member of a module.
-    pub(super) fn reject_field(&mut self, object: &ast::Expr<'src>, span: Span) -> ErrorReported {
-        if let ast::ExprKind::Name(name) = &object.kind {
-            let is_value = self
-                .scope
-                .as_ref()
-                .is_some_and(|scope| scope.lookup(name).is_some())
-                || matches!(self.globals.get(name), Some(Global::Constant(_)));
-            if !is_value {
-                return self.report(Feature::Modules.diagnostic(span));
-            }
-        }
-        self.mark_reads(object);
-        self.report(Feature::Fields.diagnostic(span))
+    /// Whether `object` in `object.member` names a module rather than a value: a name that is neither a binding nor a constant.
+    fn names_module(&self, object: &ast::Expr<'src>) -> bool {
+        let ast::ExprKind::Name(name) = &object.kind else {
+            return false;
+        };
+        let is_value = self
+            .scope
+            .as_ref()
+            .is_some_and(|scope| scope.lookup(name).is_some())
+            || matches!(self.globals.get(name), Some(Global::Constant(_)));
+        !is_value
     }
 
     /// Checks a call. `hint` is the type the place the result goes to asks for, which `array(value)` needs.
@@ -629,6 +652,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }
         match self.globals.get(name).copied() {
             Some(Global::Function(id)) => self.check_function_call(id, name, call, span),
+            Some(Global::Type(id)) => self.check_construction(id, call, span),
             Some(Global::Constant(_)) => {
                 Err(self.report(errors::not_a_function(name, callee.span)))
             }
@@ -926,16 +950,22 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }
     }
 
-    /// Reports a field or element passed or assigned where only a binding can be.
+    /**
+     * Reports something other than a binding passed with `variable`. For a
+     * field or element, the binding it is part of was meant to change, so
+     * that binding is not also reported as never changing.
+     */
     pub(super) fn report_unchangeable_place(&mut self, place: &ast::Expr<'src>) -> ErrorReported {
-        match &place.kind {
-            ast::ExprKind::Field { object, .. } => self.reject_field(object, place.span),
-            ast::ExprKind::Index { .. } => {
-                self.mark_reads(place);
-                self.report(errors::element_reference(place.span))
-            }
-            _ => self.report(errors::reference_needs_variable(place.span)),
+        let part = match &place.kind {
+            ast::ExprKind::Field { .. } => "a field",
+            ast::ExprKind::Index { .. } => "an element",
+            _ => return self.report(errors::reference_needs_variable(place.span)),
+        };
+        self.mark_reads(place);
+        if let ast::ExprKind::Name(name) = &place_parts(place).0.kind {
+            self.mark_name_changed(name);
         }
+        self.report(errors::part_reference(part, place.span))
     }
 
     /// Reports a change to a name that is not a local: a top-level constant, a function, or nothing.
@@ -957,6 +987,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             Some(Global::Function(_)) => {
                 self.report(errors::not_assignable(name, "function", span))
             }
+            Some(Global::Type(_)) => self.report(errors::not_assignable(name, "type", span)),
             None => match BuiltIn::of(name) {
                 Some(built_in) => self.report(errors::not_assignable(name, built_in.noun(), span)),
                 None => self.report_unknown_name(name, span),
@@ -1016,7 +1047,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     Ok(value) => match ir::TextForm::of(&value.ty) {
                         Some(form) => checked.push(ir::PrintPart::Value { value, form }),
                         None => {
-                            self.report(errors::array_in_text(value.span));
+                            self.report(errors::compound_in_text(&value.ty, value.span));
                             failed = true;
                         }
                     },

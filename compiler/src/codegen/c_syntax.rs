@@ -33,6 +33,16 @@ pub(super) fn local_name(name: &str) -> String {
     format!("local_{name}")
 }
 
+/// The struct of a declared type. Lymra type names are PascalCase, so the prefix keeps them apart from every other C name.
+pub(super) fn custom_type_name(name: &str) -> String {
+    format!("type_{name}")
+}
+
+/// The member of a declared type's struct that holds the field at `position`.
+pub(super) fn field_name(position: usize) -> String {
+    format!("field_{position}")
+}
+
 /**
  * A C string literal holding exactly the bytes of `text`. Bytes outside
  * printable ASCII are written as three-digit octal escapes, which cannot run

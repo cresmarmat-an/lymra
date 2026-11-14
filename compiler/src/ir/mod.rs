@@ -9,7 +9,7 @@
 
 mod types;
 
-pub use types::{ArrayType, IntegerType, Type, Value};
+pub use types::{ArrayType, CustomType, FieldType, IntegerType, Layout, Type, Value};
 
 use crate::ast::OptimizeMode;
 use crate::source::Span;
@@ -117,12 +117,20 @@ pub enum Statement {
     },
 }
 
-/// Where an assignment stores its value: a local, or an element inside it.
+/// Where an assignment stores its value: a local, or a part of it.
 #[derive(Clone, Debug)]
 pub struct Place {
     pub local: LocalId,
-    /// The indexes from the local inward: `grid[row][column]` has two.
-    pub indexes: Vec<PlaceIndex>,
+    /// The steps from the local inward: `grid[row].cells[column]` has three.
+    pub steps: Vec<PlaceStep>,
+}
+
+/// One step into a value: an element of an array, or a field of a declared type.
+#[derive(Clone, Debug)]
+pub enum PlaceStep {
+    Index(PlaceIndex),
+    /// The position of the field in its type.
+    Field(usize),
 }
 
 /// One `[index]` of a place.
@@ -163,14 +171,14 @@ pub enum TextForm {
 }
 
 impl TextForm {
-    /// How values of `ty` are written, or `None` for an array, which text cannot hold.
+    /// How values of `ty` are written, or `None` for a value that holds others, which text cannot hold.
     pub fn of(ty: &Type) -> Option<TextForm> {
         match ty {
             Type::String => Some(Self::Text),
             Type::Boolean => Some(Self::Boolean),
             Type::Integer(integer) if integer.is_signed() => Some(Self::Signed),
             Type::Integer(_) => Some(Self::Unsigned),
-            Type::Array(_) => None,
+            Type::Array(_) | Type::Custom(_) => None,
         }
     }
 }
@@ -241,6 +249,21 @@ pub enum ExprKind {
     Fill(Box<Expr>),
     /// `length(value)` of a text, or of an array that has to be computed because computing it has effects.
     Length(Box<Expr>),
+    /// `Frog(name = "Kero", age = 3)`: a value of a declared type, its fields in the order they are written.
+    Construct(Vec<FieldValue>),
+    /// `value.field`, by the field's position in its type.
+    Field {
+        object: Box<Expr>,
+        field: usize,
+    },
+}
+
+/// The value given for one field in a construction.
+#[derive(Clone, Debug)]
+pub struct FieldValue {
+    /// The position of the field in its type.
+    pub field: usize,
+    pub value: Expr,
 }
 
 impl Expr {
@@ -253,7 +276,11 @@ impl Expr {
             | ExprKind::Not(operand)
             | ExprKind::Convert { operand, .. }
             | ExprKind::Fill(operand)
-            | ExprKind::Length(operand) => operand.mentions(local),
+            | ExprKind::Length(operand)
+            | ExprKind::Field {
+                object: operand, ..
+            } => operand.mentions(local),
+            ExprKind::Construct(fields) => fields.iter().any(|field| field.value.mentions(local)),
             ExprKind::Arithmetic { left, right, .. }
             | ExprKind::Compare { left, right, .. }
             | ExprKind::Logic { left, right, .. }
@@ -279,9 +306,13 @@ impl Expr {
         match &self.kind {
             ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) => false,
             ExprKind::Call(_) => true,
-            ExprKind::Not(operand) | ExprKind::Fill(operand) | ExprKind::Length(operand) => {
-                operand.has_effects()
-            }
+            ExprKind::Not(operand)
+            | ExprKind::Fill(operand)
+            | ExprKind::Length(operand)
+            | ExprKind::Field {
+                object: operand, ..
+            } => operand.has_effects(),
+            ExprKind::Construct(fields) => fields.iter().any(|field| field.value.has_effects()),
             ExprKind::Negate { operand, checked } | ExprKind::Convert { operand, checked } => {
                 *checked || operand.has_effects()
             }

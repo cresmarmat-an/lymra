@@ -25,7 +25,8 @@ use super::loops::{self, Change, Changes, Followed};
 use super::proof::UnprovenIndex;
 use crate::ir::{
     Argument, ArithmeticOperator, Block, Branch, Call, ComparisonOperator, Expr, ExprKind,
-    Function, IntegerType, Local, LocalId, LogicOperator, PrintPart, Statement, Type, Value,
+    Function, IntegerType, Local, LocalId, LogicOperator, PlaceStep, PrintPart, Statement, Type,
+    Value,
 };
 
 /**
@@ -198,7 +199,7 @@ impl Analyzer<'_> {
             },
             ExprKind::Length(operand) => match &operand.ty {
                 Type::Array(array) => Interval::exact(i128::from(array.length)),
-                Type::Integer(_) | Type::Boolean | Type::String => Interval {
+                Type::Integer(_) | Type::Boolean | Type::String | Type::Custom(_) => Interval {
                     low: 0,
                     high: whole_type.high,
                 },
@@ -209,7 +210,9 @@ impl Analyzer<'_> {
             | ExprKind::Logic { .. }
             | ExprKind::Call(_)
             | ExprKind::Index { .. }
-            | ExprKind::Fill(_) => whole_type,
+            | ExprKind::Fill(_)
+            | ExprKind::Construct(_)
+            | ExprKind::Field { .. } => whole_type,
         };
         // A checked operation that does not stop the program gives a value of its type.
         Some(ideal.clamp(ty))
@@ -247,8 +250,16 @@ impl Analyzer<'_> {
             | ExprKind::Not(operand)
             | ExprKind::Convert { operand, .. }
             | ExprKind::Fill(operand)
-            | ExprKind::Length(operand) => {
+            | ExprKind::Length(operand)
+            | ExprKind::Field {
+                object: operand, ..
+            } => {
                 self.remove_checks(operand, bounds);
+            }
+            ExprKind::Construct(fields) => {
+                for field in fields {
+                    self.remove_checks(&mut field.value, bounds);
+                }
             }
             ExprKind::Arithmetic { left, right, .. }
             | ExprKind::Compare { left, right, .. }
@@ -362,20 +373,27 @@ impl Analyzer<'_> {
                 self.evaluate(value, bounds, changes, mode);
                 bounds.set(*local, range);
             }
-            Statement::Assign { target, value } if target.indexes.is_empty() => {
+            Statement::Assign { target, value } if target.steps.is_empty() => {
                 let range = self.range(value, bounds);
                 let step = loops::additive_terms(value, target.local)
                     .and_then(|terms| self.sum_range(&terms, bounds));
                 self.evaluate(value, bounds, changes, mode);
                 assign(target.local, range, step, bounds, changes);
             }
-            // An element of an array changes, which no bounds the analysis holds describe.
+            // A part of an array or of a declared type changes, which no bounds the analysis holds describe.
             Statement::Assign { target, value } => {
-                for index in &mut target.indexes {
-                    if mode == Mode::Remove {
-                        self.prove_index(&index.value, index.length, &mut index.checked, bounds);
+                for step in &mut target.steps {
+                    if let PlaceStep::Index(index) = step {
+                        if mode == Mode::Remove {
+                            self.prove_index(
+                                &index.value,
+                                index.length,
+                                &mut index.checked,
+                                bounds,
+                            );
+                        }
+                        self.evaluate(&mut index.value, bounds, changes, mode);
                     }
-                    self.evaluate(&mut index.value, bounds, changes, mode);
                 }
                 self.evaluate(value, bounds, changes, mode);
             }

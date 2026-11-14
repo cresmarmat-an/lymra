@@ -3,7 +3,7 @@
 use super::{described, operator_type};
 use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
 use crate::ir::Type;
-use crate::semantic::arrays::MAX_ARRAY_SIZE;
+use crate::semantic::arrays::MAX_VALUE_SIZE;
 use crate::source::Span;
 
 /// `array` without `[element type, length]`, or with something else between the brackets.
@@ -55,17 +55,25 @@ pub(in crate::semantic) fn sized_scalar(name: &str, length: Option<u64>, span: S
     )
 }
 
-pub(in crate::semantic) fn array_too_large(ty: &Type, size: Option<u64>, span: Span) -> Diagnostic {
+/// An array or declared type whose values would take more than one value on the call stack may.
+pub(in crate::semantic) fn too_large_for_stack(
+    ty: &Type,
+    size: Option<u64>,
+    span: Span,
+) -> Diagnostic {
     let size = size.map_or_else(
         || format!("more than {}", u64::MAX),
         |size| size.to_string(),
     );
     Diagnostic::new(
         ErrorCode::L0410,
-        format!("`{ty}` takes {size} bytes, more than an array can hold"),
+        format!(
+            "{} takes {size} bytes, more than a value on the call stack can",
+            described(ty)
+        ),
         Label::new(span, "too large for the call stack"),
         Help::text(format!(
-            "an array lives on the call stack and holds at most {MAX_ARRAY_SIZE} bytes (1 MiB); \
+            "a value on the call stack takes at most {MAX_VALUE_SIZE} bytes (1 MiB); \
              use fewer or smaller elements, or keep the data in a `list`, which phase 3 adds"
         )),
     )
@@ -102,6 +110,18 @@ pub(in crate::semantic) fn fill_without_type(span: Span) -> Diagnostic {
         Label::new(span, "its length comes from the type of the place it goes"),
         Help::text(
             "write the type where the array goes, as in `variable array[integer64, 10] values = array(0)`",
+        ),
+    )
+}
+
+/// `array(value)` where a value of a type other than an array goes.
+pub(in crate::semantic) fn fill_into(expected: &Type, span: Span) -> Diagnostic {
+    Diagnostic::new(
+        ErrorCode::L0402,
+        format!("expected {}, found an array", described(expected)),
+        Label::new(span, "`array(value)` builds an array"),
+        Help::text(
+            "use a value of the expected type here; `array(value)` only fills a place whose type is an array",
         ),
     )
 }
@@ -159,13 +179,19 @@ pub(in crate::semantic) fn no_length(found: &Type, span: Span) -> Diagnostic {
     )
 }
 
-/// An array interpolated into text, which holds numbers, `boolean` values and text.
-pub(in crate::semantic) fn array_in_text(span: Span) -> Diagnostic {
+/// An array or a value of a declared type interpolated into text, which holds numbers, `boolean` values and text.
+pub(in crate::semantic) fn compound_in_text(found: &Type, span: Span) -> Diagnostic {
+    let help = match found {
+        Type::Custom(_) => "put its fields in one by one, as in `{frog.name}`",
+        Type::Integer(_) | Type::Boolean | Type::String | Type::Array(_) => {
+            "put its elements in one by one, as in `{values[0]}`, or print them in a loop"
+        }
+    };
     Diagnostic::new(
         ErrorCode::L0402,
-        "an array cannot be put into text",
-        Label::new(span, "this is an array"),
-        Help::text("put its elements in one by one, as in `{values[0]}`, or print them in a loop"),
+        format!("{} cannot be put into text", described(found)),
+        Label::new(span, "text holds numbers, `boolean` values and text"),
+        Help::text(help),
     )
 }
 
@@ -177,7 +203,7 @@ pub(in crate::semantic) fn not_iterable(found: &Type, span: Span, source: &str) 
             span,
             format!("range(0, {source})"),
         ),
-        Type::Boolean | Type::String | Type::Array(_) => {
+        Type::Boolean | Type::String | Type::Array(_) | Type::Custom(_) => {
             Help::text("loop over `range(start, end)` or over an array")
         }
     };
@@ -192,34 +218,14 @@ pub(in crate::semantic) fn not_iterable(found: &Type, span: Span, source: &str) 
     )
 }
 
-/// An element passed with `variable`, where only a whole binding can be.
-pub(in crate::semantic) fn element_reference(span: Span) -> Diagnostic {
+/// An element or a field passed with `variable`, where only a whole binding can be. `part` names which.
+pub(in crate::semantic) fn part_reference(part: &str, span: Span) -> Diagnostic {
     Diagnostic::new(
         ErrorCode::L0504,
-        "an element cannot be passed with `variable`",
+        format!("{part} cannot be passed with `variable`"),
         Label::new(span, "only a whole binding can be"),
-        Help::text(
-            "pass the whole array with `variable`, or copy the element into a `variable`, pass that, and store it back",
-        ),
-    )
-}
-
-/// An assignment to an element of a value that is not stored in a binding, as in `make()[0] = 1`.
-pub(in crate::semantic) fn element_of_value(span: Span) -> Diagnostic {
-    Diagnostic::new(
-        ErrorCode::L0308,
-        "only a binding, or an element inside one, can be assigned",
-        Label::new(span, "not a binding"),
-        Help::text("store the value in a `variable` first, then assign to its elements"),
-    )
-}
-
-/// A top-level constant declared with an array type.
-pub(in crate::semantic) fn array_constant(ty: Span) -> Diagnostic {
-    Diagnostic::new(
-        ErrorCode::L0210,
-        "a top-level constant cannot hold an array",
-        Label::new(ty, "an array type"),
-        Help::text("declare the array inside the function that uses it"),
+        Help::text(format!(
+            "pass the whole binding with `variable`, or copy {part} into a `variable`, pass that, and store it back"
+        )),
     )
 }

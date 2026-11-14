@@ -1,0 +1,36 @@
+type Frog
+    string name
+    unsigned8 age
+
+type Toad
+    string name
+    string name
+
+type Node
+    integer64 label
+    Node next
+
+type Pair
+    Frog left
+    integer64[2] right
+
+type Huge
+    array[integer64, 131072] first
+    array[integer64, 131072] second
+
+constant Frog prince = Frog(name = "Prince", age = 1)
+
+function main()
+    constant frog = Frog(name = "Kero", age = 3)
+    constant missing = Frog(name = "Kero")
+    constant twice = Frog(name = "Kero", age = 3, age = 4)
+    constant unnamed = Frog("Kero", 3)
+    constant misspelled = Frog(nam = "Kero", age = 3)
+    constant empty = Frog()
+    print("{frog.nam} {frog.age.value} {frog}")
+    if frog == frog
+        print("same")
+    frog.age = 4
+    constant integer64 count = 5
+    print("{count.size}")
+    print("{missing.age} {twice.age} {unnamed.age} {misspelled.age} {empty.age}")

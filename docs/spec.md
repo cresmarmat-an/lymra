@@ -157,7 +157,7 @@ constant copy_of_name = name        # immutable, type inferred
 
 - `variable` declares a mutable binding.
 - `constant` declares an immutable binding. Changing a constant, a parameter or a loop variable is error `L0208`.
-- A top-level `constant` is computed by the compiler, from literals, operators and other top-level constants. Anything only known at run time, such as a function call, is error `L0210`, and so is a constant that depends on itself. A top-level constant cannot hold an array either (`L0210`): arrays have no literal form yet (O6), so their elements could not be written one by one.
+- A top-level `constant` is computed by the compiler, from literals, operators and other top-level constants. Anything only known at run time, such as a function call, is error `L0210`, and so is a constant that depends on itself, directly or through other constants and types. A top-level constant cannot hold an array or a value of a declared type either (`L0210`): they have no literal form yet (O6), so their parts could not be written one by one.
 - Every declaration starts with one of these two keywords. A type and a name before `=` with no keyword is error `L0203`.
 - Only `constant` may be declared at the top level of a file. A top-level `variable` would be global mutable state, and is error `L0205`.
 - `name = expr` with no keyword always means assignment. Assigning to a name that hasn't been declared is error `L0201`, and the message suggests `variable` or `constant`.
@@ -209,7 +209,7 @@ Text compares by its UTF-8 bytes, one at a time, which is the order of the chara
 
 Any other use is error `L0405`. `and` and `or` only evaluate their right side when the left side does not decide the result already.
 
-The parts of an expression run from left to right: the operands of an operator, the arguments of a call and the values in a text, each finished before the next one starts and before the operation itself. When two parts call functions that print, their lines come out in that order, and when two checks could fail, the one further left stops the program. Every C compiler builds the same order. In an assignment, the indexes of the target are computed and checked first, from the binding inward, then the value, and the value is stored last.
+The parts of an expression run from left to right: the operands of an operator, the arguments of a call, the fields of a construction and the values in a text, each finished before the next one starts and before the operation itself. When two parts call functions that print, their lines come out in that order, and when two checks could fail, the one further left stops the program. Every C compiler builds the same order. In an assignment, the indexes of the target are computed and checked first, from the binding inward, then the value, and the value is stored last.
 
 Division truncates toward zero, and a remainder takes the sign of the dividend: `-7 / 2` is `-3` and `-7 % 2` is `-1`. This matches C.
 
@@ -287,10 +287,24 @@ Indexing starts at 0, and an index can have any integer type. Every index is bou
 type Frog
     string name
     unsigned8 age
+
+type Pond
+    array[Frog, 3] frogs
+    integer64 visits
+
+function main()
+    variable pond = Pond(visits = 0, frogs = array(Frog(name = "Kero", age = 3)))
+    pond.frogs[1].age = 4
+    pond.visits = pond.visits + 1
+    print("{pond.frogs[1].name} is {pond.frogs[1].age}")
 ```
 
-- Fields are stored inline. A `Frog` with a `string` field holds the string data in the same place, not a pointer to it elsewhere.
-- Construction: `constant frog = Frog(name = "Kero", age = 3)`. All fields have to be given.
+- A `type` declaration lists its fields, a type and a name on each line. Declarations can come in any order, and a field can hold an array or another declared type. Field names follow the rules for names (Section 2.6), and a name used twice is error `L0207`.
+- A construction gives every field once, by name, in any order: `Frog(name = "Kero", age = 3)`. A field left out, given twice or given without its name is error `L0414`. Lymra never fills in a field by itself, so no field can be read before something was put there. The values run in the order they are written (Section 4.1).
+- `frog.age` reads a field, and `frog.age = 4` changes one when the binding is a `variable`; fields and elements chain, as in `pond.frogs[1].age`. A field the type does not have is error `L0413`, and the message suggests the closest one.
+- A value of a declared type is a value like a number (Section 3.1). Assigning or passing it gives an independent copy, and a `variable` parameter changes the caller's. Like an array, it lives on the call stack and takes at most 1 MiB (`L0410`).
+- Fields are stored inline, in the order they are declared (Section 4.5). A type that holds itself, directly or through other types, is error `L0415`: a value of it would have no end. A field that refers to another value of the same type holds that value's index in an array instead.
+- Values of a declared type cannot be compared with `==` or put into text yet; compare or print their fields.
 
 ### 4.7 Choices (sum types)
 

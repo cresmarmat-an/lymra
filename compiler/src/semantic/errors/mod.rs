@@ -1,17 +1,24 @@
 //! The wording of every error the semantic checker reports.
 
 mod arrays;
+mod custom_types;
+mod cycles;
 
 pub(super) use arrays::{
-    array_constant, array_in_text, array_too_large, element_of_value, element_reference,
-    empty_array, fill_argument_count, fill_without_type, index_not_integer, index_out_of_range,
-    length_argument_count, malformed_array_type, negative_length, no_length, not_indexable,
-    not_iterable, sized_scalar,
+    compound_in_text, empty_array, fill_argument_count, fill_into, fill_without_type,
+    index_not_integer, index_out_of_range, length_argument_count, malformed_array_type,
+    negative_length, no_length, not_indexable, not_iterable, part_reference, sized_scalar,
+    too_large_for_stack,
 };
+pub(super) use custom_types::{
+    compound_constant, field_given_twice, missing_fields, no_fields, unknown_field, unnamed_field,
+};
+pub(super) use cycles::{Declared, Dependency, cycle};
 
 use super::BuiltIn;
 use super::evaluation_order::Conflict;
 use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
+use crate::english;
 use crate::ir::{IntegerType, Type};
 use crate::source::Span;
 
@@ -25,12 +32,12 @@ fn spelling_help(span: Span, suggestion: Option<&str>, fallback: &str) -> Help {
 
 /// The type with its article, as in "an `integer64`" or "a `boolean`".
 pub(super) fn described(ty: &Type) -> String {
-    let name = ty.to_string();
-    let article = match name.as_bytes().first() {
-        Some(b'a' | b'e' | b'i' | b'o' | b'u') => "an",
-        _ => "a",
-    };
-    format!("{article} `{name}`")
+    named(&ty.to_string())
+}
+
+/// A name in code with its article, as in "an `Apple`".
+pub(super) fn named(name: &str) -> String {
+    format!("{} `{name}`", english::article(name))
 }
 
 pub(super) fn unknown_name(name: &str, span: Span, suggestion: Option<&str>) -> Diagnostic {
@@ -172,14 +179,14 @@ pub(super) fn not_computable(span: Span) -> Diagnostic {
     )
 }
 
-pub(super) fn depends_on_itself(name: &str, span: Span, declaration: Span) -> Diagnostic {
+/// An assignment whose target does not start at a binding, as in `make()[0] = 1`.
+pub(super) fn unassignable_target(span: Span) -> Diagnostic {
     Diagnostic::new(
-        ErrorCode::L0210,
-        format!("the constant `{name}` depends on itself"),
-        Label::new(span, "used here while it is being computed"),
-        Help::text("compute it from values that do not lead back to it"),
+        ErrorCode::L0308,
+        "only a binding, or an element or field inside one, can be assigned",
+        Label::new(span, "not a binding"),
+        Help::text("store the value in a `variable` first, then change what it holds"),
     )
-    .with_secondary(Label::new(declaration, "declared here"))
 }
 
 pub(super) fn type_mismatch(expected: &Type, found: &Type, span: Span) -> Diagnostic {
@@ -236,7 +243,7 @@ pub(super) fn condition_not_boolean(found: &Type, span: Span, source: &str) -> D
         Type::Integer(_) => {
             Help::replace("compare it with a number", span, format!("{source} != 0"))
         }
-        Type::Boolean | Type::String | Type::Array(_) => {
+        Type::Boolean | Type::String | Type::Array(_) | Type::Custom(_) => {
             Help::text("write a comparison or another `boolean` here")
         }
     };
@@ -255,6 +262,7 @@ pub(super) fn condition_not_boolean(found: &Type, span: Span, source: &str) -> D
 pub(super) fn print_needs_text(found: &Type, span: Span, source: &str) -> Diagnostic {
     let help = match found {
         Type::Array(_) => Help::text("print its elements one by one, in a loop"),
+        Type::Custom(_) => Help::text("print its fields, as in `print(\"{frog.name}\")`"),
         Type::Integer(_) | Type::Boolean | Type::String => Help::replace(
             "turn the value into text with interpolation",
             span,
@@ -316,7 +324,8 @@ pub(super) fn unknown_type(name: &str, span: Span, suggestion: Option<&str>) -> 
         spelling_help(
             span,
             suggestion,
-            "the types are `integer8` to `integer64`, `unsigned8` to `unsigned64`, `boolean` and `string`",
+            "the types are `integer8` to `integer64`, `unsigned8` to `unsigned64`, `boolean`, \
+             `string`, arrays such as `array[integer64, 10]`, and the types declared with `type`",
         ),
     )
 }

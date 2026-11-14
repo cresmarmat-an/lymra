@@ -3,7 +3,7 @@
 use super::expressions::{Bounds, is_addressable};
 use super::{Generator, INDENT, Writer, c_syntax, local_access};
 use crate::ir::{
-    Block, Branch, Expr, Function, LocalId, Place, PrintPart, Statement, TextForm, Type,
+    Block, Branch, Expr, Function, LocalId, Place, PlaceStep, PrintPart, Statement, TextForm,
 };
 
 impl Generator<'_, '_> {
@@ -96,14 +96,25 @@ impl Generator<'_, '_> {
         value: &Expr,
         writer: &mut Writer,
     ) {
+        // A field has no effects; an index has its check and those of its value.
         let effects: Vec<bool> = target
-            .indexes
+            .steps
             .iter()
-            .map(|index| index.checked || index.value.has_effects())
+            .map(|step| match step {
+                PlaceStep::Index(index) => index.checked || index.value.has_effects(),
+                PlaceStep::Field(_) => false,
+            })
             .chain([value.has_effects()])
             .collect();
         let mut place = local_access(function, target.local);
-        for (position, index) in target.indexes.iter().enumerate() {
+        for (position, step) in target.steps.iter().enumerate() {
+            let index = match step {
+                PlaceStep::Index(index) => index,
+                PlaceStep::Field(field) => {
+                    place = format!("{place}.{}", c_syntax::field_name(*field));
+                    continue;
+                }
+            };
             let bounds = Bounds {
                 length: index.length,
                 checked: index.checked,
@@ -122,11 +133,11 @@ impl Generator<'_, '_> {
         }
         let code = self.expr(function, value, writer);
         /*
-         * A C compiler may build a returned array right where it is assigned.
+         * A C compiler may build a returned value right where it is assigned.
          * Where the call can still read that storage, as in `board =
          * step(board)`, it is built in a temporary first (spec section 5).
          */
-        let code = if matches!(value.ty, Type::Array(_)) && value.mentions(target.local) {
+        let code = if value.ty.is_compound() && value.mentions(target.local) {
             self.temporary(&value.ty, &code, writer)
         } else {
             code

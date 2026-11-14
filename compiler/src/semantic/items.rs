@@ -2,8 +2,8 @@
 
 use super::features::Feature;
 use super::{
-    BuiltIn, CheckResult, Checker, ConstantEntry, ConstantState, DISCARD, FunctionEntry, Global,
-    Parameter, errors,
+    BuiltIn, CheckResult, Checker, ConstantEntry, ConstantState, DISCARD, Definition,
+    FunctionEntry, Global, Parameter, TypeEntry, TypeState, errors,
 };
 use crate::ast::{self, Mutability, Name, Visibility};
 use crate::diagnostics::ErrorReported;
@@ -26,7 +26,12 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     self.report(Feature::Modules.diagnostic(path.span));
                 }
                 ast::ItemKind::Type(declaration) => {
-                    self.skip_unavailable_type(declaration.name, item.span, Feature::CustomTypes)
+                    let id = self.types.len();
+                    self.types.push(TypeEntry {
+                        declaration,
+                        state: TypeState::Pending,
+                    });
+                    self.declare_global(declaration.name, Global::Type(id));
                 }
                 ast::ItemKind::Choice(declaration) => {
                     self.skip_unavailable_type(declaration.name, item.span, Feature::Choices)
@@ -52,6 +57,13 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     });
                     self.declare_global(declaration.name, Global::Function(id));
                 }
+            }
+        }
+        // Every type is resolved, even one nothing uses, so its own mistakes are reported.
+        for id in 0..self.types.len() {
+            if let Some(name) = self.types.get(id).map(|entry| entry.declaration.name.span) {
+                // A failure is reported where it happens.
+                let _ = self.custom_type(id, name);
             }
         }
         for id in 0..self.functions.len() {
@@ -135,6 +147,10 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         if name.text == "array" {
             return self.resolve_array_type(arguments, ty.span);
         }
+        if let Some(Global::Type(id)) = self.globals.get(name.text).copied() {
+            self.no_arguments(name.text, arguments, ty.span)?;
+            return self.custom_type(id, name.span).map(Type::Custom);
+        }
         if let Some(feature) = Feature::future_type(name.text) {
             return Err(self.report(feature.diagnostic(ty.span)));
         }
@@ -147,13 +163,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             other => IntegerType::from_name(other).map(Type::Integer),
         };
         match resolved {
-            Some(resolved) if arguments.is_empty() => Ok(resolved),
-            Some(_) => {
-                let length = match arguments.as_slice() {
-                    [ast::TypeArgument::Size { value, .. }] => Some(*value),
-                    _ => None,
-                };
-                Err(self.report(errors::sized_scalar(name.text, length, ty.span)))
+            Some(resolved) => {
+                self.no_arguments(name.text, arguments, ty.span)?;
+                Ok(resolved)
             }
             _ if matches!(name.text, "integer" | "unsigned") => {
                 Err(self.report(errors::sizeless_integer(name.text, ty.span)))
@@ -162,10 +174,12 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 errors::unsupported_integer_size(self.text(ty.span), ty.span),
             )),
             _ => {
+                let declared = self.types.iter().map(|entry| entry.declaration.name.text);
                 let known = IntegerType::ALL
                     .iter()
                     .map(|integer| integer.name())
-                    .chain(["boolean", "string"]);
+                    .chain(["boolean", "string", "array"])
+                    .chain(declared);
                 let suggestion = similarity::closest_match(name.text, known);
                 Err(self.report(errors::unknown_type(
                     self.text(ty.span),
@@ -174,6 +188,23 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 )))
             }
         }
+    }
+
+    /// Checks that a type other than `array` has nothing in brackets after its name.
+    fn no_arguments(
+        &mut self,
+        name: &str,
+        arguments: &[ast::TypeArgument<'src>],
+        span: Span,
+    ) -> CheckResult<()> {
+        if arguments.is_empty() {
+            return Ok(());
+        }
+        let length = match arguments {
+            [ast::TypeArgument::Size { value, .. }] => Some(*value),
+            _ => None,
+        };
+        Err(self.report(errors::sized_scalar(name, length, span)))
     }
 
     pub(super) fn compute_constants(&mut self) {
@@ -198,14 +229,17 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             ConstantState::Failed => return Err(ErrorReported),
             ConstantState::InProgress => {
                 let span = reference.unwrap_or(binding.name.span);
-                let error = errors::depends_on_itself(binding.name.text, span, binding.name.span);
-                return Err(self.report(error));
+                let diagnostic = self.cycle(Definition::Constant(id), span);
+                return Err(self.report(diagnostic));
             }
             ConstantState::Pending => {}
         }
 
         self.set_constant_state(id, ConstantState::InProgress);
-        let result = self.compute_constant(binding);
+        let reference = reference.unwrap_or(binding.name.span);
+        let result = self.defining(Definition::Constant(id), reference, |checker| {
+            checker.compute_constant(binding)
+        });
         let state = match &result {
             Ok(value) => ConstantState::Done(value.clone()),
             Err(ErrorReported) => ConstantState::Failed,
@@ -222,14 +256,19 @@ impl<'src, 'ast> Checker<'src, 'ast> {
 
     fn compute_constant(&mut self, binding: &'ast ast::Binding<'src>) -> CheckResult<Value> {
         let declared = binding.ty.as_ref().map(|ty| self.resolve_type(ty));
-        if let (Some(Ok(Type::Array(_))), Some(written)) = (&declared, &binding.ty) {
-            return Err(self.report(errors::array_constant(written.span)));
+        if let (Some(Ok(ty)), Some(written)) = (&declared, &binding.ty) {
+            if ty.is_compound() {
+                return Err(self.report(errors::compound_constant(ty, written.span)));
+            }
         }
         // Constants are computed outside every function, so names resolve to top-level declarations only.
         let function_scope = self.scope.take();
         let value = self.check_against(&binding.value, declared.as_ref().map(Result::as_ref));
         self.scope = function_scope;
         let value = value?;
+        if value.ty.is_compound() {
+            return Err(self.report(errors::compound_constant(&value.ty, value.span)));
+        }
         match self.known_value(&value) {
             Some(known) => Ok(known),
             None => Err(self.report(errors::not_computable(runtime_part(&value)))),
@@ -252,7 +291,10 @@ fn runtime_part(expr: &ir::Expr) -> Span {
         | ir::ExprKind::Not(operand)
         | ir::ExprKind::Convert { operand, .. }
         | ir::ExprKind::Length(operand)
-        | ir::ExprKind::Index { array: operand, .. } => runtime_part(operand),
+        | ir::ExprKind::Index { array: operand, .. }
+        | ir::ExprKind::Field {
+            object: operand, ..
+        } => runtime_part(operand),
         ir::ExprKind::Arithmetic { left, right, .. }
         | ir::ExprKind::Compare { left, right, .. }
         | ir::ExprKind::Logic { left, right, .. }
@@ -270,6 +312,7 @@ fn runtime_part(expr: &ir::Expr) -> Span {
         | ir::ExprKind::Constant(_)
         | ir::ExprKind::Local(_)
         | ir::ExprKind::Call(_)
-        | ir::ExprKind::Fill(_) => expr.span,
+        | ir::ExprKind::Fill(_)
+        | ir::ExprKind::Construct(_) => expr.span,
     }
 }

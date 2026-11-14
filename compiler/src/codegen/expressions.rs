@@ -13,7 +13,8 @@
 use super::types::fill_function;
 use super::{Generator, INDENT, Writer, c_syntax, local_access};
 use crate::ir::{
-    Argument, ArithmeticOperator, Call, Expr, ExprKind, Function, IntegerType, LogicOperator, Type,
+    Argument, ArithmeticOperator, Call, Expr, ExprKind, FieldValue, Function, IntegerType,
+    LogicOperator, Type,
 };
 use crate::source::Span;
 
@@ -28,11 +29,13 @@ pub(super) struct Bounds {
     pub span: Span,
 }
 
-/// Whether `expr` stands for storage C can take the address of: a local, or an element inside one.
+/// Whether `expr` stands for storage C can take the address of: a local, or an element or a field inside one.
 pub(super) fn is_addressable(expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::Local(_) => true,
-        ExprKind::Index { array, .. } => is_addressable(array),
+        ExprKind::Index { array: object, .. } | ExprKind::Field { object, .. } => {
+            is_addressable(object)
+        }
         _ => false,
     }
 }
@@ -139,10 +142,15 @@ impl Generator<'_, '_> {
                 match &operand.ty {
                     // The array is computed for its effects; its length is part of its type.
                     Type::Array(array) => format!("((void)({code}), INT64_C({}))", array.length),
-                    Type::Integer(_) | Type::Boolean | Type::String => {
+                    Type::Integer(_) | Type::Boolean | Type::String | Type::Custom(_) => {
                         format!("((int64_t)({code}).length)")
                     }
                 }
+            }
+            ExprKind::Construct(fields) => self.construct(function, fields, &expr.ty, writer),
+            ExprKind::Field { object, field } => {
+                let object = self.expr(function, object, writer);
+                format!("({object}).{}", c_syntax::field_name(*field))
             }
         }
     }
@@ -201,21 +209,54 @@ impl Generator<'_, '_> {
         }
     }
 
-    /// The address of an array argument: where it is stored, or else a temporary that holds it.
-    fn array_address(
+    /**
+     * A value of a declared type, as a C compound literal. Its fields are
+     * computed in the order they are written, and each one with effects but
+     * the last goes into a temporary first, since C computes the values of
+     * an initializer in any order.
+     */
+    fn construct(
         &mut self,
         function: &Function<'_>,
-        array: &Expr,
+        fields: &[FieldValue],
+        ty: &Type,
+        writer: &mut Writer,
+    ) -> String {
+        let last_effect = fields.iter().rposition(|field| field.value.has_effects());
+        let members: Vec<String> = fields
+            .iter()
+            .enumerate()
+            .map(|(position, field)| {
+                let code = self.expr(function, &field.value, writer);
+                let code = if last_effect.is_some_and(|last| position < last)
+                    && field.value.has_effects()
+                {
+                    self.temporary(&field.value.ty, &code, writer)
+                } else {
+                    code
+                };
+                format!(".{} = {code}", c_syntax::field_name(field.field))
+            })
+            .collect();
+        let name = self.types.name(ty);
+        format!("(({name}){{ {} }})", members.join(", "))
+    }
+
+    /// The address of an argument that holds other values: where it is stored, or else a temporary that holds it.
+    fn compound_address(
+        &mut self,
+        function: &Function<'_>,
+        value: &Expr,
         hoist: bool,
         writer: &mut Writer,
     ) -> String {
-        let code = self.expr(function, array, writer);
-        if !is_addressable(array) {
-            return format!("&{}", self.temporary(&array.ty, &code, writer));
+        let code = self.expr(function, value, writer);
+        if !is_addressable(value) {
+            return format!("&{}", self.temporary(&value.ty, &code, writer));
         }
         if hoist {
-            // The address is worked out now, with its checks, but the array is not copied.
-            self.address(&array.ty, &code, writer)
+            // The address is worked out now, with its checks, but the value is not copied.
+            self.address(&value.ty, &code, writer)
         } else {
             format!("&({code})")
         }
@@ -253,7 +294,7 @@ impl Generator<'_, '_> {
 
     /// Computes `code`, of type `ty`, into a new constant and returns the constant's name.
     pub(super) fn temporary(&mut self, ty: &Type, code: &str, writer: &mut Writer) -> String {
-        self.frame = self.frame.saturating_add(super::array_bytes(ty));
+        self.frame = self.frame.saturating_add(super::compound_bytes(ty));
         let name = self.helper("value");
         let ty = self.types.name(ty);
         writer.line(&format!("const {ty} {name} = {code};"));
@@ -327,8 +368,8 @@ impl Generator<'_, '_> {
                 Argument::Value(value) => {
                     let hoist =
                         last_effect.is_some_and(|last| position < last) && value.has_effects();
-                    if matches!(value.ty, Type::Array(_)) {
-                        return self.array_address(function, value, hoist, writer);
+                    if value.ty.is_compound() {
+                        return self.compound_address(function, value, hoist, writer);
                     }
                     let code = self.expr(function, value, writer);
                     if hoist {

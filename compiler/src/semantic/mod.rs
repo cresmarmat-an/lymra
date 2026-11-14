@@ -10,11 +10,14 @@
  */
 
 mod arrays;
+mod custom_types;
+mod cycles;
 mod errors;
 mod evaluation_order;
 mod expressions;
 mod features;
 mod items;
+mod places;
 mod scope;
 mod statements;
 mod values;
@@ -24,10 +27,11 @@ mod wrapping;
 mod tests;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::ast::{self, Name, OptimizeMode};
 use crate::diagnostics::{Diagnostic, ErrorReported, Help};
-use crate::ir::{self, ConstantId, FunctionId, IntegerType, Program, Type, Value};
+use crate::ir::{self, ConstantId, CustomType, FunctionId, IntegerType, Program, Type, Value};
 use crate::similarity;
 use crate::source::{SourceFile, Span};
 use scope::{FunctionScope, LocalKind};
@@ -114,11 +118,22 @@ impl<'src> ast::visit::Visitor<'src> for NameCollector<'src> {
     }
 }
 
+/// Index into `Checker::types`.
+type TypeId = usize;
+
+/// A declaration the checker works out when something first needs it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Definition {
+    Type(TypeId),
+    Constant(ConstantId),
+}
+
 /// A name declared at the top level of the file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Global {
     Function(FunctionId),
     Constant(ConstantId),
+    Type(TypeId),
 }
 
 /// A parameter with its type resolved.
@@ -146,6 +161,20 @@ enum ConstantState {
     Failed,
 }
 
+/// How far a `type` declaration is resolved. Resolving one in progress means it contains itself.
+#[derive(Debug)]
+enum TypeState {
+    Pending,
+    InProgress,
+    Done(Arc<CustomType>),
+    Failed,
+}
+
+struct TypeEntry<'src, 'ast> {
+    declaration: &'ast ast::TypeDeclaration<'src>,
+    state: TypeState,
+}
+
 struct ConstantEntry<'src, 'ast> {
     binding: &'ast ast::Binding<'src>,
     public: bool,
@@ -159,6 +188,15 @@ struct Checker<'src, 'ast> {
     globals: HashMap<&'src str, Global>,
     functions: Vec<FunctionEntry<'src, 'ast>>,
     constants: Vec<ConstantEntry<'src, 'ast>>,
+    types: Vec<TypeEntry<'src, 'ast>>,
+    /// The declarations being worked out, innermost last, each with where the one before it names it.
+    resolving: Vec<(Definition, Span)>,
+    /**
+     * Set while an expression is checked only for its own mistakes. Where
+     * its value goes is unknown then, so a mistake that depends on that,
+     * such as an `array(value)` with no length to take, is not reported.
+     */
+    destination_unknown: bool,
     /// Names of `type` and `choice` declarations, which are not available yet and already reported.
     unavailable_types: HashSet<&'src str>,
     optimize: Option<OptimizeMode>,
@@ -175,6 +213,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             globals: HashMap::new(),
             functions: Vec::new(),
             constants: Vec::new(),
+            types: Vec::new(),
+            resolving: Vec::new(),
+            destination_unknown: false,
             unavailable_types: HashSet::new(),
             optimize: None,
             prove_bounds: false,
@@ -221,6 +262,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 .get(id)
                 .map(|entry| entry.declaration.name.span),
             Global::Constant(id) => self.constants.get(id).map(|entry| entry.binding.name.span),
+            Global::Type(id) => self.types.get(id).map(|entry| entry.declaration.name.span),
         }
     }
 
@@ -324,6 +366,16 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         if let Some(Global::Constant(id)) = self.globals.get(name).copied() {
             if let Some(entry) = self.constants.get_mut(id) {
                 entry.used = true;
+            }
+        }
+    }
+
+    /// Records that a statement meant to change the local `name`, if it is a `variable`.
+    fn mark_name_changed(&mut self, name: &str) {
+        let local = self.scope.as_ref().and_then(|scope| scope.lookup(name));
+        if let Some(local) = local.and_then(|id| self.scope.as_mut()?.local_mut(id)) {
+            if local.kind.is_mutable() {
+                local.written = true;
             }
         }
     }

@@ -1,0 +1,12 @@
+exit status 0
+--- standard output
+origin 5,0; step 2,2
+moved origin 6,1; fresh 4
+Kero at 2,3 with 60 and 50
+copy 1, original 50, 3 slots
+path sum 164
+y
+x
+ordered 1,2
+frogs total 7
+--- standard error

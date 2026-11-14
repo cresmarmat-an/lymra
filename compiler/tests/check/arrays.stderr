@@ -1,10 +1,10 @@
-error[L0210]: a top-level constant cannot hold an array
+error[L0210]: a top-level constant cannot hold an `array[integer64, 2]`
  --> tests/check/arrays.lym:3:10
   |
 3 | constant array[integer64, 2] table = array(0)
-  |          ^^^^^^^^^^^^^^^^^^^ an array type
+  |          ^^^^^^^^^^^^^^^^^^^ a top-level constant holds a number, a `boolean` or text
   |
-help: declare the array inside the function that uses it
+help: declare it inside the function that uses it
 
 error[L0409]: `integer64` takes nothing in brackets
  --> tests/check/arrays.lym:5:16
@@ -40,13 +40,13 @@ error[L0409]: an array holds at least one element, but `negative` is -2
   |
 help: give the number of elements the array holds, 1 or more
 
-error[L0410]: `array[integer64, 1000000]` takes 8000000 bytes, more than an array can hold
+error[L0410]: an `array[integer64, 1000000]` takes 8000000 bytes, more than a value on the call stack can
  --> tests/check/arrays.lym:9:14
   |
 9 |     variable array[integer64, 1000000] huge = array(0)
   |              ^^^^^^^^^^^^^^^^^^^^^^^^^ too large for the call stack
   |
-help: an array lives on the call stack and holds at most 1048576 bytes (1 MiB); use fewer or smaller elements, or keep the data in a `list`, which phase 3 adds
+help: a value on the call stack takes at most 1048576 bytes (1 MiB); use fewer or smaller elements, or keep the data in a `list`, which phase 3 adds
 
 error[L0411]: index 3 is out of range for an array of length 3
   --> tests/check/arrays.lym:11:12
@@ -88,11 +88,11 @@ error[L0402]: an index is an integer, but this is a `boolean`
    |
 help: index with a whole number from 0 up to the length, without it
 
-error[L0402]: an array cannot be put into text
+error[L0402]: an `array[integer64, 3]` cannot be put into text
   --> tests/check/arrays.lym:17:13
    |
 17 |     print("{values}")
-   |             ^^^^^^ this is an array
+   |             ^^^^^^ text holds numbers, `boolean` values and text
    |
 help: put its elements in one by one, as in `{values[0]}`, or print them in a loop
 
@@ -144,15 +144,15 @@ error[L0504]: an element cannot be passed with `variable`
 25 |     take(variable values[0])
    |                   ^^^^^^^^^ only a whole binding can be
    |
-help: pass the whole array with `variable`, or copy the element into a `variable`, pass that, and store it back
+help: pass the whole binding with `variable`, or copy an element into a `variable`, pass that, and store it back
 
-error[L0308]: only a binding, or an element inside one, can be assigned
+error[L0308]: only a binding, or an element or field inside one, can be assigned
   --> tests/check/arrays.lym:27:5
    |
 27 |     made()[0] = 1
    |     ^^^^^^ not a binding
    |
-help: store the value in a `variable` first, then assign to its elements
+help: store the value in a `variable` first, then change what it holds
 
 error[L0501]: `array` takes 1 argument, but 2 were given
   --> tests/check/arrays.lym:28:19

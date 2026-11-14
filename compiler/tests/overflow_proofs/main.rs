@@ -19,7 +19,8 @@ mod interpreter;
 use lymra::diagnostics::render_report;
 use lymra::frontend;
 use lymra::ir::{
-    Argument, Block, Call, Expr, ExprKind, FunctionId, IntegerType, PrintPart, Program, Statement,
+    Argument, Block, Call, Expr, ExprKind, FunctionId, IntegerType, PlaceStep, PrintPart, Program,
+    Statement,
 };
 use lymra::optimize;
 
@@ -54,9 +55,11 @@ impl CheckCount {
     fn statement(&mut self, statement: &Statement) {
         match statement {
             Statement::Assign { target, value } => {
-                for index in &target.indexes {
-                    self.operation(index.checked);
-                    self.expr(&index.value);
+                for step in &target.steps {
+                    if let PlaceStep::Index(index) = step {
+                        self.operation(index.checked);
+                        self.expr(&index.value);
+                    }
                 }
                 self.expr(value);
             }
@@ -129,8 +132,18 @@ impl CheckCount {
                 self.expr(array);
                 self.expr(index);
             }
-            ExprKind::Not(operand) | ExprKind::Fill(operand) | ExprKind::Length(operand) => {
+            ExprKind::Not(operand)
+            | ExprKind::Fill(operand)
+            | ExprKind::Length(operand)
+            | ExprKind::Field {
+                object: operand, ..
+            } => {
                 self.expr(operand);
+            }
+            ExprKind::Construct(fields) => {
+                for field in fields {
+                    self.expr(&field.value);
+                }
             }
             ExprKind::Compare { left, right, .. }
             | ExprKind::Logic { left, right, .. }

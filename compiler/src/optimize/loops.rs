@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::interval::Interval;
 use crate::ir::{
-    Argument, ArithmeticOperator, Block, Expr, ExprKind, LocalId, PrintPart, Statement,
+    Argument, ArithmeticOperator, Block, Expr, ExprKind, LocalId, PlaceStep, PrintPart, Statement,
 };
 
 /// How far an iteration has moved a variable from its value at the start of the iteration.
@@ -149,8 +149,10 @@ fn collect_statement(
         }
         Statement::Assign { target, value } => {
             changed.insert(target.local);
-            for index in &target.indexes {
-                collect_references(&index.value, changed);
+            for step in &target.steps {
+                if let PlaceStep::Index(index) = step {
+                    collect_references(&index.value, changed);
+                }
             }
             collect_references(value, changed);
         }
@@ -227,8 +229,16 @@ pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
         | ExprKind::Not(operand)
         | ExprKind::Convert { operand, .. }
         | ExprKind::Fill(operand)
-        | ExprKind::Length(operand) => {
+        | ExprKind::Length(operand)
+        | ExprKind::Field {
+            object: operand, ..
+        } => {
             collect_references(operand, changed);
+        }
+        ExprKind::Construct(fields) => {
+            for field in fields {
+                collect_references(&field.value, changed);
+            }
         }
         ExprKind::Arithmetic { left, right, .. }
         | ExprKind::Compare { left, right, .. }

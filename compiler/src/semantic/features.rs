@@ -22,9 +22,7 @@ const FUTURE_FUNCTIONS: [(&str, u8); 12] = [
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Feature {
     Floats,
-    CustomTypes,
     Choices,
-    Fields,
     NamedArguments,
     TextBuilding,
     Lists,
@@ -62,9 +60,7 @@ impl Feature {
     fn message(self) -> String {
         let subject = match self {
             Self::Floats => "`float32` and `float64` are",
-            Self::CustomTypes => "`type` declarations are",
             Self::Choices => "choices and `match` are",
-            Self::Fields => "fields are",
             Self::NamedArguments => "named arguments are",
             Self::TextBuilding => {
                 return "text with interpolation can only be given to `print` for now".to_owned();
@@ -86,11 +82,7 @@ impl Feature {
 
     fn phase(self) -> u8 {
         match self {
-            Self::Floats
-            | Self::CustomTypes
-            | Self::Choices
-            | Self::Fields
-            | Self::NamedArguments => 2,
+            Self::Floats | Self::Choices | Self::NamedArguments => 2,
             Self::TextBuilding
             | Self::Lists
             | Self::ForEach

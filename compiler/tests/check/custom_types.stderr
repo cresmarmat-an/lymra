@@ -1,0 +1,161 @@
+error[L0207]: `name` is already declared
+ --> tests/check/custom_types.lym:7:12
+  |
+6 |     string name
+  |            ---- first declared here
+7 |     string name
+  |            ^^^^ declared again here
+  |
+help: choose another name; in Lymra one name never hides another
+
+error[L0415]: `Node` contains itself
+  --> tests/check/custom_types.lym:11:5
+   |
+ 9 | type Node
+   |      ---- declared here
+...
+11 |     Node next
+   |     ^^^^ a `Node` holds a `Node` here, which would hold another, without end
+   |
+help: keep the `Node` values in an array and hold the index of one here instead
+   |
+11 |     integer64 next
+
+error[L0409]: `integer64` takes nothing in brackets
+  --> tests/check/custom_types.lym:15:5
+   |
+15 |     integer64[2] right
+   |     ^^^^^^^^^^^^ not an array type
+   |
+help: an array of them is written with `array`
+   |
+15 |     array[integer64, 2] right
+
+error[L0410]: a `Huge` takes 2097152 bytes, more than a value on the call stack can
+  --> tests/check/custom_types.lym:17:6
+   |
+17 | type Huge
+   |      ^^^^ too large for the call stack
+   |
+help: a value on the call stack takes at most 1048576 bytes (1 MiB); use fewer or smaller elements, or keep the data in a `list`, which phase 3 adds
+
+error[L0210]: a top-level constant cannot hold a `Frog`
+  --> tests/check/custom_types.lym:21:10
+   |
+21 | constant Frog prince = Frog(name = "Prince", age = 1)
+   |          ^^^^ a top-level constant holds a number, a `boolean` or text
+   |
+help: declare it inside the function that uses it
+
+error[L0414]: every field of a `Frog` has to be given; `age` is missing
+  --> tests/check/custom_types.lym:25:24
+   |
+25 |     constant missing = Frog(name = "Kero")
+   |                        ^^^^^^^^^^^^^^^^^^^ this leaves out a field
+   |
+help: give a value for each, as in `age = ...`; Lymra never fills in a field by itself
+
+error[L0414]: the field `age` is given twice
+  --> tests/check/custom_types.lym:26:51
+   |
+26 |     constant twice = Frog(name = "Kero", age = 3, age = 4)
+   |                                                   ^^^^^^^ given again here
+   |                                          ------- first given here
+   |
+help: give each field once
+
+error[L0414]: the fields of a `Frog` are given by name
+  --> tests/check/custom_types.lym:27:29
+   |
+27 |     constant unnamed = Frog("Kero", 3)
+   |                             ^^^^^^ a value without a field name
+   |
+help: name the field it is for
+   |
+27 |     constant unnamed = Frog(name = "Kero", 3)
+
+error[L0414]: the fields of a `Frog` are given by name
+  --> tests/check/custom_types.lym:27:37
+   |
+27 |     constant unnamed = Frog("Kero", 3)
+   |                                     ^ a value without a field name
+   |
+help: name the field it is for
+   |
+27 |     constant unnamed = Frog("Kero", age = 3)
+
+error[L0413]: `Frog` has no field `nam`
+  --> tests/check/custom_types.lym:28:32
+   |
+28 |     constant misspelled = Frog(nam = "Kero", age = 3)
+   |                                ^^^ not a field of this type
+   |
+help: did you mean `name`?
+   |
+28 |     constant misspelled = Frog(name = "Kero", age = 3)
+
+error[L0414]: every field of a `Frog` has to be given; `name` and `age` are missing
+  --> tests/check/custom_types.lym:29:22
+   |
+29 |     constant empty = Frog()
+   |                      ^^^^^^ this leaves out fields
+   |
+help: give a value for each, as in `name = ..., age = ...`; Lymra never fills in a field by itself
+
+error[L0413]: `Frog` has no field `nam`
+  --> tests/check/custom_types.lym:30:18
+   |
+30 |     print("{frog.nam} {frog.age.value} {frog}")
+   |                  ^^^ not a field of this type
+   |
+help: did you mean `name`?
+   |
+30 |     print("{frog.name} {frog.age.value} {frog}")
+
+error[L0413]: this is an `unsigned8`, which has no fields
+  --> tests/check/custom_types.lym:30:24
+   |
+30 |     print("{frog.nam} {frog.age.value} {frog}")
+   |                        ^^^^^^^^ has no fields
+   |
+help: only a value of a type declared with `type` has fields such as `value`
+
+error[L0402]: a `Frog` cannot be put into text
+  --> tests/check/custom_types.lym:30:41
+   |
+30 |     print("{frog.nam} {frog.age.value} {frog}")
+   |                                         ^^^^ text holds numbers, `boolean` values and text
+   |
+help: put its fields in one by one, as in `{frog.name}`
+
+error[L0405]: `==` compares single values, and these are `Frog` values
+  --> tests/check/custom_types.lym:31:8
+   |
+31 |     if frog == frog
+   |        ^^^^^^^^^^^^ comparing values with fields
+   |
+help: compare the fields one by one
+
+error[L0208]: `frog` is a constant, so it cannot change
+  --> tests/check/custom_types.lym:33:5
+   |
+24 |     constant frog = Frog(name = "Kero", age = 3)
+   |              ---- declared as a constant here
+...
+33 |     frog.age = 4
+   |     ^^^^ changed here
+   |
+help: declare it with `variable` if it has to change
+   |
+24 |     variable frog = Frog(name = "Kero", age = 3)
+
+error[L0413]: this is an `integer64`, which has no fields
+  --> tests/check/custom_types.lym:35:13
+   |
+35 |     print("{count.size}")
+   |             ^^^^^ has no fields
+   |
+help: only a value of a type declared with `type` has fields such as `size`
+
+found 17 errors in tests/check/custom_types.lym
+run `lymra explain L0207` to read why a rule exists and how to fix it

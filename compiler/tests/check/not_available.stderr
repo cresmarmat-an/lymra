@@ -6,14 +6,6 @@ error[L0309]: modules are not available yet
   |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-error[L0309]: `type` declarations are not available yet
- --> tests/check/not_available.lym:3:1
-  |
-3 | type Frog
-  | ^^^^^^^^^ the compiler adds this in roadmap phase 2
-  |
-help: write this part another way for now; the roadmap in the README lists what each phase adds
-
 error[L0309]: choices and `match` are not available yet
  --> tests/check/not_available.lym:6:1
   |
@@ -78,14 +70,6 @@ error[L0309]: text with interpolation can only be given to `print` for now
    |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-error[L0309]: fields are not available yet
-  --> tests/check/not_available.lym:19:13
-   |
-19 |     print("{frog.name} {numbers[0]} {geometry.area(2.0, 3.0)}")
-   |             ^^^^^^^^^ the compiler adds this in roadmap phase 2
-   |
-help: write this part another way for now; the roadmap in the README lists what each phase adds
-
 error[L0309]: modules are not available yet
   --> tests/check/not_available.lym:19:38
    |
@@ -126,5 +110,5 @@ error[L0309]: `float32` and `float64` are not available yet
    |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-found 16 errors in tests/check/not_available.lym
+found 14 errors in tests/check/not_available.lym
 run `lymra explain L0309` to read why a rule exists and how to fix it

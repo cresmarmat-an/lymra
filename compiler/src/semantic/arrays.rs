@@ -11,11 +11,12 @@ use super::errors;
 use super::expressions::CheckedCall;
 use super::{CheckResult, Checker, Global};
 use crate::ast::{self, TypeArgument};
+use crate::diagnostics::ErrorReported;
 use crate::ir::{self, IntegerType, Type, Value};
 use crate::source::Span;
 
-/// The most bytes one array may take. Arrays live on the call stack, which holds a few MiB in all.
-pub const MAX_ARRAY_SIZE: u64 = 1 << 20;
+/// The most bytes one value on the call stack may take, an array or a value of a declared type. The stack holds a few MiB in all.
+pub const MAX_VALUE_SIZE: u64 = 1 << 20;
 
 impl<'src> Checker<'src, '_> {
     /// Resolves `array[element, length]`. The length is a number or a top-level integer constant.
@@ -38,8 +39,8 @@ impl<'src> Checker<'src, '_> {
         }
         let ty = Type::array(element, length);
         match ty.size() {
-            Some(size) if size <= MAX_ARRAY_SIZE => Ok(ty),
-            size => Err(self.report(errors::array_too_large(&ty, size, span))),
+            Some(size) if size <= MAX_VALUE_SIZE => Ok(ty),
+            size => Err(self.report(errors::too_large_for_stack(&ty, size, span))),
         }
     }
 
@@ -94,7 +95,7 @@ impl<'src> Checker<'src, '_> {
     }
 
     /// Checks an index, which can have any integer type. A literal is an `integer64`.
-    fn check_index_value(&mut self, index: &ast::Expr<'src>) -> CheckResult<ir::Expr> {
+    pub(super) fn check_index_value(&mut self, index: &ast::Expr<'src>) -> CheckResult<ir::Expr> {
         let index = self.check_expr_with_hint(index, None)?;
         if index.ty.as_integer().is_none() {
             return Err(self.report(errors::index_not_integer(&index.ty, index.span)));
@@ -103,7 +104,11 @@ impl<'src> Checker<'src, '_> {
     }
 
     /// Whether `index` has to be checked when the program runs. One known now is checked now.
-    fn needs_bounds_check(&mut self, index: &ir::Expr, length: u64) -> CheckResult<bool> {
+    pub(super) fn needs_bounds_check(
+        &mut self,
+        index: &ir::Expr,
+        length: u64,
+    ) -> CheckResult<bool> {
         let Some(Value::Integer { value, .. }) = self.known_value(index) else {
             return Ok(true);
         };
@@ -129,7 +134,11 @@ impl<'src> Checker<'src, '_> {
         let value = self.single_value_argument(argument, "value")?;
         let Some(ty @ Type::Array(array)) = hint else {
             self.check_for_errors(value);
-            return Err(self.report(errors::fill_without_type(span)));
+            return Err(match hint {
+                Some(expected) => self.report(errors::fill_into(expected, span)),
+                None if self.destination_unknown => ErrorReported,
+                None => self.report(errors::fill_without_type(span)),
+            });
         };
         let value = self.check_expr(value, Some(&array.element))?;
         Ok(CheckedCall::Value(ir::Expr {
@@ -162,7 +171,7 @@ impl<'src> Checker<'src, '_> {
         let known = match &operand.ty {
             Type::Array(array) => (!operand.has_effects()).then_some(array.length),
             Type::String => None,
-            Type::Integer(_) | Type::Boolean => {
+            Type::Integer(_) | Type::Boolean | Type::Custom(_) => {
                 return Err(self.report(errors::no_length(&operand.ty, operand.span)));
             }
         };
@@ -179,62 +188,4 @@ impl<'src> Checker<'src, '_> {
             span,
         }))
     }
-
-    /**
-     * Checks the indexes of an assignment target such as `grid[row][column]`,
-     * from the binding inward, and returns them with the type of the element
-     * they reach. `indexes` holds each index with the target up to it.
-     */
-    pub(super) fn check_place_indexes(
-        &mut self,
-        mut ty: Type,
-        steps: &[PlaceStep<'_, 'src>],
-    ) -> CheckResult<(Vec<ir::PlaceIndex>, Type)> {
-        let mut checked = Vec::with_capacity(steps.len());
-        for step in steps {
-            let value = self.check_index_value(step.index)?;
-            let Type::Array(array) = ty else {
-                return Err(self.report(errors::not_indexable(&ty, step.object)));
-            };
-            checked.push(ir::PlaceIndex {
-                checked: self.needs_bounds_check(&value, array.length)?,
-                value,
-                length: array.length,
-                span: step.span,
-            });
-            ty = array.element.clone();
-        }
-        Ok((checked, ty))
-    }
-}
-
-/// One `[index]` of an assignment target.
-pub(super) struct PlaceStep<'expr, 'src> {
-    pub index: &'expr ast::Expr<'src>,
-    /// What the index selects from.
-    pub object: Span,
-    /// The target up to and including this index.
-    pub span: Span,
-}
-
-/**
- * Splits an assignment target such as `grid[row][column]` into the
- * expression it starts from and its indexes, from the outermost inward, each
- * with the target up to it.
- */
-pub(super) fn place_parts<'expr, 'src>(
-    target: &'expr ast::Expr<'src>,
-) -> (&'expr ast::Expr<'src>, Vec<PlaceStep<'expr, 'src>>) {
-    let mut steps = Vec::new();
-    let mut root = target;
-    while let ast::ExprKind::Index { object, index } = &root.kind {
-        steps.push(PlaceStep {
-            index,
-            object: object.span,
-            span: root.span,
-        });
-        root = object;
-    }
-    steps.reverse();
-    (root, steps)
 }

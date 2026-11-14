@@ -130,7 +130,7 @@ struct Generator<'program, 'src> {
     /// Counts helper variables, so each has a name of its own.
     helpers: usize,
     types: CTypes,
-    /// The bytes of arrays the function being generated keeps in its frame.
+    /// The bytes of arrays and declared types the function being generated keeps in its frame.
     frame: u64,
     /**
      * An upper bound on the frame of every function so far: twice its arrays,
@@ -143,7 +143,7 @@ impl Generator<'_, '_> {
     fn function(&mut self, function: &Function<'_>) -> String {
         self.frame = (0..function.locals.len())
             .filter(|&id| !is_pointer(function, id))
-            .map(|id| array_bytes(&function.locals[id].ty))
+            .map(|id| compound_bytes(&function.locals[id].ty))
             .fold(0, u64::saturating_add);
         let mut writer = Writer {
             text: format!("{} {{\n", self.signature(function)),
@@ -240,18 +240,23 @@ impl Generator<'_, '_> {
     }
 }
 
-/// The bytes a value of `ty` takes in a frame if it is an array. Other values are too small to count.
-fn array_bytes(ty: &Type) -> u64 {
-    match ty {
-        Type::Array(_) => ty.size().unwrap_or(u64::MAX),
-        Type::Integer(_) | Type::Boolean | Type::String => 0,
+/// The bytes a value of `ty` takes in a frame if it holds other values. Other values are too small to count.
+fn compound_bytes(ty: &Type) -> u64 {
+    if ty.is_compound() {
+        ty.size().unwrap_or(u64::MAX)
+    } else {
+        0
     }
 }
 
-/// Whether a local is reached through a pointer: a `variable` parameter, or an array parameter.
+/**
+ * Whether a local is reached through a pointer: a `variable` parameter, or a
+ * parameter that holds other values, which is passed by address so no call
+ * copies it.
+ */
 fn is_pointer(function: &Function<'_>, id: LocalId) -> bool {
     let local = &function.locals[id];
-    local.by_reference || (matches!(local.ty, Type::Array(_)) && function.parameters.contains(&id))
+    local.by_reference || (local.ty.is_compound() && function.parameters.contains(&id))
 }
 
 /// How a local is read or assigned: through its pointer when it has one.

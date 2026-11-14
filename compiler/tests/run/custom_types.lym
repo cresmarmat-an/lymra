@@ -1,0 +1,65 @@
+#[
+    Declared types hold named fields inline. A value is copied whole, a field
+    can be read and changed, and values of declared types sit in arrays and
+    in other types. A construction runs its values in the order written.
+]#
+
+type Point
+    integer32 x
+    integer32 y
+
+type Creature
+    string name
+    Point position
+    array[integer32, 3] health
+
+type Herd
+    array[Member, 2] members
+
+type Member
+    string label
+    unsigned8 count
+
+function moved(Point point, integer32 by) returns Point
+    return Point(y = point.y + by, x = point.x + by)
+
+function heal(variable Creature creature)
+    creature.health[0] = creature.health[0] + 10
+
+function noted(string name, integer32 value) returns integer32
+    print("{name}")
+    return value
+
+function main()
+    variable origin = Point(x = 0, y = 0)
+    constant step = moved(origin, 2)
+    origin.x = 5
+    print("origin {origin.x},{origin.y}; step {step.x},{step.y}")
+    origin = moved(origin, 1)
+    print("moved origin {origin.x},{origin.y}; fresh {moved(origin, 3).y}")
+
+    variable kero = Creature(name = "Kero", position = step, health = array(50))
+    heal(variable kero)
+    kero.position.y = kero.position.y + 1
+    print("{kero.name} at {kero.position.x},{kero.position.y} with {kero.health[0]} and {kero.health[1]}")
+    variable copy = kero
+    copy.health[1] = 1
+    print("copy {copy.health[1]}, original {kero.health[1]}, {length(kero.health)} slots")
+
+    variable array[Point, 3] path = array(Point(x = 1, y = 1))
+    path[1].x = 7
+    path[2] = moved(path[1], 1)
+    variable integer32 sum = 0
+    for point in path
+        sum = sum + point.x * 10 + point.y
+    print("path sum {sum}")
+
+    constant ordered = Point(y = noted("y", 2), x = noted("x", 1))
+    print("ordered {ordered.x},{ordered.y}")
+
+    variable herd = Herd(members = array(Member(label = "frogs", count = 2)))
+    herd.members[1].count = 5
+    variable unsigned8 total = 0
+    for member in herd.members
+        total = total + member.count
+    print("{herd.members[0].label} total {total}")

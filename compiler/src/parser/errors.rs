@@ -2,6 +2,7 @@
 
 use super::{MAX_NESTING, MAX_OPERATIONS};
 use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
+use crate::english;
 use crate::source::Span;
 
 const KNOWN_DIRECTIVES: &str = "`#!edition 0.1`, `#!optimize speed`, `#!optimize size`, `#!optimize debug` and `#!prove bounds`";
@@ -152,7 +153,10 @@ pub(super) fn statement_at_top_level(span: Span) -> Diagnostic {
 pub(super) fn declaration_in_function(keyword: &str, span: Span) -> Diagnostic {
     Diagnostic::new(
         ErrorCode::L0302,
-        format!("a `{keyword}` declaration cannot be inside a function"),
+        format!(
+            "{} `{keyword}` declaration cannot be inside a function",
+            english::article(keyword)
+        ),
         Label::new(span, "declared inside a function body"),
         Help::text("move it to the top level of the file"),
     )

@@ -112,6 +112,40 @@ pub enum Type {
     String,
     /// `array[element, length]`, shared so that copying a type stays cheap.
     Array(Arc<ArrayType>),
+    /// A type the program declares with `type`, shared like an array.
+    Custom(Arc<CustomType>),
+}
+
+/// A `type` declaration: named fields, stored one after another (spec 4.6).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct CustomType {
+    /// Unique among the program's types, so it identifies the type.
+    pub name: String,
+    /// At least one, in the order the declaration lists them.
+    pub fields: Vec<FieldType>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FieldType {
+    pub name: String,
+    pub ty: Type,
+}
+
+impl CustomType {
+    /// The position and the type of the field called `name`.
+    pub fn field(&self, name: &str) -> Option<(usize, &FieldType)> {
+        self.fields
+            .iter()
+            .enumerate()
+            .find(|(_, field)| field.name == name)
+    }
+}
+
+/// How many bytes a value takes, and the multiple of bytes its address is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Layout {
+    pub size: u64,
+    pub align: u64,
 }
 
 /// A fixed number of elements of one type, known while compiling (spec 4.4).
@@ -130,30 +164,65 @@ impl Type {
     pub const fn as_integer(&self) -> Option<IntegerType> {
         match self {
             Self::Integer(integer) => Some(*integer),
-            Self::Boolean | Self::String | Self::Array(_) => None,
+            Self::Boolean | Self::String | Self::Array(_) | Self::Custom(_) => None,
         }
     }
 
     pub fn as_array(&self) -> Option<&ArrayType> {
         match self {
             Self::Array(array) => Some(array),
-            Self::Integer(_) | Self::Boolean | Self::String => None,
+            Self::Integer(_) | Self::Boolean | Self::String | Self::Custom(_) => None,
         }
     }
 
+    /// Whether values of the type hold other values: arrays and declared types.
+    pub const fn is_compound(&self) -> bool {
+        matches!(self, Self::Array(_) | Self::Custom(_))
+    }
+
     /**
-     * The size of a value in bytes, or `None` when it does not fit a `u64`.
-     * Sizes are those of a 64-bit system on every system, so a program that
-     * one compiler accepts, every compiler accepts.
+     * How a value is laid out, as on a 64-bit system, where every field sits
+     * at a multiple of its alignment; `None` when the size does not fit a
+     * `u64`. Other systems take as much or less, so a program that one
+     * compiler accepts, every compiler accepts.
      */
-    pub fn size(&self) -> Option<u64> {
+    pub fn layout(&self) -> Option<Layout> {
         match self {
-            Self::Integer(integer) => Some(u64::from(integer.bits() / 8)),
-            Self::Boolean => Some(1),
+            Self::Integer(integer) => {
+                let size = u64::from(integer.bits() / 8);
+                Some(Layout { size, align: size })
+            }
+            Self::Boolean => Some(Layout { size: 1, align: 1 }),
             // A text value is a pointer and a length.
-            Self::String => Some(16),
-            Self::Array(array) => array.element.size()?.checked_mul(array.length),
+            Self::String => Some(Layout { size: 16, align: 8 }),
+            Self::Array(array) => {
+                let element = array.element.layout()?;
+                Some(Layout {
+                    size: element.size.checked_mul(array.length)?,
+                    align: element.align,
+                })
+            }
+            Self::Custom(custom) => {
+                let mut end = 0_u64;
+                let mut align = 1;
+                for field in &custom.fields {
+                    let layout = field.ty.layout()?;
+                    end = end
+                        .checked_next_multiple_of(layout.align)?
+                        .checked_add(layout.size)?;
+                    align = align.max(layout.align);
+                }
+                Some(Layout {
+                    size: end.checked_next_multiple_of(align)?,
+                    align,
+                })
+            }
         }
+    }
+
+    /// The size of a value in bytes. See `layout`.
+    pub fn size(&self) -> Option<u64> {
+        self.layout().map(|layout| layout.size)
     }
 }
 
@@ -164,6 +233,7 @@ impl fmt::Display for Type {
             Self::Boolean => formatter.write_str("boolean"),
             Self::String => formatter.write_str("string"),
             Self::Array(array) => write!(formatter, "array[{}, {}]", array.element, array.length),
+            Self::Custom(custom) => formatter.write_str(&custom.name),
         }
     }
 }
@@ -216,6 +286,25 @@ mod tests {
             i128::from(u64::MAX)
         );
         assert_eq!(IntegerType::Integer32.from_bits(1 << 31), -(1 << 31));
+    }
+
+    #[test]
+    fn declared_types_are_laid_out_like_c_structs() {
+        let field = |name: &str, ty: Type| FieldType {
+            name: name.to_owned(),
+            ty,
+        };
+        let small = Type::Custom(Arc::new(CustomType {
+            name: "Small".to_owned(),
+            fields: vec![
+                field("flag", Type::Boolean),
+                field("count", Type::Integer(IntegerType::Integer64)),
+                field("mark", Type::Integer(IntegerType::Unsigned8)),
+            ],
+        }));
+        assert_eq!(small.layout(), Some(Layout { size: 24, align: 8 }));
+        assert_eq!(small.to_string(), "Small");
+        assert_eq!(Type::array(small, 3).size(), Some(72));
     }
 
     #[test]

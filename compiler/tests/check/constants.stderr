@@ -10,11 +10,11 @@ error[L0210]: the constant `first` depends on itself
  --> tests/check/constants.lym:6:19
   |
 5 | constant first = second
-  |          ----- declared here
+  |                  ------ the value of `first` needs `second` here
 6 | constant second = first
-  |                   ^^^^^ used here while it is being computed
+  |                   ^^^^^ and the value of `second` needs `first` here, so neither can be worked out first
   |
-help: compute it from values that do not lead back to it
+help: compute `first` from values that do not lead back to it
 
 error[L0210]: the constant `self_reference` depends on itself
  --> tests/check/constants.lym:7:27
@@ -23,7 +23,7 @@ error[L0210]: the constant `self_reference` depends on itself
   |                           ^^^^^^^^^^^^^^ used here while it is being computed
   |          -------------- declared here
   |
-help: compute it from values that do not lead back to it
+help: compute `self_reference` from values that do not lead back to it
 
 found 3 errors in tests/check/constants.lym
 run `lymra explain L0210` to read why a rule exists and how to fix it

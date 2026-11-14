@@ -23,6 +23,7 @@ pub mod cli;
 pub mod codegen;
 pub mod diagnostics;
 pub mod driver;
+mod english;
 mod foreign_types;
 pub mod frontend;
 pub mod ir;

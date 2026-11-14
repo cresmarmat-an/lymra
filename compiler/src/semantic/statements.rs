@@ -6,9 +6,9 @@
  * run, and functions that can reach their end without returning a value.
  */
 
-use super::arrays::place_parts;
 use super::expressions::{CheckedCall, immutable_local_error};
 use super::features::Feature;
+use super::places::place_parts;
 use super::scope::{FunctionScope, LocalKind};
 use super::{CheckResult, Checker, DISCARD, errors, evaluation_order};
 use crate::ast::{self, ArgumentKind, Mutability};
@@ -131,7 +131,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 // The target's own binding is where the value goes, not a use; its indexes are uses.
                 let (_, steps) = place_parts(target);
                 let mut parts: Vec<&ast::Expr<'src>> =
-                    steps.iter().map(|step| step.index).collect();
+                    steps.iter().filter_map(|step| step.index()).collect();
                 parts.push(value);
                 self.report_order_conflict(&parts);
             }
@@ -196,7 +196,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         })
     }
 
-    /// Checks `target = value`, where the target is a binding or an element inside one.
+    /// Checks `target = value`, where the target is a binding or an element or field inside one.
     fn check_assignment(
         &mut self,
         target: &ast::Expr<'src>,
@@ -231,17 +231,17 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         let place = local
             .ty
             .clone()
-            .and_then(|ty| self.check_place_indexes(ty, &steps));
+            .and_then(|ty| self.check_place_steps(ty, &steps));
         match place {
-            Ok((indexes, ty)) => {
+            Ok((steps, ty)) => {
                 let value = self.check_expr(value, Some(&ty))?;
                 Ok(ir::Statement::Assign {
-                    target: ir::Place { local: id, indexes },
+                    target: ir::Place { local: id, steps },
                     value,
                 })
             }
             Err(ErrorReported) => {
-                self.check_untyped(value);
+                self.check_for_errors(value);
                 Err(ErrorReported)
             }
         }
@@ -249,11 +249,8 @@ impl<'src, 'ast> Checker<'src, 'ast> {
 
     /// Reports an assignment target that does not start at a binding, such as `make()[0]`.
     fn report_unassignable(&mut self, root: &ast::Expr<'src>) -> ErrorReported {
-        if let ast::ExprKind::Field { object, .. } = &root.kind {
-            return self.reject_field(object, root.span);
-        }
         self.mark_reads(root);
-        self.report(errors::element_of_value(root.span))
+        self.report(errors::unassignable_target(root.span))
     }
 
     /// An assignment to a name that is not a local: undeclared, a top-level constant, or a function.
@@ -433,7 +430,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 array: checked,
             }),
             Type::String => Err(self.report(Feature::ForEach.diagnostic(iterable.span))),
-            Type::Integer(_) | Type::Boolean => {
+            Type::Integer(_) | Type::Boolean | Type::Custom(_) => {
                 let source = self.text(iterable.span);
                 Err(self.report(errors::not_iterable(&checked.ty, iterable.span, source)))
             }
@@ -494,7 +491,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             (None, Ok(None)) => Ok(ir::Statement::Return(None)),
             (value, Err(ErrorReported)) => {
                 if let Some(value) = value {
-                    self.check_untyped(value);
+                    self.check_for_errors(value);
                 }
                 Err(ErrorReported)
             }
