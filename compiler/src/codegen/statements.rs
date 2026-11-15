@@ -75,7 +75,7 @@ impl Generator<'_, '_> {
 
     /// Moves the lists the statement has computed so far into the wrapper, which frees them when it closes.
     fn keep_in_wrapper(&mut self) {
-        let built: Vec<Release> = self.pending.drain(..).collect();
+        let built = std::mem::take(&mut self.pending);
         if let Some(scope) = self.scopes.last_mut() {
             scope.releases.extend(built);
         }
@@ -90,7 +90,7 @@ impl Generator<'_, '_> {
 
     fn statement(&mut self, function: &Function<'_>, statement: &Statement, writer: &mut Writer) {
         self.statement_kind(function, statement, writer);
-        let built: Vec<Release> = self.pending.drain(..).collect();
+        let built = std::mem::take(&mut self.pending);
         Self::release(writer, &built);
     }
 

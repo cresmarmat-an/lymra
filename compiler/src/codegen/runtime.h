@@ -959,18 +959,28 @@ LYMRA_UNUSED static bool lymra_commit_range(char *start, size_t bytes) {
 #elif !defined(LYMRA_POSIX)
 #error "Lymra's lists need a system that can reserve address space: a POSIX system or Windows"
 #else
+#if defined(PROT_MPROTECT)
+/*
+ * NetBSD lets `mprotect` grant no more than `mmap` allowed, so there the
+ * reservation allows the reading and writing that come later.
+ */
+#define LYMRA_RESERVED_PROTECTION (PROT_NONE | PROT_MPROTECT(PROT_READ | PROT_WRITE))
+#else
+#define LYMRA_RESERVED_PROTECTION PROT_NONE
+#endif
+
 LYMRA_UNUSED static char *lymra_reserve_range(size_t bytes) {
 #if defined(MAP_ANONYMOUS)
-    void *range = mmap(NULL, bytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    void *range = mmap(NULL, bytes, LYMRA_RESERVED_PROTECTION, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 #elif defined(MAP_ANON)
-    void *range = mmap(NULL, bytes, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    void *range = mmap(NULL, bytes, LYMRA_RESERVED_PROTECTION, MAP_PRIVATE | MAP_ANON, -1, 0);
 #else
     /* A system that shows neither name still maps zeroed pages from /dev/zero. */
     int zero = open("/dev/zero", O_RDWR);
     if (zero < 0) {
         return NULL;
     }
-    void *range = mmap(NULL, bytes, PROT_NONE, MAP_PRIVATE, zero, 0);
+    void *range = mmap(NULL, bytes, LYMRA_RESERVED_PROTECTION, MAP_PRIVATE, zero, 0);
     close(zero);
 #endif
     return range == MAP_FAILED ? NULL : (char *)range;
