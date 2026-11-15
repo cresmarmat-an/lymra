@@ -1,0 +1,18 @@
+#[
+    Counts the primes below a hundred million with a sieve kept in a list that
+    grows one element at a time.
+]#
+
+function main()
+    variable list[boolean] composite = list()
+    for _ in range(0, 100_000_000)
+        push(variable composite, false)
+    variable integer64 count = 0
+    for candidate in range(2, length(composite))
+        if not composite[candidate]
+            count = count + 1
+            variable integer64 multiple = candidate * candidate
+            while multiple < length(composite)
+                composite[multiple] = true
+                multiple = multiple + candidate
+    print("{count}")

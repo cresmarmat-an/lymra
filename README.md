@@ -22,7 +22,7 @@ Every name the language defines is a whole English word: `variable`, `constant`,
 
 ## Status
 
-**Edition 0.1, roadmap phase 2.** The compiler checks Lymra programs and compiles them to native executables through C. It covers integers of every size and floats, with checked conversions between them, wrapping arithmetic, booleans, text values and comparing them, arrays, custom types, choices and `match`, functions, `variable` parameters, `if`, `while`, `for` over `range` and over arrays, and `print`. Every integer operation and every index is checked, in every build mode, except where the compiler proves the check can never fail. A failed check, or recursion that runs out of stack, stops the program with an error message and exit status 70 instead of a crash. Anything later phases add is rejected with an error that names the phase.
+**Edition 0.1, roadmap phase 3 under way.** The compiler checks Lymra programs and compiles them to native executables through C. It covers integers of every size and floats, with checked conversions between them, wrapping arithmetic, booleans, text values and comparing them, arrays, lists that grow on data stacks with no garbage collector and no `free`, custom types, choices and `match`, functions, `variable` parameters, `if`, `while`, `for` over `range`, arrays and lists, and `print`. Every integer operation and every index is checked, in every build mode, except where the compiler proves the check can never fail. A failed check, or recursion that runs out of stack, stops the program with an error message and exit status 70 instead of a crash. A list cannot be read after it is freed, or grow over another: the compiler rejects the programs that could (`L0703`, `L0704`), and every test program also runs under AddressSanitizer in CI. Anything later phases add is rejected with an error that names the phase.
 
 ## Try it
 
@@ -83,10 +83,11 @@ error: integer overflow
 
 ## Speed
 
-`cargo run --release -p lymra-bench` times six programs written in Lymra, C and Rust, and writes [bench/results.md](bench/results.md). On the last run:
+`cargo run --release -p lymra-bench` times seven programs written in Lymra, C and Rust, and writes [bench/results.md](bench/results.md). On the last run:
 
-- Where the compiler proves that no check can fail, Lymra runs as fast as C: four of the six programs keep no check, and built with GCC they run within 1% of C's time. In one, GCC and Clang replace the loop with a formula: it takes 1 millisecond, against 0.7 seconds for Rust with overflow checks, which keeps every check.
-- The checks that stay guard values no bound the compiler finds can hold, such as a Collatz chain. Built with GCC, that program takes 1.12 times as long as C. Built with Clang, its time on the benchmark machine moves by up to 45% with changes outside its loop.
+- Where the compiler proves that no check can fail, Lymra runs as fast as C: four of the seven programs keep no check, and built with GCC they take 0.95 to 1.00 times C's time. In one, GCC and Clang replace the loop with a formula: it takes 1 millisecond, against 0.65 seconds for Rust with overflow checks, which keeps every check.
+- A list costs no more than a C array that doubles as it grows: a sieve over a hundred million booleans, pushed one at a time, took 0.98 times C's time built with GCC. The compiler proves every index of its loops inside the list, so no bounds check runs.
+- The checks that stay guard values no bound the compiler finds can hold, such as a Collatz chain. Built with GCC, that program takes 1.04 to 1.12 times as long as C across runs. Built with Clang, its time on the benchmark machine moves by up to 45% with changes outside its loop.
 
 [bench/README.md](bench/README.md) explains every number, including the one that flatters Lymra by accident.
 
@@ -108,7 +109,7 @@ error: integer overflow
 | `compiler/src/lint` | Rules that need the whole tree, such as naming |
 | `compiler/src/semantic` | Names, types and control flow, producing the checked program |
 | `compiler/src/ir` | The checked program: every name resolved, every expression typed |
-| `compiler/src/optimize` | Interval analysis that removes the overflow checks it proves can never fail |
+| `compiler/src/optimize` | Interval analysis that removes the overflow and index checks it proves can never fail |
 | `compiler/src/codegen` | The checked program to C, and the runtime every program includes |
 | `compiler/src/driver.rs` | Finds the C compiler, builds, and runs |
 | `compiler/src/diagnostics` | Error codes and how errors are rendered |
@@ -116,8 +117,9 @@ error: integer overflow
 | `compiler/tests/check` | Golden errors about names, types and control flow |
 | `compiler/tests/run` | Programs that are built with every C compiler on the machine, with and without the optimizer, and run, with their recorded output |
 | `compiler/tests/runtime_arithmetic.rs` | The runtime's overflow checks, in both the GCC and Clang form and the portable form, against exact arithmetic |
+| `compiler/tests/runtime_data_stacks.rs` | The runtime's data stacks on their own: growth, moves, freeing, and the errors a list can stop a program with |
 | `compiler/tests/windows_console.rs`, `pseudo_console.rs` | On Windows, output reaches a console, and a terminal's pseudo console, as the characters printed |
-| `compiler/tests/overflow_proofs` | Thousands of generated programs run in an exact interpreter, to catch a check removed by a wrong proof |
+| `compiler/tests/overflow_proofs` | Thousands of generated programs run in an exact interpreter, to catch a check removed by a wrong proof, and generated list programs built with every C compiler that have to print what the interpreter prints |
 | `bench` | The same programs in Lymra, C and Rust, and the runner that times them |
 | `docs/errors` | One page per error code, embedded in the compiler for `lymra explain` |
 | `docs/memory` | The memory model study: twelve programs written against the spec, and what they changed in it |
@@ -128,7 +130,13 @@ error: integer overflow
 cargo test
 ```
 
-The tests compare the compiler's exact output with recorded files: error reports, syntax trees, and the output of programs it builds. They compile every test program with each C compiler on the machine, GCC, Clang and MSVC, with all warnings as errors, so the generated C stays clean. `CC` adds a compiler with its arguments, as in `CC="gcc -m32"`, and `LYMRA_TEST_COMPILERS` names the exact list instead, as in `LYMRA_TEST_COMPILERS="cl, clang -m32"`. After a deliberate change, accept the new output:
+The tests compare the compiler's exact output with recorded files: error reports, syntax trees, and the output of programs it builds. They compile every test program with each C compiler on the machine, GCC, Clang and MSVC, with all warnings as errors, so the generated C stays clean. `CC` adds a compiler with its arguments, as in `CC="gcc -m32"`, and `LYMRA_TEST_COMPILERS` names the exact list instead, separated by commas, as in `LYMRA_TEST_COMPILERS="cl, clang -m32"`. Naming a compiler with the sanitizers runs every program under them, as CI does:
+
+```bash
+LYMRA_TEST_COMPILERS="gcc -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all" cargo test
+```
+
+After a deliberate change, accept the new output:
 
 ```bash
 LYMRA_BLESS=1 cargo test
@@ -143,7 +151,7 @@ Each phase ends with a compiler that passes its own test suite. Nothing advances
 | 0 | Lexer, parser, diagnostics format | Every snippet in the spec parses or fails with the documented error | Done |
 | 1 | Integers, booleans, functions, `if`, `while`, `for` over `range`, `print`. Emits C. | `examples/hello.lym` compiles and runs | Done |
 | 2 | Floats, arrays, custom types and choices, comparing text, `length`, wrapping arithmetic | Type errors carry fix suggestions | Done |
-| 3 | Data stacks, `list`, `stack`, `view`, text built from values, `with` blocks, root inference | Escaping-reference programs are rejected with `L0701` | |
+| 3 | Data stacks, `list`, `stack`, `view`, text built from values, `with` blocks, root inference | Escaping-reference programs are rejected with `L0701` | Data stacks and lists done |
 | 4 | Modules and `public` | Multi-file programs build | |
 | 5 | Pools, error handling, threads | Benchmark suite runs against C++ and Rust | |
 
