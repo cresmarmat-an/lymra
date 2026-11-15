@@ -54,7 +54,7 @@ pub(super) const WIDENING_DELAY: usize = 3;
  * point. Nested loops multiply them; past the limit, a loop forgets what it
  * changes, as every loop once did, so compiling stays fast.
  */
-const LOOP_BUDGET: usize = 4_000;
+const LOOP_BUDGET: usize = 1_000;
 
 /// Removes the checks in one function that its bounds prove unnecessary, and returns the indexes it could not prove.
 pub(super) fn optimize_function(

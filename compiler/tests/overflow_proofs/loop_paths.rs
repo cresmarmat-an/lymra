@@ -4,7 +4,8 @@
  * `break`. One of the values sits at an end of the type, and the input picks
  * the way, so a loop head or exit that missed a way would remove a check
  * that fails on some input. The loops also run inside another loop, which
- * probes them before the analysis settles on its own head.
+ * probes them before the analysis settles on its own head, and inside so many
+ * that the analysis runs out of walks and forgets what they change.
  */
 
 use lymra::ir::IntegerType;
@@ -29,9 +30,14 @@ enum Around {
     Nothing,
     While,
     For,
+    /// `while` loops that each run once, nested deeper than the analysis has walks for.
+    Deep,
 }
 
-const AROUND: [Around; 3] = [Around::Nothing, Around::While, Around::For];
+const AROUND: [Around; 4] = [Around::Nothing, Around::While, Around::For, Around::Deep];
+
+/// How many loops `Around::Deep` puts around the loop under test.
+const DEEP_NESTING: usize = 10;
 
 /**
  * Every way paired with every surrounding loop. The way named gives the
@@ -66,17 +72,26 @@ fn ways_program(ty: IntegerType, edge_way: Way, arithmetic: &str, around: Around
     let (low, high) = (ty.minimum() + quarter, ty.maximum() - quarter);
     let mut lines = vec![format!("variable {name} level = {}", value(Way::Entry))];
     let indent = match around {
-        Around::Nothing => "",
+        Around::Nothing => String::new(),
         Around::While => {
             lines.push("variable integer64 round = 0".to_owned());
             lines.push("while round < 2".to_owned());
             lines.push("    round = round + 1".to_owned());
-            "    "
+            "    ".to_owned()
         }
         Around::For => {
             lines.push("for round in range(0, 2)".to_owned());
             lines.push("    print(\"{round}\")".to_owned());
-            "    "
+            "    ".to_owned()
+        }
+        Around::Deep => {
+            for level in 0..DEEP_NESTING {
+                let indent = "    ".repeat(level);
+                lines.push(format!("{indent}variable integer64 depth_{level} = 0"));
+                lines.push(format!("{indent}while depth_{level} < 1"));
+                lines.push(format!("{indent}    depth_{level} = depth_{level} + 1"));
+            }
+            "    ".repeat(DEEP_NESTING)
         }
     };
     let inner = [

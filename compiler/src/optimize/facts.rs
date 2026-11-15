@@ -5,17 +5,23 @@
  * entry is `main`, so every call that can happen is a call the analysis sees.
  *
  * The two depend on each other, as an argument can be another function's
- * result, so they are worked out together. Each round analyzes every
- * function that something calls, with the facts of the round before, and
- * records what its calls pass and what it returns. The facts only grow, a
- * bound that keeps moving is widened to its type's end, and the rounds stop
- * when nothing grows: then every call and every return lies within the facts
- * the analysis assumed.
+ * result, so they are worked out together, from `main` outward. A function
+ * is analyzed again whenever what it relies on grows: the values its
+ * parameters receive, or the values a function it calls returns. The facts
+ * only grow, and a value that keeps growing is widened to its type's end, so
+ * the work ends. It ends when no function waits: each was last analyzed with
+ * the facts as they stand, so every call and every return lies within the
+ * facts the analysis assumed.
  */
+
+use std::collections::{BTreeSet, VecDeque};
 
 use super::analysis::{self, WIDENING_DELAY};
 use super::interval::Interval;
 use crate::ir::{FunctionId, IntegerType, Program, Type, Value};
+
+/// Growths a value can have once widening starts: its first bounds, then each end to the end of its type.
+const GROWTHS_AFTER_DELAY: usize = 3;
 
 /// The values a parameter or a result can have.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,9 +86,9 @@ pub(super) struct Facts {
 }
 
 impl Facts {
-    /// Facts before anything is seen: only `main` is reached, and nothing is known to be passed or returned.
-    fn nothing(program: &Program<'_>, main: FunctionId) -> Facts {
-        let mut facts = Facts {
+    /// Facts before anything is seen: nothing is reached, passed or returned.
+    fn empty(program: &Program<'_>) -> Facts {
+        Facts {
             called: vec![false; program.functions.len()],
             parameters: program
                 .functions
@@ -90,11 +96,7 @@ impl Facts {
                 .map(|function| vec![Seen::Nothing; function.parameters.len()])
                 .collect(),
             results: vec![Seen::Nothing; program.functions.len()],
-        };
-        if let Some(called) = facts.called.get_mut(main) {
-            *called = true;
         }
-        facts
     }
 
     /// Facts that assume nothing: every function may be called with any values and return any value.
@@ -147,75 +149,131 @@ impl Facts {
         }
     }
 
-    fn join(&self, other: &Facts) -> Facts {
-        Facts {
-            called: self
-                .called
+    /**
+     * Adds what one analysis of `function` saw, widening each value that has
+     * grown too often, and returns the functions to analyze again: every
+     * callee reached for the first time or passed more, and every caller of
+     * `function` when it returns more.
+     */
+    fn absorb(
+        &mut self,
+        function: FunctionId,
+        seen: &Facts,
+        program: &Program<'_>,
+        tracking: &mut Tracking,
+    ) -> Vec<FunctionId> {
+        let mut again = Vec::new();
+        for (callee, definition) in program.functions.iter().enumerate() {
+            if !seen.is_called(callee) {
+                continue;
+            }
+            if let Some(callers) = tracking.callers.get_mut(callee) {
+                callers.insert(function);
+            }
+            let mut grew = !self.is_called(callee);
+            if let Some(called) = self.called.get_mut(callee) {
+                *called = true;
+            }
+            for (position, &local) in definition.parameters.iter().enumerate() {
+                let ty = definition
+                    .locals
+                    .get(local)
+                    .and_then(|local| local.ty.as_integer());
+                let value = seen.parameters[callee][position];
+                grew |= grow(
+                    &mut self.parameters[callee][position],
+                    value,
+                    ty,
+                    &mut tracking.parameter_growths[callee][position],
+                );
+            }
+            if grew {
+                again.push(callee);
+            }
+        }
+        let ty = program
+            .functions
+            .get(function)
+            .and_then(|definition| definition.return_type.as_ref())
+            .and_then(Type::as_integer);
+        if grow(
+            &mut self.results[function],
+            seen.results[function],
+            ty,
+            &mut tracking.result_growths[function],
+        ) {
+            again.extend(tracking.callers[function].iter().copied());
+        }
+        again
+    }
+}
+
+/// Joins `next` into `seen`, widened once it has grown `WIDENING_DELAY` times. Returns whether it grew.
+fn grow(seen: &mut Seen, next: Seen, ty: Option<IntegerType>, growths: &mut usize) -> bool {
+    let joined = seen.join(next);
+    if joined == *seen {
+        return false;
+    }
+    *seen = if *growths >= WIDENING_DELAY {
+        seen.widen(joined, ty)
+    } else {
+        joined
+    };
+    *growths += 1;
+    true
+}
+
+/// What the work of `program_facts` keeps besides the facts: who calls whom, and how often each value grew.
+struct Tracking {
+    /// For each function, the functions seen calling it.
+    callers: Vec<BTreeSet<FunctionId>>,
+    parameter_growths: Vec<Vec<usize>>,
+    result_growths: Vec<usize>,
+}
+
+impl Tracking {
+    fn new(program: &Program<'_>) -> Tracking {
+        Tracking {
+            callers: vec![BTreeSet::new(); program.functions.len()],
+            parameter_growths: program
+                .functions
                 .iter()
-                .zip(&other.called)
-                .map(|(first, second)| *first || *second)
+                .map(|function| vec![0; function.parameters.len()])
                 .collect(),
-            parameters: self
-                .parameters
-                .iter()
-                .zip(&other.parameters)
-                .map(|(first, second)| {
-                    first
-                        .iter()
-                        .zip(second)
-                        .map(|(first, second)| first.join(*second))
-                        .collect()
-                })
-                .collect(),
-            results: self
-                .results
-                .iter()
-                .zip(&other.results)
-                .map(|(first, second)| first.join(*second))
-                .collect(),
+            result_growths: vec![0; program.functions.len()],
+        }
+    }
+}
+
+/// The functions waiting to be analyzed, each at most once, in the order they began waiting.
+struct Waiting {
+    queue: VecDeque<FunctionId>,
+    queued: Vec<bool>,
+}
+
+impl Waiting {
+    fn new(functions: usize) -> Waiting {
+        Waiting {
+            queue: VecDeque::new(),
+            queued: vec![false; functions],
         }
     }
 
-    /// `next`, with every bound that moved since `self` widened to the end of its type.
-    fn widen(&self, next: Facts, program: &Program<'_>) -> Facts {
-        let parameters = self
-            .parameters
-            .iter()
-            .zip(next.parameters)
-            .zip(&program.functions)
-            .map(|((old, new), function)| {
-                old.iter()
-                    .zip(new)
-                    .zip(&function.parameters)
-                    .map(|((old, new), &local)| {
-                        old.widen(
-                            new,
-                            function
-                                .locals
-                                .get(local)
-                                .and_then(|local| local.ty.as_integer()),
-                        )
-                    })
-                    .collect()
-            })
-            .collect();
-        let results = self
-            .results
-            .iter()
-            .zip(next.results)
-            .zip(&program.functions)
-            .map(|((old, new), function)| {
-                old.widen(
-                    new,
-                    function.return_type.as_ref().and_then(Type::as_integer),
-                )
-            })
-            .collect();
-        Facts {
-            called: next.called,
-            parameters,
-            results,
+    fn push(&mut self, function: FunctionId) {
+        if let Some(queued) = self.queued.get_mut(function) {
+            if !*queued {
+                *queued = true;
+                self.queue.push_back(function);
+            }
         }
+    }
+
+    fn pop(&mut self) -> Option<FunctionId> {
+        let function = self.queue.pop_front()?;
+        if let Some(queued) = self.queued.get_mut(function) {
+            *queued = false;
+        }
+        Some(function)
     }
 }
 
@@ -228,38 +286,44 @@ pub(super) fn program_facts(program: &Program<'_>, constants: &[Value]) -> Facts
     let Some(main) = program.main else {
         return Facts::unknown(program);
     };
-    let mut facts = Facts::nothing(program, main);
+    let mut facts = Facts::empty(program);
+    if let Some(called) = facts.called.get_mut(main) {
+        *called = true;
+    }
+    let mut tracking = Tracking::new(program);
+    let mut waiting = Waiting::new(program.functions.len());
+    waiting.push(main);
     /*
-     * Each round that does not settle reaches one more function or changes
-     * one more value. Once widening starts, a value changes at most three
-     * times: to its first bounds, then each end to the end of its type, the
-     * second of which makes it any value.
+     * A function waits again only when a value grows or a function is first
+     * reached, and each growth sends back at most every function. A value
+     * grows at most `WIDENING_DELAY` times and then a few more, so this many
+     * analyses always suffice; running out means a mistake, and nothing is
+     * assumed.
      */
+    let functions = program.functions.len();
     let values: usize = program
         .functions
         .iter()
         .map(|function| function.parameters.len() + 1)
         .sum();
-    let most_rounds = WIDENING_DELAY + program.functions.len() + 3 * values + 1;
-    for round in 0..most_rounds {
-        let mut observed = Facts::nothing(program, main);
-        for (id, function) in program.functions.iter().enumerate() {
-            if facts.is_called(id) {
-                analysis::observe_function(function, id, constants, &facts, &mut observed);
-            }
-        }
-        let joined = facts.join(&observed);
-        let next = if round >= WIDENING_DELAY {
-            facts.widen(joined, program)
-        } else {
-            joined
+    let growths =
+        functions.saturating_add(values.saturating_mul(WIDENING_DELAY + GROWTHS_AFTER_DELAY));
+    let mut analyses_left = growths.saturating_mul(functions).saturating_add(1);
+    while let Some(function) = waiting.pop() {
+        let Some(definition) = program.functions.get(function) else {
+            continue;
         };
-        if next == facts {
-            return facts;
+        analyses_left = match analyses_left.checked_sub(1) {
+            Some(left) => left,
+            None => return Facts::unknown(program),
+        };
+        let mut seen = Facts::empty(program);
+        analysis::observe_function(definition, function, constants, &facts, &mut seen);
+        for again in facts.absorb(function, &seen, program, &mut tracking) {
+            waiting.push(again);
         }
-        facts = next;
     }
-    Facts::unknown(program)
+    facts
 }
 
 #[cfg(test)]

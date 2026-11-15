@@ -78,6 +78,7 @@ impl Analyzer<'_> {
         };
         let mut head = entry.clone();
         let mut round = 0;
+        let mut widened = false;
         loop {
             let next = self.after_iteration(condition, body, &head, entry)?;
             if next.within(&head) {
@@ -85,13 +86,16 @@ impl Analyzer<'_> {
             }
             let joined = head.join(&next);
             head = if round >= delay {
+                widened = true;
                 self.widen(&head, &joined)
             } else {
                 joined
             };
             round += 1;
         }
-        for _ in 0..NARROWING_ROUNDS {
+        // Without widening, the head holds only values some iteration reaches, and nothing can be taken back.
+        let narrowing_rounds = if widened { NARROWING_ROUNDS } else { 0 };
+        for _ in 0..narrowing_rounds {
             let Some(next) = self.after_iteration(condition, body, &head, entry) else {
                 break;
             };

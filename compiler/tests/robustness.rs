@@ -235,8 +235,38 @@ fn check_pathological_inputs() {
             "function main()\n    print(\"{{{}}}\")\n",
             vec!["true"; longest_expression].join(" and ")
         ),
+        call_chain(400),
+        nested_while_loops(16),
     ];
     for (index, case) in cases.iter().enumerate() {
         check_survives(&format!("pathological case {index}"), case);
     }
+}
+
+/// A chain of calls from `main`, which the facts across calls follow to its end, one function at a time.
+fn call_chain(length: usize) -> String {
+    let mut text = String::new();
+    for index in 0..length {
+        let result = if index + 1 < length {
+            format!("step_{}(amount % 1000 + 1)", index + 1)
+        } else {
+            "amount".to_owned()
+        };
+        text.push_str(&format!(
+            "function step_{index}(integer64 amount) returns integer64\n    return {result}\n\n"
+        ));
+    }
+    text + "function main()\n    print(\"{step_0(1)}\")\n"
+}
+
+/// `while` loops nested far past the walks the analysis may spend on them, each changing a total.
+fn nested_while_loops(depth: usize) -> String {
+    let mut text = "function main()\n    variable integer64 total = 0\n".to_owned();
+    for level in 0..depth {
+        let indent = "    ".repeat(level + 1);
+        text.push_str(&format!(
+            "{indent}variable integer64 count_{level} = 0\n{indent}while count_{level} < 2\n{indent}    count_{level} = count_{level} + 1\n{indent}    total = total + count_{level}\n"
+        ));
+    }
+    text + "    print(\"{total}\")\n"
 }
