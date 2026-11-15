@@ -72,15 +72,17 @@
 #define LYMRA_UNREACHABLE() __assume(0)
 #define LYMRA_SIGNAL_FENCE() _ReadWriteBarrier()
 /*
- * Three MSVC warnings do not apply to generated code: a program uses only
- * part of the runtime, and MSVC has no attribute for unused functions
- * (C4505); once runtime checks are inlined, the optimizer finds trap paths
- * that a known value can never take (C4702), and Lymra itself rejects
- * unreachable code; and inlining can make a divisor a known zero (C4723),
+ * Four MSVC warnings do not apply to generated code. A program uses only part
+ * of the runtime, and MSVC has no attribute for unused functions (C4505).
+ * Once runtime checks are inlined, the optimizer finds trap paths that a
+ * known value can never take (C4702), and Lymra itself rejects unreachable
+ * code. Inlining can also make an operand known: a divisor of zero (C4723),
  * where Lymra stops the program before any integer division by zero and a
- * float division by zero gives infinity or NaN, as IEEE 754 defines.
+ * float division by zero gives infinity or NaN, as IEEE 754 defines; or a
+ * float too large for `float32` (C4756), on a path the conversion's check
+ * stops first.
  */
-#pragma warning(disable : 4505 4702 4723)
+#pragma warning(disable : 4505 4702 4723 4756)
 #else
 #error "Lymra programs are compiled with GCC, Clang or MSVC"
 #endif
