@@ -253,8 +253,6 @@ A custom type's class is the largest class of its fields.
 
 `list[T]` never moves its elements, because it always sits on top of its data stack (Section 7.2) and grows in place. A reference to an element stays valid for as long as the list exists, no matter how many pushes come after it. C++ `std::vector` and Rust `Vec` reallocate when they grow, which is why they can't make this promise.
 
-`stack[T]` can shrink, so a reference into it could point at a popped slot. Holding a reference into a `stack` past the next `pop` is error `L0702`.
-
 A list is a value too. `list()` starts an empty one, its type taken from where it goes (`L0412`), and `push(variable items, value)` adds an element at the end. A copy is independent, a `variable` parameter changes the caller's list, and a function can return one. `items = new_value` replaces the whole list (Section 7.9). An index works as it does for an array, but a list's length is only known when the program runs, so an index past the end always stops the program then. In 0.1 a list holds fixed-size values: numbers, booleans, text, arrays, and custom types and choices made of them. A list inside another value comes with nested data (Section 4.5), later in phase 3.
 
 ```lymra
@@ -270,7 +268,19 @@ function main()
     print("{length(values)} {values[3]} {values[4]}")
 ```
 
-A view reads elements that an array, a list or a text keeps, and copies none of them. An array or a list goes wherever a view of its elements is expected, so one function that takes a `view[integer64]` works on arrays of any length and on lists. `slice(items, start, end)` shows part of an array, a list or a view, and `bytes(text)` shows the bytes of a text. A view reads the elements as they are when it reads them; nothing changes through it (`L0208`). Its length is the one it had when it was made: a `push` adds to the list behind it, not to the view. A view can't outlive what it shows (`L0701`), and a list can't be replaced while a view of it is still used (`L0703`); Section 7.4 has the rules. In 0.1 a view lives in a binding, a parameter or a function's result, not inside another value.
+A stack is a list that can also shrink. `stack()` starts an empty one, `push(variable items, value)` adds an element on top, `pop(variable items)` takes the top element off and returns it, and `top(items)` returns it and leaves it in place. Either stops the program when the stack is empty. Everything else works as it does for a list: an index counts from the bottom, `length` gives the number of elements, a `for` loop and a view go from the bottom up, and a copy is independent. A `pop` frees the top element, so a view of the stack, or a `for` loop over it, could read a slot that no longer holds anything: popping while one is still used is error `L0702`.
+
+```lymra
+function main()
+    variable stack[integer64] pending = stack()
+    push(variable pending, 1)
+    push(variable pending, 2)
+    while length(pending) > 0
+        constant next = pop(variable pending)
+        print("{next}")
+```
+
+A view reads elements that an array, a list, a stack or a text keeps, and copies none of them. An array, a list or a stack goes wherever a view of its elements is expected, so one function that takes a `view[integer64]` works on arrays of any length, on lists and on stacks. `slice(items, start, end)` shows part of an array, a list, a stack or a view, and `bytes(text)` shows the bytes of a text. A view reads the elements as they are when it reads them; nothing changes through it (`L0208`). Its length is the one it had when it was made: a `push` adds to the list behind it, not to the view. A view can't outlive what it shows (`L0701`), a list can't be replaced while a view of it is still used (`L0703`), and a stack can't be popped then (`L0702`); Section 7.4 has the rules. In 0.1 a view lives in a binding, a parameter or a function's result, not inside another value.
 
 ```lymra
 function total(view[integer64] values) returns integer64
@@ -411,11 +421,14 @@ function main()
 |---|---|
 | `print(string text)` | Writes the text and a line break to standard output, as one whole line. The values in the text are computed first, so a call among them that prints writes its own line before this one. |
 | `range(start, end)` | The integers from `start` up to `end`, without `end`. It is only used in a `for` loop for now. |
-| `length(items)` | The number of elements of an array, a list or a view, or of bytes in a `string`, as an `integer64`. An array's length is part of its type, so it is known while compiling. Phase 3 adds stacks. |
+| `length(items)` | The number of elements of an array, a list, a stack or a view, or of bytes in a `string`, as an `integer64`. An array's length is part of its type, so it is known while compiling. |
 | `array(value)` | An array with every element set to `value`. Its type, and so its length, comes from the place it goes: a declared type, a parameter, or a function's return type (`L0412`). |
 | `list()` | An empty list. Its type comes from the place it goes, as for `array(value)` (`L0412`). |
-| `push(variable items, value)` | Adds `value` to the end of a list. Elements never move, so nothing that reads the list sees it change but for its new end. |
-| `slice(items, start, end)` | The elements of an array, a list or a view from `start` up to `end`, without `end`, as a view, with nothing copied. A slice of a `string` is a `string` that shares its bytes; its ends have to fall between characters. Each position is checked as soon as it is computed: the start lies from 0 to the length, the end from the start to the length. |
+| `push(variable items, value)` | Adds `value` to the end of a list, or on top of a stack. Elements never move, so nothing that reads the list sees it change but for its new end. |
+| `stack()` | An empty stack. Its type comes from the place it goes, as for `list()` (`L0412`). |
+| `pop(variable items)` | Takes the top element off a stack and returns it. It stops the program when the stack is empty. |
+| `top(items)` | The top element of a stack, left in place. It stops the program when the stack is empty. |
+| `slice(items, start, end)` | The elements of an array, a list, a stack or a view from `start` up to `end`, without `end`, as a view, with nothing copied. A slice of a `string` is a `string` that shares its bytes; its ends have to fall between characters. Each position is checked as soon as it is computed: the start lies from 0 to the length, the end from the start to the length. |
 | `bytes(text)` | The UTF-8 bytes of a `string`, as a `view[unsigned8]` |
 | `wrapping_add(left, right)`, `wrapping_subtract`, `wrapping_multiply` | Arithmetic that wraps around the type instead of stopping the program: the exact result, keeping only as many low bits as the type has, read as two's complement for a signed type. The operands follow the rules of `+`. |
 | `integer8(value)` to `integer64(value)` | Converts an integer to that signed type |
@@ -427,10 +440,6 @@ Later phases add these, and until then the compiler rejects each with `L0309`:
 
 | Function | Does | Phase |
 |---|---|---|
-| `stack()` | An empty stack | 3 |
-| `push(variable items, value)` on a stack | Adds `value` to the top of a stack | 3 |
-| `pop(variable items)` | Removes the top of a stack and returns it | 3 |
-| `top(items)` | The top of a stack, left in place | 3 |
 | `filter(items) with name`, `sort(variable items) with left, right` | The elements the block accepts; the elements in the block's order (Section 7.7) | 3 |
 | `pool()`, `insert(variable items, value)`, `remove(variable items, handle)` | An empty pool; a stored value's handle; a freed slot (Section 7.6) | 5 |
 
@@ -459,7 +468,7 @@ for index in range(0, 10)
 - A condition needs no parentheses, and nothing follows it on its line: no `:`, no `then`, no `{`.
 - A condition is a `boolean`. Lymra has no "truthy" values: write `if count != 0`, not `if count` (`L0402`).
 - `for name in range(start, end)` computes `start`, then `end`, each once, then runs the block with `name` set to each integer from `start` up to `end`, without `end`. The loop variable cannot be changed. Name it `_` when the loop only repeats.
-- `for name in items` over an array, a list or a view runs the block once for each element, in order, with `name` set to a copy of it. The array, list or view is computed once, and each element is read when its turn comes, so a change the block makes to a later element is seen. A list is walked over the elements it holds when the loop starts, so the block can `push` to it without making the loop longer; replacing the list, or passing it with `variable` to a function that can replace it, would free the elements the loop reads, and is error `L0703`. A view binding the block gives another view leaves the loop going over the first one. Phase 3 adds loops over stacks.
+- `for name in items` over an array, a list, a stack or a view runs the block once for each element, in order, with `name` set to a copy of it. The array, list, stack or view is computed once, and each element is read when its turn comes, so a change the block makes to a later element is seen. A list is walked over the elements it holds when the loop starts, so the block can `push` to it without making the loop longer; replacing the list, or passing it with `variable` to a function that can replace it, would free the elements the loop reads, and is error `L0703`. A stack is walked from the bottom up the same way; popping it, or passing it with `variable` to a function that can pop it, would free an element the loop is still to read, and is error `L0702`. A view binding the block gives another view leaves the loop going over the first one.
 - `else if` continues a chain. There is no `elif`.
 - `break` and `continue` work in `while` and `for`. Anywhere else they are error `L0601`.
 - A statement after `return`, `break` or `continue`, or after an `if` whose every branch leaves, can never run. It is error `L0602`.
@@ -489,7 +498,7 @@ There is no `malloc`, no `new`, and no `free`.
 - When a scope ends, all of its growable values are freed by resetting the bump pointer. That costs one store instruction, whether the scope held one integer list or a million nested orders. There are no destructors and nothing walks the data to free it.
 - Each data stack is reserved as address space up front, and the operating system commits pages only when they are first touched. Unused reservation costs no physical memory.
 - A value that would grow past the end of its reservation stops the program with a clear error before it touches anything beyond it. It never overwrites other memory.
-- A growable value grows only while it is on top of its data stack. A `push` to a value that another value may sit above at that point is error `L0704`, and the message names the value above it. Within one call, a function's lists never share a stack, so this comes up in recursion: a call that holds its own copy of a binding cannot change the copy of an earlier call that reached it through a `variable` parameter, since its own copy sits above it. The compiler follows where each list can travel through calls, so it reports only a list that really can be under a newer one. The runtime checks it again before every `push`, as a second line of defense.
+- A growable value grows only while it is on top of its data stack. A `push` or a `pop` on a value that another value may sit above at that point is error `L0704`, and the message names the value above it. Within one call, a function's lists never share a stack, so this comes up in recursion: a call that holds its own copy of a binding cannot change the copy of an earlier call that reached it through a `variable` parameter, since its own copy sits above it. The compiler follows where each list can travel through calls, so it reports only a list that really can be under a newer one. The runtime checks it again before every `push` and `pop`, as a second line of defense.
 - The compiler assigns stacks statically: two growable values that are live at the same time never share a stack, and values with separate lifetimes reuse one. The copies of one binding at different depths of a recursion share a data stack, each above the copy of the call before it; a call frees its own before it returns, so the one below is on top again when it grows. A list whose elements differ in size keeps their positions on a data stack of its own (Section 4.5). The runtime only tracks the bump pointers.
 - A data stack reserves address space, not memory. On a 64-bit system each reserves up to 64 GiB. On a 32-bit system, where a process has 2 to 3 GiB in all, a program's data stacks share 1 GiB. The runtime reserves one region for all of them, halving its request until the system grants it, and splits it evenly. A value that outgrows its data stack stops the program with `error: data stack full`.
 
@@ -508,7 +517,7 @@ Values on the call stack (integers, floats, fixed arrays) aren't "freed" at all.
 - A `view[T]`, or any other reference, has a **root**: what keeps the data it points to. That is a binding of the function, a parameter, whose root the caller keeps alive through the call, text in the program itself, or a value a statement computes without a binding, which it frees when it ends. The compiler infers the roots of every reference, from everything it is given anywhere in its function. You never write them.
 - A reference can't outlive its root, and the program is rejected with error `L0701` where it would: a binding that holds a reference to a value its statement frees, or to a binding of a block that ends before the reference's; a function that returns a reference to one of its own bindings; or a `variable` reference parameter given a reference to a binding of the function, which the caller would keep. The message names the root.
 - A function that returns a reference returns one rooted in some of its parameters, and the compiler works out which ones across the whole program. A call's result then has the roots of the arguments it passed there. That is why no lifetime annotations are needed.
-- A value can't be replaced while a reference into it is still used, when the replacement could change what its bytes mean: assigning a choice, which can change its variant, assigning a growable value, whose storage is released (Section 7.9), or removing a pool slot. Each is error `L0703`, and so is passing the value with `variable` to a function that can replace it. A reference is still used when a later statement can read it, or a `for` loop around the replacement goes over it. The message names the reference and where it was made. Holding a reference into a `stack` past the next `pop` is the same mistake, `L0702`.
+- A value can't be replaced while a reference into it is still used, when the replacement could change what its bytes mean: assigning a choice, which can change its variant, assigning a growable value, whose storage is released (Section 7.9), or removing a pool slot. Each is error `L0703`, and so is passing the value with `variable` to a function that can replace it. A reference is still used when a later statement can read it, or a `for` loop around the replacement goes over it. The message names the reference and where it was made. A `pop` frees the top element of a stack, so popping a stack while a reference into it is still used, or a `for` loop goes over it, is the same mistake: error `L0702`, and so is passing the stack with `variable` to a function that can pop it.
 - These are the only reference rules. There are no exclusivity rules: two mutable references to the same data may exist at once. That is safe because memory never moves while a reference to it lives (Section 4.4), nothing is freed while its root is in scope, and no value changes layout under a reference. Threads share nothing (Section 9), so two references never race.
 
 ### 7.5 Known limitations of this model

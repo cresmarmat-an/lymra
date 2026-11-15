@@ -4,10 +4,7 @@ use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
 use crate::source::Span;
 
 /// Built-in functions the spec describes, with the phase that implements each.
-const FUTURE_FUNCTIONS: [(&str, u8); 8] = [
-    ("stack", 3),
-    ("pop", 3),
-    ("top", 3),
+const FUTURE_FUNCTIONS: [(&str, u8); 5] = [
     ("filter", 3),
     ("sort", 3),
     ("pool", 5),
@@ -20,7 +17,6 @@ pub(super) enum Feature {
     Packed,
     NamedArguments,
     TextBuilding,
-    Stacks,
     /// A list inside another value: an array, a declared type, a choice or a list.
     NestedGrowable,
     /// A view inside another value, or a view of views.
@@ -49,7 +45,6 @@ impl Feature {
     /// The type name `name` belongs to a later phase, if it does.
     pub fn future_type(name: &str) -> Option<Feature> {
         match name {
-            "stack" => Some(Feature::Stacks),
             "pool" | "handle" => Some(Feature::Pools),
             _ => None,
         }
@@ -62,7 +57,6 @@ impl Feature {
             Self::TextBuilding => {
                 return "text with interpolation can only be given to `print` for now".to_owned();
             }
-            Self::Stacks => "`stack` is",
             Self::NestedGrowable => "lists inside other values are",
             Self::NestedView => "views inside other values are",
             Self::ForEach => {
@@ -84,7 +78,6 @@ impl Feature {
             Self::NamedArguments => 2,
             Self::TextBuilding
             | Self::Packed
-            | Self::Stacks
             | Self::NestedGrowable
             | Self::NestedView
             | Self::ForEach
@@ -105,7 +98,6 @@ impl Feature {
             Self::Packed
             | Self::NamedArguments
             | Self::TextBuilding
-            | Self::Stacks
             | Self::NestedGrowable
             | Self::NestedView
             | Self::RangeValues
@@ -138,9 +130,9 @@ mod tests {
     #[test]
     fn future_functions_carry_their_phase() {
         assert_eq!(
-            Feature::future_function("pop"),
+            Feature::future_function("filter"),
             Some(Feature::Function {
-                name: "pop",
+                name: "filter",
                 phase: 3
             })
         );

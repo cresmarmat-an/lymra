@@ -26,11 +26,11 @@ pub(super) use cycles::{Declared, Dependency, cycle};
 pub(super) use floats::{conversion_never_fits, float_remainder, float_too_large, float_too_small};
 pub(super) use lists::{
     Change, changed_below_newer, empty_list_arguments, empty_list_into, empty_list_without_type,
-    malformed_list_type, negative_index, push_argument_count, push_needs_variable, push_not_list,
-    pushed_value_marked,
+    malformed_list_type, negative_index, not_a_stack, pop_needs_variable, push_argument_count,
+    push_needs_variable, push_not_list, pushed_value_marked, stack_argument_count,
 };
 pub(super) use roots::{
-    Replacement, replaced_while_iterated, replaced_while_viewed, returned_view_of_local,
+    Freeing, freed_while_iterated, freed_while_viewed, returned_view_of_local,
     returned_view_of_temporary, view_escapes_call, view_of_temporary, view_outlives_root,
 };
 pub(super) use views::{

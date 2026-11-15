@@ -22,7 +22,7 @@ Every name the language defines is a whole English word: `variable`, `constant`,
 
 ## Status
 
-**Edition 0.1, roadmap phase 3 under way.** The compiler checks Lymra programs and compiles them to native executables through C. It covers integers of every size and floats, with checked conversions between them, wrapping arithmetic, booleans, text values and comparing them, arrays, lists that grow on data stacks with no garbage collector and no `free`, views that read arrays, lists and text without copying them, with `slice` and `bytes`, custom types, choices and `match`, functions, `variable` parameters, `if`, `while`, `for` over `range`, arrays, lists and views, and `print`. Every integer operation and every index is checked, in every build mode, except where the compiler proves the check can never fail. A failed check, or recursion that runs out of stack, stops the program with an error message and exit status 70 instead of a crash. Nothing can read a list after it is freed, or grow it over another: the compiler works out what every view shows across the whole program, with no annotations, and rejects the programs that could (`L0701`, `L0703`, `L0704`). Every test program also runs under AddressSanitizer in CI. Seven of the twelve programs of the [memory model study](docs/memory/README.md) build and run. Anything later phases add is rejected with an error that names the phase.
+**Edition 0.1, roadmap phase 3 under way.** The compiler checks Lymra programs and compiles them to native executables through C. It covers integers of every size and floats, with checked conversions between them, wrapping arithmetic, booleans, text values and comparing them, arrays, lists that grow on data stacks with no garbage collector and no `free`, stacks that also shrink with `pop`, views that read arrays, lists, stacks and text without copying them, with `slice` and `bytes`, custom types, choices and `match`, functions, `variable` parameters, `if`, `while`, `for` over `range`, arrays, lists, stacks and views, and `print`. Every integer operation and every index is checked, in every build mode, except where the compiler proves the check can never fail. A failed check, or recursion that runs out of stack, stops the program with an error message and exit status 70 instead of a crash. Nothing can read a list or a stack after it is freed, or grow or shrink it over another: the compiler works out what every view shows across the whole program, with no annotations, and rejects the programs that could (`L0701`, `L0702`, `L0703`, `L0704`). Every test program also runs under AddressSanitizer in CI. Nine of the twelve programs of the [memory model study](docs/memory/README.md) build and run. Anything later phases add is rejected with an error that names the phase.
 
 ## Try it
 
@@ -117,7 +117,7 @@ error: integer overflow
 | `compiler/tests/check` | Golden errors about names, types and control flow |
 | `compiler/tests/run` | Programs that are built with every C compiler on the machine, with and without the optimizer, and run, with their recorded output |
 | `compiler/tests/runtime_arithmetic.rs` | The runtime's overflow checks, in both the GCC and Clang form and the portable form, against exact arithmetic |
-| `compiler/tests/runtime_data_stacks.rs` | The runtime's data stacks on their own: growth, moves, freeing, and the errors a list can stop a program with |
+| `compiler/tests/runtime_data_stacks.rs` | The runtime's data stacks on their own: growth, moves, freeing, shrinking, and the errors a list can stop a program with |
 | `compiler/tests/windows_console.rs`, `pseudo_console.rs` | On Windows, output reaches a console, and a terminal's pseudo console, as the characters printed |
 | `compiler/tests/overflow_proofs` | Thousands of generated programs run in an exact interpreter, to catch a check removed by a wrong proof, and generated list programs built with every C compiler that have to print what the interpreter prints |
 | `bench` | The same programs in Lymra, C and Rust, and the runner that times them |
@@ -151,7 +151,7 @@ Each phase ends with a compiler that passes its own test suite. Nothing advances
 | 0 | Lexer, parser, diagnostics format | Every snippet in the spec parses or fails with the documented error | Done |
 | 1 | Integers, booleans, functions, `if`, `while`, `for` over `range`, `print`. Emits C. | `examples/hello.lym` compiles and runs | Done |
 | 2 | Floats, arrays, custom types and choices, comparing text, `length`, wrapping arithmetic | Type errors carry fix suggestions | Done |
-| 3 | Data stacks, `list`, `stack`, `view`, text built from values, `with` blocks, root inference | Escaping-reference programs are rejected with `L0701` | Data stacks, lists, views and root inference done |
+| 3 | Data stacks, `list`, `stack`, `view`, text built from values, `with` blocks, root inference | Escaping-reference programs are rejected with `L0701` | Data stacks, lists, stacks, views and root inference done |
 | 4 | Modules and `public` | Multi-file programs build | |
 | 5 | Pools, error handling, threads | Benchmark suite runs against C++ and Rust | |
 

@@ -7,7 +7,7 @@ use super::{
 };
 use crate::ast::{self, Mutability, Name, Visibility};
 use crate::diagnostics::ErrorReported;
-use crate::ir::{self, ConstantId, FloatType, IntegerType, Type, Value};
+use crate::ir::{self, ConstantId, FloatType, IntegerType, Sequence, Type, Value};
 use crate::similarity;
 use crate::source::Span;
 
@@ -155,7 +155,10 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             return self.resolve_array_type(arguments, ty.span);
         }
         if name.text == "list" {
-            return self.resolve_list_type(arguments, ty.span);
+            return self.resolve_list_type(arguments, ty.span, Sequence::List);
+        }
+        if name.text == "stack" {
+            return self.resolve_list_type(arguments, ty.span, Sequence::Stack);
         }
         if name.text == "view" {
             return self.resolve_view_type(arguments, ty.span);
@@ -191,7 +194,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     .iter()
                     .map(|integer| integer.name())
                     .chain([
-                        "float32", "float64", "boolean", "string", "array", "list", "view",
+                        "float32", "float64", "boolean", "string", "array", "list", "stack", "view",
                     ])
                     .chain(declared);
                 let suggestion = similarity::closest_match(name.text, known);
@@ -331,6 +334,8 @@ fn runtime_part(expr: &ir::Expr) -> Span {
         | ir::ExprKind::Fill(_)
         | ir::ExprKind::EmptyList
         | ir::ExprKind::Slice { .. }
+        | ir::ExprKind::Pop(_)
+        | ir::ExprKind::Top(_)
         | ir::ExprKind::Construct(_)
         | ir::ExprKind::Variant { .. } => expr.span,
     }

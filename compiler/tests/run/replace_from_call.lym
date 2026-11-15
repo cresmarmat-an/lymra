@@ -1,0 +1,33 @@
+#[
+    A whole binding can take the result of a call that changes it through
+    `variable`: the call grows, replaces or pops the binding, and the value
+    it returns then takes the binding's place.
+]#
+
+function grown(variable list[integer64] items) returns list[integer64]
+    push(variable items, 2)
+    return items
+
+function rebuilt(variable list[integer64] items) returns list[integer64]
+    items = list()
+    push(variable items, 3)
+    push(variable items, 4)
+    return items
+
+function trimmed(variable stack[integer64] work) returns stack[integer64]
+    constant _ = pop(variable work)
+    push(variable work, 8)
+    return work
+
+function main()
+    variable list[integer64] items = list()
+    push(variable items, 1)
+    items = grown(variable items)
+    print("{length(items)} {items[0]} {items[1]}")
+    items = rebuilt(variable items)
+    print("{length(items)} {items[0]} {items[1]}")
+    variable stack[integer64] work = stack()
+    push(variable work, 5)
+    push(variable work, 6)
+    work = trimmed(variable work)
+    print("{length(work)} {work[0]} {top(work)}")

@@ -1,0 +1,10 @@
+exit status 70
+--- standard output
+0 3 0
+1 2 1
+--- standard error
+error: index 2 is out of range for a stack of length 1
+  --> tests/run/stack_index_past_end.lym:13:33
+   |
+13 |         print("{index} {taken} {work[index]}")
+   |                                 ^^^^^^^^^^^

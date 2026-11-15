@@ -45,11 +45,13 @@ use scope::{FunctionScope, LocalKind};
 type CheckResult<T> = Result<T, ErrorReported>;
 
 /// The built-in functions the compiler implements.
-const BUILT_IN_FUNCTIONS: [&str; 9] = [
+const BUILT_IN_FUNCTIONS: [&str; 11] = [
     "print",
     "range",
     "length",
     "push",
+    "pop",
+    "top",
     "slice",
     "bytes",
     "wrapping_add",
@@ -57,9 +59,9 @@ const BUILT_IN_FUNCTIONS: [&str; 9] = [
     "wrapping_multiply",
 ];
 
-/// Built-in types that are not integers. Calling `array` or `list` builds one.
-const OTHER_TYPE_NAMES: [&str; 7] = [
-    "boolean", "string", "array", "list", "view", "float32", "float64",
+/// Built-in types that are not integers. Calling `array`, `list` or `stack` builds one.
+const OTHER_TYPE_NAMES: [&str; 8] = [
+    "boolean", "string", "array", "list", "stack", "view", "float32", "float64",
 ];
 
 /// What a name the language itself defines stands for. No declaration can take such a name.

@@ -262,10 +262,13 @@ fn collect_call_references(arguments: &[Argument], changed: &mut HashSet<LocalId
     }
 }
 
-/// Collects the locals an expression passes with `variable`, which the called function may change.
+/// Collects the locals an expression passes with `variable`, which the called function may change, and the stacks it pops.
 pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
     match &expr.kind {
         ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) | ExprKind::EmptyList => {
+        }
+        ExprKind::Pop(stack) => {
+            changed.insert(*stack);
         }
         ExprKind::Negate { operand, .. }
         | ExprKind::Not(operand)
@@ -274,6 +277,7 @@ pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
         | ExprKind::Length(operand)
         | ExprKind::View(operand)
         | ExprKind::Bytes(operand)
+        | ExprKind::Top(operand)
         | ExprKind::Field {
             object: operand, ..
         } => {
@@ -308,8 +312,11 @@ pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
 /// Collects every call inside an expression, its arguments' calls included.
 pub(super) fn collect_calls<'expr>(expr: &'expr Expr, calls: &mut Vec<&'expr Call>) {
     match &expr.kind {
-        ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) | ExprKind::EmptyList => {
-        }
+        ExprKind::Literal(_)
+        | ExprKind::Local(_)
+        | ExprKind::Constant(_)
+        | ExprKind::EmptyList
+        | ExprKind::Pop(_) => {}
         ExprKind::Negate { operand, .. }
         | ExprKind::Not(operand)
         | ExprKind::Convert { operand, .. }
@@ -317,6 +324,7 @@ pub(super) fn collect_calls<'expr>(expr: &'expr Expr, calls: &mut Vec<&'expr Cal
         | ExprKind::Length(operand)
         | ExprKind::View(operand)
         | ExprKind::Bytes(operand)
+        | ExprKind::Top(operand)
         | ExprKind::Field {
             object: operand, ..
         } => collect_calls(operand, calls),

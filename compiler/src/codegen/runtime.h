@@ -118,7 +118,8 @@ typedef enum {
     LYMRA_CONVERSION_OUT_OF_RANGE,
     LYMRA_DATA_STACK_FULL,
     LYMRA_NOT_ON_TOP,
-    LYMRA_OUT_OF_MEMORY
+    LYMRA_OUT_OF_MEMORY,
+    LYMRA_EMPTY_STACK
 } lymra_trap_kind;
 
 /* Where text goes. The values are the POSIX file descriptors. */
@@ -294,6 +295,7 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
         "data stack full",
         "a list changed while a newer list sat above it on its data stack",
         "out of memory",
+        "the stack is empty",
     };
     static const char *const helps[] = {
         NULL,
@@ -305,6 +307,7 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
         "help: this is a bug in the Lymra compiler, which should have rejected the program with error "
         "L0704; please report it with the source file\n",
         "help: the system has no memory left for a list to grow into\n",
+        "help: check that `length` is above 0 before `pop` or `top`\n",
     };
     lymra_write_finished();
     lymra_write_error("error: ");
@@ -1219,6 +1222,17 @@ LYMRA_UNUSED static inline char *lymra_data_stack_place(lymra_data_stack *stack,
 LYMRA_UNUSED static inline void lymra_data_stack_release(lymra_data_stack *stack, char *start) {
     stack->top = start;
     lymra_data_stack_settle(stack);
+}
+
+/*
+ * Frees the last `bytes` bytes of the newest value on `stack`, which start
+ * at `start`. Everything above them is free already, so a build with
+ * AddressSanitizer marks only these, and taking elements off one at a time
+ * costs the same however much the stack has free above them.
+ */
+LYMRA_UNUSED static inline void lymra_data_stack_shrink(lymra_data_stack *stack, char *start, size_t bytes) {
+    LYMRA_MARK_FREE(start, bytes);
+    stack->top = start;
 }
 
 /*

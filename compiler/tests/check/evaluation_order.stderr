@@ -61,5 +61,23 @@ error[L0508]: `items` is passed with `variable` and also used elsewhere in the s
    |
 help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `items`
 
-found 7 errors in tests/check/evaluation_order.lym
+error[L0508]: `work` is passed with `variable` and also used elsewhere in the same expression
+  --> tests/check/evaluation_order.lym:30:19
+   |
+30 |     work[0] = pop(variable work)
+   |                   ^^^^^^^^^^^^^ `pop` may change `work` here
+   |     ---- `work` is used here too, so the result depends on which runs first
+   |
+help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `work`
+
+error[L0508]: `work` is passed with `variable` and also used elsewhere in the same expression
+  --> tests/check/evaluation_order.lym:31:14
+   |
+31 |     work[pop(variable work)] = 7
+   |              ^^^^^^^^^^^^^ `pop` may change `work` here
+   |     ---- `work` is used here too, so the result depends on which runs first
+   |
+help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `work`
+
+found 9 errors in tests/check/evaluation_order.lym
 run `lymra explain L0508` to read why a rule exists and how to fix it

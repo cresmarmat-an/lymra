@@ -20,9 +20,12 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::errors::{self, Change};
-use super::walk::{expr_calls, statement_blocks, statement_calls};
+use super::walk::{each_expr, statement_blocks, statement_calls, statement_pops};
 use crate::diagnostics::Diagnostic;
-use crate::ir::{Argument, Block, Call, Expr, Function, FunctionId, LocalId, PlaceStep, Statement};
+use crate::ir::{
+    Argument, Block, Call, Expr, ExprKind, Function, FunctionId, LocalId, PlaceStep, Sequence,
+    Statement,
+};
 use crate::source::Span;
 
 /// A local of one function: a list binding, or a `variable` parameter.
@@ -130,6 +133,9 @@ impl Edges<'_, '_> {
             for call in calls {
                 self.call(call);
             }
+            for (stack, _) in statement_pops(statement) {
+                self.change(stack);
+            }
             match statement {
                 Statement::Push { list, .. } => self.change(*list),
                 Statement::Assign { target, value }
@@ -232,6 +238,9 @@ impl Walk<'_, '_> {
                 for call in calls {
                     self.call(call);
                 }
+                for (stack, span) in statement_pops(statement) {
+                    self.change(stack, Change::Pop, span);
+                }
                 for body in statement_blocks(statement) {
                     self.block(body);
                 }
@@ -239,11 +248,20 @@ impl Walk<'_, '_> {
         }
     }
 
+    /// Checks the calls an expression makes and the stacks it pops.
     fn expr(&mut self, expr: &Expr) {
         let mut calls = Vec::new();
-        expr_calls(expr, &mut calls);
+        let mut pops = Vec::new();
+        each_expr(expr, &mut |inner| match &inner.kind {
+            ExprKind::Call(call) => calls.push(call),
+            ExprKind::Pop(stack) => pops.push((*stack, inner.span)),
+            _ => {}
+        });
         for call in calls {
             self.call(call);
+        }
+        for (stack, span) in pops {
+            self.change(stack, Change::Pop, span);
         }
     }
 
@@ -270,11 +288,16 @@ impl Walk<'_, '_> {
             .find(|&&binding| reaching.contains(&(self.function, binding)));
         if let Some(&binding) = newer {
             let binding = &function.locals[binding];
+            let kind = binding
+                .ty
+                .as_list()
+                .map_or(Sequence::List, |list| list.kind);
             self.diagnostics.push(errors::changed_below_newer(
                 function.locals[local].name,
                 change,
                 span,
                 (binding.name, binding.span),
+                kind,
             ));
         }
     }

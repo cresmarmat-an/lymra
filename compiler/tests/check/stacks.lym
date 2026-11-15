@@ -1,0 +1,25 @@
+#[
+    Errors in using stacks: malformed stack types, `pop` and `top` given
+    something other than a stack, `pop` without `variable` or on a
+    constant, the wrong number of arguments, and `stack()` with no type to
+    build.
+]#
+
+function shapes(stack _, stack[integer64, 3] _, stack[list[integer64]] _)
+    return
+
+function main()
+    variable list[integer64] items = list()
+    push(variable items, 1)
+    constant from_list = pop(variable items)
+    constant listed = top(items)
+    constant number = top(3)
+    variable stack[integer64] work = stack()
+    push(variable work, 2)
+    constant unmarked = pop(work)
+    constant counted = pop(variable work, 1)
+    constant nothing = top()
+    constant untyped = stack()
+    constant stack[integer64] fixed = stack()
+    constant changed = pop(variable fixed)
+    print("{from_list} {listed} {number} {unmarked} {counted} {nothing} {changed}")

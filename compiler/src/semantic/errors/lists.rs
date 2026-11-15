@@ -1,54 +1,70 @@
-//! The wording of the errors about lists.
+//! The wording of the errors about lists and stacks.
 
 use super::described;
 use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
-use crate::ir::Type;
+use crate::ir::{Sequence, Type};
 use crate::source::Span;
 
-/// `list` without `[element type]`, or with more between the brackets.
-pub(in crate::semantic) fn malformed_list_type(span: Span) -> Diagnostic {
+/// `list` or `stack` without `[element type]`, or with more between the brackets.
+pub(in crate::semantic) fn malformed_list_type(kind: Sequence, span: Span) -> Diagnostic {
+    let name = kind.name();
     Diagnostic::new(
         ErrorCode::L0409,
-        "a list type names the type of its elements",
-        Label::new(span, "expected `list[element type]`"),
-        Help::text(
-            "write the type of the elements, as in `list[integer64]`; a list grows, so it has no length in its type",
-        ),
+        format!("a {name} type names the type of its elements"),
+        Label::new(span, format!("expected `{name}[element type]`")),
+        Help::text(format!(
+            "write the type of the elements, as in `{name}[integer64]`; a {name} grows, so it has no length in its type"
+        )),
     )
 }
 
-/// `list()` where nothing says which list type it builds.
-pub(in crate::semantic) fn empty_list_without_type(span: Span) -> Diagnostic {
+/// `list()` or `stack()` where nothing says which type it builds.
+pub(in crate::semantic) fn empty_list_without_type(kind: Sequence, span: Span) -> Diagnostic {
+    let name = kind.name();
     Diagnostic::new(
         ErrorCode::L0412,
-        "`list()` needs to know which list to build",
+        format!("`{name}()` needs to know which {name} to build"),
         Label::new(
             span,
             "its element type comes from the type of the place it goes",
         ),
-        Help::text(
-            "write the type where the list goes, as in `variable list[integer64] values = list()`",
-        ),
+        Help::text(format!(
+            "write the type where the {name} goes, as in `variable {name}[integer64] values = {name}()`"
+        )),
     )
 }
 
-/// `list()` where a value of a type other than a list goes.
-pub(in crate::semantic) fn empty_list_into(expected: &Type, span: Span) -> Diagnostic {
+/// `list()` or `stack()` where a value of another type goes.
+pub(in crate::semantic) fn empty_list_into(
+    kind: Sequence,
+    expected: &Type,
+    span: Span,
+) -> Diagnostic {
+    let name = kind.name();
     Diagnostic::new(
         ErrorCode::L0402,
-        format!("expected {}, found a list", described(expected)),
-        Label::new(span, "`list()` builds a list"),
-        Help::text("use a value of the expected type here; `list()` only goes where a list does"),
+        format!("expected {}, found a {name}", described(expected)),
+        Label::new(span, format!("`{name}()` builds a {name}")),
+        Help::text(format!(
+            "use a value of the expected type here; `{name}()` only goes where a {name} does"
+        )),
     )
 }
 
-pub(in crate::semantic) fn empty_list_arguments(found: usize, call: Span) -> Diagnostic {
+pub(in crate::semantic) fn empty_list_arguments(
+    kind: Sequence,
+    found: usize,
+    call: Span,
+) -> Diagnostic {
+    let name = kind.name();
     let given = if found == 1 { "was" } else { "were" };
     Diagnostic::new(
         ErrorCode::L0501,
-        format!("`list` takes no arguments, but {found} {given} given"),
-        Label::new(call, "`list()` builds a list with no elements"),
-        Help::text("write `list()`, then add the elements with `push`"),
+        format!("`{name}` takes no arguments, but {found} {given} given"),
+        Label::new(call, format!("`{name}()` builds a {name} with no elements")),
+        Help::text(format!(
+            "write `{name}()`, then add the elements with `push`"
+        )),
     )
 }
 
@@ -95,31 +111,96 @@ pub(in crate::semantic) fn push_not_list(found: &Type, span: Span) -> Diagnostic
     )
 }
 
+pub(in crate::semantic) fn stack_argument_count(
+    function: &str,
+    found: usize,
+    call: Span,
+) -> Diagnostic {
+    let given = if found == 1 { "was" } else { "were" };
+    let (label, help) = if function == "pop" {
+        (
+            "`pop` takes the top element off one stack",
+            "write `pop(variable values)`",
+        )
+    } else {
+        (
+            "`top` reads the top element of one stack",
+            "write `top(values)`",
+        )
+    };
+    Diagnostic::new(
+        ErrorCode::L0501,
+        format!("`{function}` takes 1 argument, but {found} {given} given"),
+        Label::new(call, label),
+        Help::text(help),
+    )
+}
+
+/// The stack given to `pop` without `variable`, though `pop` changes it. `source` is the stack as written.
+pub(in crate::semantic) fn pop_needs_variable(span: Span, source: &str) -> Diagnostic {
+    Diagnostic::new(
+        ErrorCode::L0504,
+        "`pop` changes the stack it is given, so the stack needs `variable`",
+        Label::new(span, "passed without `variable`"),
+        Help::replace(
+            "mark the stack `variable`",
+            span,
+            format!("variable {source}"),
+        ),
+    )
+}
+
+/// `pop` or `top`, named by `function`, of a value that is not a stack.
+pub(in crate::semantic) fn not_a_stack(function: &str, found: &Type, span: Span) -> Diagnostic {
+    let help = match found {
+        Type::List(_) => {
+            "a list only grows; declare it as a `stack` to take elements off, or read the last one as `values[length(values) - 1]`"
+        }
+        _ => "pass a `stack`, as in `variable stack[integer64] values = stack()`",
+    };
+    Diagnostic::new(
+        ErrorCode::L0402,
+        format!(
+            "`{function}` works on a stack, but this is {}",
+            described(found)
+        ),
+        Label::new(span, "not a stack"),
+        Help::text(help),
+    )
+}
+
 /// How a list is changed where error L0704 points.
 #[derive(Clone, Copy, Debug)]
 pub(in crate::semantic) enum Change<'a> {
     Push,
+    Pop,
     Replace,
     /// Passed with `variable` to the function named, which can change it.
     Pass(&'a str),
 }
 
 /**
- * A `variable` list parameter changed while a list binding of the same
+ * A `variable` list or stack parameter changed while a binding of the same
  * function is alive whose copy from an earlier call of the function the
  * parameter can hold. This call's copy sits above that one on their data
- * stack, and only the newest list on a data stack can change. `binding` is
- * the binding's name and where it is declared.
+ * stack, and only the newest value on a data stack can change. `binding` is
+ * the binding's name and where it is declared; `kind` is what both are.
  */
 pub(in crate::semantic) fn changed_below_newer(
     parameter: &str,
     change: Change<'_>,
     span: Span,
     binding: (&str, Span),
+    kind: Sequence,
 ) -> Diagnostic {
     let (name, declared) = binding;
+    let noun = kind.name();
     let (action, label) = match change {
         Change::Push => ("grow".to_owned(), format!("adds to `{parameter}`")),
+        Change::Pop => (
+            "shrink".to_owned(),
+            format!("takes an element off `{parameter}`"),
+        ),
         Change::Replace => ("be replaced".to_owned(), format!("replaces `{parameter}`")),
         Change::Pass(callee) => (
             "be passed with `variable`".to_owned(),
@@ -128,10 +209,10 @@ pub(in crate::semantic) fn changed_below_newer(
     };
     Diagnostic::new(
         ErrorCode::L0704,
-        format!("`{parameter}` cannot {action} here, where a newer list may sit above it"),
+        format!("`{parameter}` cannot {action} here, where a newer {noun} may sit above it"),
         Label::new(span, label),
         Help::text(format!(
-            "only the newest list on a data stack can change; change `{parameter}` before `{name}` is declared, or after the block that declares it ends"
+            "only the newest {noun} on a data stack can change; change `{parameter}` before `{name}` is declared, or after the block that declares it ends"
         )),
     )
     .with_secondary(Label::new(

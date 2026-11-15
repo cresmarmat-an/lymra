@@ -27,13 +27,15 @@ use lymra::frontend;
 use lymra::optimize;
 
 /// The programs of the memory model study in `docs/memory` that the compiler builds; later phases add the rest.
-const STUDY_PROGRAMS: [&str; 7] = [
+const STUDY_PROGRAMS: [&str; 9] = [
+    "document_tree",
     "expressions",
     "life",
     "routes",
     "shapes",
     "statistics",
     "tokens",
+    "undo",
     "word_count",
 ];
 

@@ -52,7 +52,7 @@ From 04 on, they are the chapter of the [specification](../spec.md) the rule com
 | [L0409](L0409.md) | array or list type written wrong |
 | [L0410](L0410.md) | value too large for the call stack |
 | [L0411](L0411.md) | index out of range |
-| [L0412](L0412.md) | `array(value)` or `list()` without a type |
+| [L0412](L0412.md) | `array(value)`, `list()` or `stack()` without a type |
 | [L0413](L0413.md) | unknown field |
 | [L0414](L0414.md) | field not given once by name |
 | [L0415](L0415.md) | type contains itself |
@@ -67,5 +67,6 @@ From 04 on, they are the chapter of the [specification](../spec.md) the rule com
 | [L0601](L0601.md) | `break` or `continue` outside a loop |
 | [L0602](L0602.md) | unreachable code |
 | [L0701](L0701.md) | view outlives what it shows |
+| [L0702](L0702.md) | stack popped while something still uses it |
 | [L0703](L0703.md) | value replaced while something still uses it |
 | [L0704](L0704.md) | list changed while a newer list sits above it |

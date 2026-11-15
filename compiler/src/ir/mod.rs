@@ -10,8 +10,8 @@
 mod types;
 
 pub use types::{
-    ArrayType, ChoiceType, CustomType, FieldType, FloatType, IntegerType, Layout, ListType, Type,
-    Value, ViewType,
+    ArrayType, ChoiceType, CustomType, FieldType, FloatType, IntegerType, Layout, ListType,
+    Sequence, Type, Value, ViewType,
 };
 
 use crate::ast::OptimizeMode;
@@ -178,12 +178,22 @@ pub enum PlaceStep {
 #[derive(Clone, Debug)]
 pub struct PlaceIndex {
     pub value: Expr,
-    /// The length of the array or list the index selects from.
-    pub length: Extent,
+    /// The type of the array, list or stack the index selects from.
+    pub indexed: Type,
     /// Whether the index can fall outside its array and has to be checked when the program runs.
     pub checked: bool,
     /// The place up to and including this index, which a failed check points at.
     pub span: Span,
+}
+
+impl PlaceIndex {
+    /// The length of the array, list or stack the index selects from.
+    pub fn length(&self) -> Extent {
+        match self.indexed.as_array() {
+            Some(array) => Extent::Fixed(array.length),
+            None => Extent::Dynamic,
+        }
+    }
 }
 
 /// How many elements a value that can be indexed has.
@@ -319,6 +329,10 @@ pub enum ExprKind {
     },
     /// `bytes(text)`: the bytes of a text as a `view[unsigned8]`.
     Bytes(Box<Expr>),
+    /// `pop(variable stack)`: takes the top element off a stack and gives it. An empty stack stops the program.
+    Pop(LocalId),
+    /// `top(stack)`: the top element of a stack, left where it is. An empty stack stops the program.
+    Top(Box<Expr>),
     /// `length(value)` of a text, or of an array that has to be computed because computing it has effects.
     Length(Box<Expr>),
     /// `Frog(name = "Kero", age = 3)`: a value of a declared type, its fields in the order they are written.
@@ -356,9 +370,11 @@ impl Expr {
             | ExprKind::Length(operand)
             | ExprKind::View(operand)
             | ExprKind::Bytes(operand)
+            | ExprKind::Top(operand)
             | ExprKind::Field {
                 object: operand, ..
             } => operand.mentions(local),
+            ExprKind::Pop(stack) => *stack == local,
             ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
                 fields.iter().any(|field| field.value.mentions(local))
             }
@@ -401,8 +417,8 @@ impl Expr {
             | ExprKind::Field {
                 object: operand, ..
             } => operand.has_effects(),
-            // A slice whose positions fall outside its items stops the program.
-            ExprKind::Slice { .. } => true,
+            // A slice whose positions fall outside its items stops the program, and so does an empty stack.
+            ExprKind::Slice { .. } | ExprKind::Pop(_) | ExprKind::Top(_) => true,
             ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
                 fields.iter().any(|field| field.value.has_effects())
             }

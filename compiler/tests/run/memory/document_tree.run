@@ -1,0 +1,14 @@
+exit status 0
+--- standard output
+depth 0: 0
+depth 1: 1
+depth 1: 0
+depth 2: 2
+depth 2: 3
+depth 1: 4
+depth 1: 0
+depth 2: 5
+depth 2: 0
+depth 3: 6
+depth 3: 7
+--- standard error

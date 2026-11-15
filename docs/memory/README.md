@@ -2,7 +2,7 @@
 
 Section 7 of the [specification](../spec.md) is the core of Lymra: memory safety without a garbage collector, reference counting or a borrow checker. This study tested the model against programs people actually write before any of it was implemented, while changing it still cost only text.
 
-**Status:** data stacks, lists, views and the rules that keep them safe (L0701, L0703, L0704) are implemented. Seven of the twelve programs build and run, and the run tests check their output with every C compiler: expressions, life, routes, shapes, statistics, tokens and word_count. The rest wait for stacks, pools, lists inside values, text built from values and `with` blocks.
+**Status:** data stacks, lists, stacks, views and the rules that keep them safe (L0701, L0702, L0703, L0704) are implemented. Nine of the twelve programs build and run, and the run tests check their output with every C compiler: document_tree, expressions, life, routes, shapes, statistics, tokens, undo and word_count. The rest wait for pools, lists inside values, text built from values and `with` blocks.
 
 ## Method
 

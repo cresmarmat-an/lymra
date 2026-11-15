@@ -1,0 +1,9 @@
+exit status 70
+--- standard output
+2
+--- standard error
+error: index 1 is out of range for a stack of length 1
+  --> tests/run/stack_store_past_end.lym:13:5
+   |
+13 |     work[1] = taken
+   |     ^^^^^^^

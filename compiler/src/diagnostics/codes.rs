@@ -92,7 +92,7 @@ error_codes! {
     L0409 => "array or list type written wrong",
     L0410 => "value too large for the call stack",
     L0411 => "index out of range",
-    L0412 => "`array(value)` or `list()` without a type",
+    L0412 => "`array(value)`, `list()` or `stack()` without a type",
     L0413 => "unknown field",
     L0414 => "field not given once by name",
     L0415 => "type contains itself",
@@ -107,6 +107,7 @@ error_codes! {
     L0601 => "`break` or `continue` outside a loop",
     L0602 => "unreachable code",
     L0701 => "view outlives what it shows",
+    L0702 => "stack popped while something still uses it",
     L0703 => "value replaced while something still uses it",
     L0704 => "list changed while a newer list sits above it",
 }

@@ -25,11 +25,17 @@ function main()
     variable list[integer64] items = list()
     push(variable items, 1)
     items[0] = emptied(variable items)
+    variable stack[integer64] work = stack()
+    push(variable work, 0)
+    work[0] = pop(variable work)
+    work[pop(variable work)] = 7
 
     # Each of these is allowed: the uses happen in separate expressions, one after another.
     apples = take_one(variable apples)
     constant cleared = emptied(variable items)
     push(variable items, cleared)
+    constant popped = pop(variable work)
+    push(variable work, popped)
     if take_one(variable pears) > 0
         print("first")
     else if pears > 2

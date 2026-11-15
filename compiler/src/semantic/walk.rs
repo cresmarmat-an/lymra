@@ -1,12 +1,14 @@
 /*!
  * Walks over the checked program that the whole-program passes share: the
- * calls a statement makes, and the blocks it holds.
+ * expressions a statement computes, the calls and pops inside them, and the
+ * blocks a statement holds.
  */
 
-use crate::ir::{Argument, Block, Call, Expr, ExprKind, PlaceStep, PrintPart, Statement};
+use crate::ir::{Argument, Block, Call, Expr, ExprKind, LocalId, PlaceStep, PrintPart, Statement};
+use crate::source::Span;
 
-/// Every call a statement makes outside the blocks it holds.
-pub(super) fn statement_calls<'a>(statement: &'a Statement, calls: &mut Vec<&'a Call>) {
+/// The expressions a statement computes outside the blocks it holds; for a call statement, the values it passes.
+fn statement_exprs(statement: &Statement) -> Vec<&Expr> {
     match statement {
         Statement::Declare { value, .. }
         | Statement::Discard(value)
@@ -17,34 +19,118 @@ pub(super) fn statement_calls<'a>(statement: &'a Statement, calls: &mut Vec<&'a 
             condition: value, ..
         }
         | Statement::ForEach { array: value, .. }
-        | Statement::Match { value, .. } => expr_calls(value, calls),
-        Statement::Assign { target, value } => {
-            for step in &target.steps {
-                if let PlaceStep::Index(index) = step {
-                    expr_calls(&index.value, calls);
-                }
-            }
-            expr_calls(value, calls);
-        }
-        Statement::Call(call) => call_calls(call, calls),
-        Statement::Print(parts) => {
-            for part in parts {
-                if let PrintPart::Value { value, .. } = part {
-                    expr_calls(value, calls);
-                }
-            }
-        }
-        Statement::If { branches, .. } => {
-            for branch in branches {
-                expr_calls(&branch.condition, calls);
-            }
-        }
-        Statement::ForRange { start, end, .. } => {
-            expr_calls(start, calls);
-            expr_calls(end, calls);
-        }
-        Statement::Return(None) | Statement::Break | Statement::Continue => {}
+        | Statement::Match { value, .. } => vec![value],
+        Statement::Assign { target, value } => target
+            .steps
+            .iter()
+            .filter_map(|step| match step {
+                PlaceStep::Index(index) => Some(&index.value),
+                PlaceStep::Field(_) => None,
+            })
+            .chain([value])
+            .collect(),
+        Statement::Call(call) => argument_values(call).collect(),
+        Statement::Print(parts) => parts
+            .iter()
+            .filter_map(|part| match part {
+                PrintPart::Value { value, .. } => Some(value),
+                PrintPart::Text(_) => None,
+            })
+            .collect(),
+        Statement::If { branches, .. } => branches.iter().map(|branch| &branch.condition).collect(),
+        Statement::ForRange { start, end, .. } => vec![start, end],
+        Statement::Return(None) | Statement::Break | Statement::Continue => Vec::new(),
     }
+}
+
+/// The values a call passes, leaving out the bindings it passes with `variable`.
+fn argument_values(call: &Call) -> impl Iterator<Item = &Expr> {
+    call.arguments.iter().filter_map(|argument| match argument {
+        Argument::Value(value) => Some(value),
+        Argument::Reference { .. } => None,
+    })
+}
+
+/// Visits `expr` and every expression inside it, the values passed to calls included.
+pub(super) fn each_expr<'a>(expr: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
+    visit(expr);
+    match &expr.kind {
+        ExprKind::Literal(_)
+        | ExprKind::Local(_)
+        | ExprKind::Constant(_)
+        | ExprKind::EmptyList
+        | ExprKind::Pop(_) => {}
+        ExprKind::Call(call) => {
+            for value in argument_values(call) {
+                each_expr(value, visit);
+            }
+        }
+        ExprKind::Negate { operand, .. }
+        | ExprKind::Not(operand)
+        | ExprKind::Convert { operand, .. }
+        | ExprKind::Fill(operand)
+        | ExprKind::Length(operand)
+        | ExprKind::View(operand)
+        | ExprKind::Bytes(operand)
+        | ExprKind::Top(operand)
+        | ExprKind::Field {
+            object: operand, ..
+        } => each_expr(operand, visit),
+        ExprKind::Slice { items, start, end } => {
+            each_expr(items, visit);
+            each_expr(start, visit);
+            each_expr(end, visit);
+        }
+        ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
+            for field in fields {
+                each_expr(&field.value, visit);
+            }
+        }
+        ExprKind::Arithmetic { left, right, .. }
+        | ExprKind::Compare { left, right, .. }
+        | ExprKind::Logic { left, right, .. }
+        | ExprKind::Wrapping { left, right, .. }
+        | ExprKind::Index {
+            array: left,
+            index: right,
+            ..
+        } => {
+            each_expr(left, visit);
+            each_expr(right, visit);
+        }
+    }
+}
+
+/// Every call inside an expression.
+fn expr_calls<'a>(expr: &'a Expr, calls: &mut Vec<&'a Call>) {
+    each_expr(expr, &mut |inner| {
+        if let ExprKind::Call(call) = &inner.kind {
+            calls.push(call);
+        }
+    });
+}
+
+/// Every call a statement makes outside the blocks it holds.
+pub(super) fn statement_calls<'a>(statement: &'a Statement, calls: &mut Vec<&'a Call>) {
+    if let Statement::Call(call) = statement {
+        calls.push(call);
+    }
+    for expr in statement_exprs(statement) {
+        expr_calls(expr, calls);
+    }
+}
+
+/// Every stack a statement pops outside the blocks it holds, with where.
+pub(super) fn statement_pops(statement: &Statement) -> Vec<(LocalId, Span)> {
+    let mut pops = Vec::new();
+    for expr in statement_exprs(statement) {
+        each_expr(expr, &mut |inner| {
+            if let ExprKind::Pop(stack) = inner.kind {
+                pops.push((stack, inner.span));
+            }
+        });
+    }
+    pops
 }
 
 /// The blocks a statement holds, in order.
@@ -63,56 +149,5 @@ pub(super) fn statement_blocks(statement: &Statement) -> Vec<&Block> {
         | Statement::ForEach { body, .. } => vec![body],
         Statement::Match { cases, .. } => cases.iter().map(|case| &case.body).collect(),
         _ => Vec::new(),
-    }
-}
-
-/// `call` and every call inside its arguments.
-fn call_calls<'a>(call: &'a Call, calls: &mut Vec<&'a Call>) {
-    calls.push(call);
-    for argument in &call.arguments {
-        if let Argument::Value(value) = argument {
-            expr_calls(value, calls);
-        }
-    }
-}
-
-/// Every call inside an expression.
-pub(super) fn expr_calls<'a>(expr: &'a Expr, calls: &mut Vec<&'a Call>) {
-    match &expr.kind {
-        ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) | ExprKind::EmptyList => {
-        }
-        ExprKind::Call(call) => call_calls(call, calls),
-        ExprKind::Negate { operand, .. }
-        | ExprKind::Not(operand)
-        | ExprKind::Convert { operand, .. }
-        | ExprKind::Fill(operand)
-        | ExprKind::Length(operand)
-        | ExprKind::View(operand)
-        | ExprKind::Bytes(operand)
-        | ExprKind::Field {
-            object: operand, ..
-        } => expr_calls(operand, calls),
-        ExprKind::Slice { items, start, end } => {
-            expr_calls(items, calls);
-            expr_calls(start, calls);
-            expr_calls(end, calls);
-        }
-        ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
-            for field in fields {
-                expr_calls(&field.value, calls);
-            }
-        }
-        ExprKind::Arithmetic { left, right, .. }
-        | ExprKind::Compare { left, right, .. }
-        | ExprKind::Logic { left, right, .. }
-        | ExprKind::Wrapping { left, right, .. }
-        | ExprKind::Index {
-            array: left,
-            index: right,
-            ..
-        } => {
-            expr_calls(left, calls);
-            expr_calls(right, calls);
-        }
     }
 }

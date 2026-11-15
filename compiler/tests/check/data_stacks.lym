@@ -1,7 +1,8 @@
 #[
     Error L0704. Each call of a function that calls itself puts its own
-    copy of a list binding above the copy of the call before it, so it can
-    change an older copy that reaches it only before its own copy exists.
+    copy of a list or stack binding above the copy of the call before it, so
+    it can change an older copy that reaches it only before its own copy
+    exists.
 ]#
 
 function digits_of(variable list[integer64] digits, integer64 value)
@@ -65,6 +66,14 @@ function grown(variable list[integer64] values) returns list[integer64]
     push(variable values, 2)
     return values
 
+function walk(variable stack[integer64] pending, integer64 depth)
+    variable stack[integer64] mine = stack()
+    push(variable mine, depth)
+    if depth > 0
+        walk(variable mine, depth - 1)
+    if length(pending) > 0
+        constant _ = pop(variable pending)
+
 function main()
     variable list[integer64] values = list()
     digits_of(variable values, 2026)
@@ -75,3 +84,6 @@ function main()
     changed_each_turn(variable values, 2)
     one_list(variable values, 2)
     freed_before(variable values, 2)
+    variable stack[integer64] pending = stack()
+    push(variable pending, 0)
+    walk(variable pending, 2)

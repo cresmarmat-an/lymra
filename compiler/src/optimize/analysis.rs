@@ -517,6 +517,8 @@ impl<'function> Analyzer<'function> {
             | ExprKind::View(_)
             | ExprKind::Slice { .. }
             | ExprKind::Bytes(_)
+            | ExprKind::Pop(_)
+            | ExprKind::Top(_)
             | ExprKind::EmptyList
             | ExprKind::Construct(_)
             | ExprKind::Variant { .. }
@@ -579,7 +581,8 @@ impl<'function> Analyzer<'function> {
             ExprKind::Literal(_)
             | ExprKind::Local(_)
             | ExprKind::Constant(_)
-            | ExprKind::EmptyList => {}
+            | ExprKind::EmptyList
+            | ExprKind::Pop(_) => {}
             ExprKind::Negate { operand, .. }
             | ExprKind::Not(operand)
             | ExprKind::Convert { operand, .. }
@@ -587,6 +590,7 @@ impl<'function> Analyzer<'function> {
             | ExprKind::Length(operand)
             | ExprKind::View(operand)
             | ExprKind::Bytes(operand)
+            | ExprKind::Top(operand)
             | ExprKind::Field {
                 object: operand, ..
             } => {
@@ -749,7 +753,7 @@ impl<'function> Analyzer<'function> {
                             let list = (position == 0).then_some(target.local);
                             self.prove_index(
                                 &index.value,
-                                Bound::of(index.length, indexed),
+                                Bound::of(index.length(), indexed),
                                 list,
                                 &mut index.checked,
                                 bounds,

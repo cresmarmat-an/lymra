@@ -1,0 +1,14 @@
+#[
+    Reading the top of an empty stack stops the program, here inside the
+    function that reads it.
+]#
+
+function newest(stack[integer64] waiting) returns integer64
+    return top(waiting)
+
+function main()
+    variable stack[integer64] waiting = stack()
+    push(variable waiting, 4)
+    print("{newest(waiting)}")
+    constant _ = pop(variable waiting)
+    print("{newest(waiting)}")

@@ -150,7 +150,7 @@ pub enum Type {
     Custom(Arc<CustomType>),
     /// A type the program declares with `choice`, shared like an array.
     Choice(Arc<ChoiceType>),
-    /// `list[element]`, which grows while it lives (spec 4.4), shared like an array.
+    /// `list[element]` or `stack[element]`, which grow while they live (spec 4.4), shared like an array.
     List(Arc<ListType>),
     /// `view[element]`, a read-only window into elements kept elsewhere (spec 4.4), shared like an array.
     View(Arc<ViewType>),
@@ -244,10 +244,33 @@ pub struct ArrayType {
     pub length: u64,
 }
 
-/// Elements of one type that a program adds one at a time, in place, on a data stack (spec 7.2).
+/**
+ * Elements of one type that a program adds one at a time, in place, on a
+ * data stack (spec 7.2). A stack can also take its top element off.
+ */
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ListType {
     pub element: Type,
+    pub kind: Sequence,
+}
+
+/// Whether elements only come onto a list, or can go again from the top, as on a stack.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Sequence {
+    /// `list[T]`: grows only.
+    List,
+    /// `stack[T]`: grows with `push` and shrinks with `pop`.
+    Stack,
+}
+
+impl Sequence {
+    /// The name of the type, as written: `list` or `stack`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Stack => "stack",
+        }
+    }
 }
 
 /// Elements of one type that an array, a list or a text keeps, read through a window that owns none of them (spec 4.4).
@@ -262,7 +285,12 @@ impl Type {
     }
 
     pub fn list(element: Type) -> Type {
-        Type::List(Arc::new(ListType { element }))
+        Type::sequence(element, Sequence::List)
+    }
+
+    /// A list or a stack of `element`, as `kind` says.
+    pub fn sequence(element: Type, kind: Sequence) -> Type {
+        Type::List(Arc::new(ListType { element, kind }))
     }
 
     pub fn view(element: Type) -> Type {
@@ -458,7 +486,7 @@ impl fmt::Display for Type {
             Self::Array(array) => write!(formatter, "array[{}, {}]", array.element, array.length),
             Self::Custom(custom) => formatter.write_str(&custom.name),
             Self::Choice(choice) => formatter.write_str(&choice.name),
-            Self::List(list) => write!(formatter, "list[{}]", list.element),
+            Self::List(list) => write!(formatter, "{}[{}]", list.kind.name(), list.element),
             Self::View(view) => write!(formatter, "view[{}]", view.element),
         }
     }

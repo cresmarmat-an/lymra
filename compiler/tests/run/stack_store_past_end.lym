@@ -1,0 +1,14 @@
+#[
+    Storing through an index past the end of a stack stops the program
+    before anything is written, and the error names the stack.
+]#
+
+function main()
+    variable stack[integer64] work = stack()
+    push(variable work, 1)
+    push(variable work, 2)
+    constant taken = pop(variable work)
+    work[0] = taken
+    print("{work[0]}")
+    work[1] = taken
+    print("not reached")

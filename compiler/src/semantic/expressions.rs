@@ -20,8 +20,8 @@ use crate::ast::{self, ArgumentKind, BinaryOperator, UnaryOperator};
 use crate::diagnostics::{Diagnostic, ErrorReported, Help};
 use crate::foreign_types::translate_type;
 use crate::ir::{
-    self, ArithmeticOperator, ComparisonOperator, FloatType, IntegerType, LogicOperator, Type,
-    Value,
+    self, ArithmeticOperator, ComparisonOperator, FloatType, IntegerType, LogicOperator, Sequence,
+    Type, Value,
 };
 use crate::source::Span;
 
@@ -783,7 +783,10 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         match name {
             "print" => return self.check_print(call, span),
             "array" => return self.check_fill(call, span, hint),
-            "list" => return self.check_empty_list(call, span, hint),
+            "list" => return self.check_empty_list(call, span, hint, Sequence::List),
+            "stack" => return self.check_empty_list(call, span, hint, Sequence::Stack),
+            "pop" => return self.check_pop(call, span),
+            "top" => return self.check_top(call, span),
             "push" => return self.check_push(call, span),
             "slice" => return self.check_slice(call, span),
             "bytes" => return self.check_bytes(call, span),

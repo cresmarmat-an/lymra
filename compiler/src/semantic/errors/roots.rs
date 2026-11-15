@@ -1,74 +1,118 @@
-//! The wording of the errors about what views show: L0701 and L0703.
+//! The wording of the errors about what views show: L0701, L0702 and L0703.
 
 use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
+use crate::ir::Sequence;
 use crate::source::Span;
 
-/// How a list is replaced where error L0703 points.
+/// How a list frees elements that a view or a `for` loop may still read, where L0702 or L0703 points.
 #[derive(Clone, Copy, Debug)]
-pub(in crate::semantic) enum Replacement<'a> {
+pub(in crate::semantic) enum Freeing<'a> {
     /// Assigned a whole new value; the span is the target as written.
     Assigned(Span),
     /// Passed with `variable` to the function named, which can replace it; the span is the argument as written.
-    Passed(Span, &'a str),
+    PassedToReplace(Span, &'a str),
+    /// Popped; the span is the `pop` call.
+    Popped(Span),
+    /// Passed with `variable` to the function named, which can pop it; the span is the argument as written.
+    PassedToPop(Span, &'a str),
 }
 
-/// A list replaced while a `for` loop goes over it, or over a view of it, named at `iterable`.
-pub(in crate::semantic) fn replaced_while_iterated(
+impl Freeing<'_> {
+    fn code(self) -> ErrorCode {
+        match self {
+            Self::Assigned(_) | Self::PassedToReplace(..) => ErrorCode::L0703,
+            Self::Popped(_) | Self::PassedToPop(..) => ErrorCode::L0702,
+        }
+    }
+
+    fn span(self) -> Span {
+        match self {
+            Self::Assigned(span)
+            | Self::PassedToReplace(span, _)
+            | Self::Popped(span)
+            | Self::PassedToPop(span, _) => span,
+        }
+    }
+
+    /// What the error says `list` cannot be: "replaced", "popped", or passed on.
+    fn verb(self) -> &'static str {
+        match self {
+            Self::Assigned(_) => "replaced",
+            Self::Popped(_) => "popped",
+            Self::PassedToReplace(..) | Self::PassedToPop(..) => "passed with `variable`",
+        }
+    }
+}
+
+/// A list or a stack, as `kind` says, that frees elements as `how` says while a `for` loop goes over it, or over a view of it, named at `iterable`.
+pub(in crate::semantic) fn freed_while_iterated(
     list: &str,
-    how: Replacement<'_>,
+    kind: Sequence,
+    how: Freeing<'_>,
     iterable: Span,
 ) -> Diagnostic {
-    let (message, span, label, help) = match how {
-        Replacement::Assigned(span) => (
-            format!("`{list}` cannot be replaced while a `for` loop goes over it"),
-            span,
-            "this replaces the whole list".to_owned(),
+    let noun = kind.name();
+    let (label, help) = match how {
+        Freeing::Assigned(_) => (
+            format!("this replaces the whole {noun}"),
             "change its elements or `push` to it inside the loop, and replace it after the loop ends"
                 .to_owned(),
         ),
-        Replacement::Passed(span, function) => (
-            format!("`{list}` cannot be passed with `variable` while a `for` loop goes over it"),
-            span,
-            format!("`{function}` can replace the whole list"),
+        Freeing::PassedToReplace(_, function) => (
+            format!("`{function}` can replace the whole {noun}"),
             format!(
                 "call `{function}` after the loop; `push` and changing elements are fine inside it"
             ),
         ),
+        Freeing::Popped(_) => (
+            format!("this takes the top element off `{list}`"),
+            format!(
+                "to take each element off in turn, loop with `while length({list}) > 0` and `pop` inside it"
+            ),
+        ),
+        Freeing::PassedToPop(_, function) => (
+            format!("`{function}` can take elements off `{list}`"),
+            format!(
+                "call `{function}` after the loop, or loop with `while length({list}) > 0` instead of `for`"
+            ),
+        ),
     };
     Diagnostic::new(
-        ErrorCode::L0703,
-        message,
-        Label::new(span, label),
+        how.code(),
+        format!(
+            "`{list}` cannot be {} while a `for` loop goes over it",
+            how.verb()
+        ),
+        Label::new(how.span(), label),
         Help::text(help),
     )
     .with_secondary(Label::new(iterable, "the loop goes over it here"))
 }
 
-/// A list replaced while `view`, declared at `declared`, still shows it.
-pub(in crate::semantic) fn replaced_while_viewed(
+/// A list or a stack, as `kind` says, that frees elements as `how` says while `view`, declared at `declared`, still shows it.
+pub(in crate::semantic) fn freed_while_viewed(
     list: &str,
+    kind: Sequence,
     view: &str,
-    how: Replacement<'_>,
+    how: Freeing<'_>,
     declared: Span,
 ) -> Diagnostic {
-    let (message, span, label) = match how {
-        Replacement::Assigned(span) => (
-            format!("`{list}` cannot be replaced while `{view}`, a view of it, is still used"),
-            span,
-            format!("this frees the elements `{view}` shows"),
-        ),
-        Replacement::Passed(span, function) => (
-            format!(
-                "`{list}` cannot be passed with `variable` while `{view}`, a view of it, is still used"
-            ),
-            span,
-            format!("`{function}` can replace the whole list"),
-        ),
+    let noun = kind.name();
+    let label = match how {
+        Freeing::Assigned(_) => format!("this frees the elements `{view}` shows"),
+        Freeing::PassedToReplace(_, function) => {
+            format!("`{function}` can replace the whole {noun}")
+        }
+        Freeing::Popped(_) => format!("this frees the top element, which `{view}` can show"),
+        Freeing::PassedToPop(_, function) => format!("`{function}` can take elements off `{list}`"),
     };
     Diagnostic::new(
-        ErrorCode::L0703,
-        message,
-        Label::new(span, label),
+        how.code(),
+        format!(
+            "`{list}` cannot be {} while `{view}`, a view of it, is still used",
+            how.verb()
+        ),
+        Label::new(how.span(), label),
         Help::text(format!(
             "finish with `{view}` before `{list}` changes, or copy what `{view}` shows into a list of its own"
         )),

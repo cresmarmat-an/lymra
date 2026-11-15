@@ -7,7 +7,7 @@
  * statement computes without a binding is freed once the statement is done.
  */
 
-use super::expressions::{Bounds, is_addressable};
+use super::expressions::{Bounds, indexed_noun, is_addressable};
 use super::types::list_function;
 use super::{
     DESTINATION, Generator, INDENT, Release, Scope, Writer, c_syntax, data_stack, local_access,
@@ -343,14 +343,10 @@ impl Generator<'_, '_> {
                 }
             };
             let bounds = Bounds {
-                length: index.length,
+                length: index.length(),
                 checked: index.checked,
                 span: index.span,
-                // Only arrays and lists can be changed through an index; a view only reads.
-                indexed: match index.length {
-                    Extent::Fixed(_) => "an array",
-                    Extent::Dynamic => "a list",
-                },
+                indexed: indexed_noun(&index.indexed),
             };
             let code = self.position(function, &index.value, bounds, &place, writer);
             let later_effect = effects[position + 1..].iter().any(|&effect| effect);

@@ -1,0 +1,10 @@
+exit status 70
+--- standard output
+4
+--- standard error
+error: the stack is empty
+ --> tests/run/top_empty.lym:7:12
+  |
+7 |     return top(waiting)
+  |            ^^^^^^^^^^^^
+help: check that `length` is above 0 before `pop` or `top`

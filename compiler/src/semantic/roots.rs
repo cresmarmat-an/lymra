@@ -15,6 +15,9 @@
  *   statement frees, or of a binding whose block ends first; a function
  *   returns a view of its own binding; or a `variable` view parameter is
  *   given one, which the caller would keep.
+ * - L0702: a stack is popped, or passed with `variable` to a function that
+ *   can pop it, while a view of it is still used, or while a `for` loop goes
+ *   over it: the view or the loop could read the element taken off.
  * - L0703: a list is replaced, or passed with `variable` to a function that
  *   can replace it, while a view of it is still used, or while a `for` loop
  *   goes over it. A `push` keeps the elements where they are, so it is fine.
@@ -22,11 +25,12 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use super::errors::{self, Replacement};
-use super::walk::{statement_blocks, statement_calls};
+use super::errors::{self, Freeing};
+use super::walk::{statement_blocks, statement_calls, statement_pops};
 use crate::diagnostics::Diagnostic;
 use crate::ir::{
-    Argument, Block, Call, Expr, ExprKind, Function, LocalId, PlaceStep, PrintPart, Statement, Type,
+    Argument, Block, Call, Expr, ExprKind, Function, LocalId, PlaceStep, PrintPart, Sequence,
+    Statement, Type,
 };
 use crate::source::Span;
 
@@ -52,9 +56,11 @@ struct Summary {
     takes: BTreeMap<usize, BTreeSet<usize>>,
     /// The positions of the `variable` list parameters it can replace, itself or through a call.
     replaces: BTreeSet<usize>,
+    /// The positions of the `variable` stack parameters it can pop, itself or through a call.
+    pops: BTreeSet<usize>,
 }
 
-/// Every error L0701 and L0703 in the program, in source order.
+/// Every error L0701, L0702 and L0703 in the program, in source order.
 pub(super) fn check(functions: &[Function<'_>]) -> Vec<Diagnostic> {
     let mut summaries = vec![Summary::default(); functions.len()];
     loop {
@@ -248,7 +254,7 @@ impl<'a, 'src> Analysis<'a, 'src> {
             .collect()
     }
 
-    /// Adds what the statements of `block` return and replace to `summary`.
+    /// Adds what the statements of `block` return, replace and pop to `summary`.
     fn summarize(&self, block: &Block, summary: &mut Summary) {
         for statement in &block.statements {
             match statement {
@@ -265,35 +271,24 @@ impl<'a, 'src> Analysis<'a, 'src> {
                 }
                 _ => {}
             }
+            for (stack, _) in statement_pops(statement) {
+                summary.pops.extend(self.parameter_position(stack));
+            }
             let mut calls = Vec::new();
             statement_calls(statement, &mut calls);
             for call in calls {
-                for (list, _) in self.replaced_by(call) {
+                let callee = &self.summaries[call.function];
+                for (list, _) in passed_at(call, &callee.replaces) {
                     summary.replaces.extend(self.parameter_position(list));
+                }
+                for (stack, _) in passed_at(call, &callee.pops) {
+                    summary.pops.extend(self.parameter_position(stack));
                 }
             }
             for body in statement_blocks(statement) {
                 self.summarize(body, summary);
             }
         }
-    }
-
-    /**
-     * The lists a call can replace, each with where it is passed: those it
-     * passes with `variable` to a parameter that its function can replace.
-     */
-    fn replaced_by(&self, call: &Call) -> Vec<(LocalId, Span)> {
-        let replaces = &self.summaries[call.function].replaces;
-        call.arguments
-            .iter()
-            .enumerate()
-            .filter_map(|(position, argument)| match *argument {
-                Argument::Reference { local, span } if replaces.contains(&position) => {
-                    Some((local, span))
-                }
-                Argument::Reference { .. } | Argument::Value(_) => None,
-            })
-            .collect()
     }
 
     fn diagnostics(&self) -> Vec<Diagnostic> {
@@ -309,6 +304,20 @@ impl<'a, 'src> Analysis<'a, 'src> {
         checks.block(&self.function.body, Live::new());
         checks.diagnostics
     }
+}
+
+/// The bindings a call passes with `variable` to the parameters at `positions`, each with where it is passed.
+fn passed_at(call: &Call, positions: &BTreeSet<usize>) -> Vec<(LocalId, Span)> {
+    call.arguments
+        .iter()
+        .enumerate()
+        .filter_map(|(position, argument)| match *argument {
+            Argument::Reference { local, span } if positions.contains(&position) => {
+                Some((local, span))
+            }
+            Argument::Reference { .. } | Argument::Value(_) => None,
+        })
+        .collect()
 }
 
 /// Which block declares each local, and which block holds each block. The function's body is block 0.
@@ -488,9 +497,9 @@ impl Checks<'_, '_, '_> {
     }
 
     /**
-     * L0703: walks `block` backward from `live`, the views read after it,
-     * and returns the views read from its start on. A list replaced at a
-     * point where a view of it is live is the error.
+     * L0702 and L0703: walks `block` backward from `live`, the views read
+     * after it, and returns the views read from its start on. A list that
+     * frees elements at a point where a view of it is live is the error.
      */
     fn block(&mut self, block: &Block, live: Live) -> Live {
         let mut live = live;
@@ -501,22 +510,37 @@ impl Checks<'_, '_, '_> {
     }
 
     /**
-     * The views live before `statement`, given those live after it. A call
-     * in the statement's own expressions runs before the blocks it holds, so
-     * what it could replace must not be read there, by the statement itself
-     * or after it.
+     * The views live before `statement`, given those live after it. A pop
+     * or a call in the statement's own expressions runs before the blocks it
+     * holds, so what it could free must not be read there, by the statement
+     * itself or after it.
      */
     fn statement(&mut self, statement: &Statement, after: Live) -> Live {
         let mut read = Live::new();
         statement_reads(self.function(), statement, &mut read);
         let before = self.live_before(statement, after.clone(), read);
         let in_use: Live = before.union(&after).copied().collect();
+        for (stack, span) in statement_pops(statement) {
+            self.freed(stack, Freeing::Popped(span), &in_use);
+        }
         let mut calls = Vec::new();
         statement_calls(statement, &mut calls);
         for call in calls {
-            let callee = self.analysis.functions[call.function].name;
-            for (list, span) in self.analysis.replaced_by(call) {
-                self.replaced(list, Replacement::Passed(span, callee), &in_use);
+            let callee = &self.analysis.summaries[call.function];
+            let name = self.analysis.functions[call.function].name;
+            for (position, argument) in call.arguments.iter().enumerate() {
+                let Argument::Reference { local, span } = *argument else {
+                    continue;
+                };
+                // A call that can do both is reported once, for the replacement, which frees more.
+                let how = if callee.replaces.contains(&position) {
+                    Freeing::PassedToReplace(span, name)
+                } else if callee.pops.contains(&position) {
+                    Freeing::PassedToPop(span, name)
+                } else {
+                    continue;
+                };
+                self.freed(local, how, &in_use);
             }
         }
         before
@@ -533,7 +557,7 @@ impl Checks<'_, '_, '_> {
             }
             Statement::Assign { target, .. } => {
                 if target.steps.is_empty() && is_list(self.function(), target.local) {
-                    self.replaced(target.local, Replacement::Assigned(target.span), &after);
+                    self.freed(target.local, Freeing::Assigned(target.span), &after);
                 }
                 let mut live = after;
                 if target.steps.is_empty() {
@@ -634,19 +658,23 @@ impl Checks<'_, '_, '_> {
         head
     }
 
-    /// Reports `list`, replaced as `how` says, if a `for` loop goes over it or a view of it is in use.
-    fn replaced(&mut self, list: LocalId, how: Replacement<'_>, in_use: &Live) {
+    /// Reports `list`, which frees elements as `how` says, if a `for` loop goes over it or a view of it is in use.
+    fn freed(&mut self, list: LocalId, how: Freeing<'_>, in_use: &Live) {
         if !self.report {
             return;
         }
         let root = Root::Local(list);
+        let kind = self.function().locals[list]
+            .ty
+            .as_list()
+            .map_or(Sequence::List, |list| list.kind);
         let looped = self
             .iterated
             .iter()
             .rev()
             .find(|(roots, _)| roots.contains(&root));
         if let Some(&(_, loop_span)) = looped {
-            let diagnostic = errors::replaced_while_iterated(self.name(list), how, loop_span);
+            let diagnostic = errors::freed_while_iterated(self.name(list), kind, how, loop_span);
             self.diagnostics.push(diagnostic);
             return;
         }
@@ -659,7 +687,7 @@ impl Checks<'_, '_, '_> {
         if let Some(view) = viewing {
             let declared = self.function().locals[view].span;
             let diagnostic =
-                errors::replaced_while_viewed(self.name(list), self.name(view), how, declared);
+                errors::freed_while_viewed(self.name(list), kind, self.name(view), how, declared);
             self.diagnostics.push(diagnostic);
         }
     }
@@ -730,7 +758,7 @@ fn expr_reads(function: &Function<'_>, expr: &Expr, read: &mut Live) {
                 read.insert(*local);
             }
         }
-        ExprKind::Literal(_) | ExprKind::Constant(_) | ExprKind::EmptyList => {}
+        ExprKind::Literal(_) | ExprKind::Constant(_) | ExprKind::EmptyList | ExprKind::Pop(_) => {}
         ExprKind::Negate { operand, .. }
         | ExprKind::Not(operand)
         | ExprKind::Convert { operand, .. }
@@ -738,6 +766,7 @@ fn expr_reads(function: &Function<'_>, expr: &Expr, read: &mut Live) {
         | ExprKind::Length(operand)
         | ExprKind::View(operand)
         | ExprKind::Bytes(operand)
+        | ExprKind::Top(operand)
         | ExprKind::Field {
             object: operand, ..
         } => expr_reads(function, operand, read),

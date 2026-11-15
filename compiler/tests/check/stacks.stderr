@@ -1,0 +1,96 @@
+error[L0409]: a stack type names the type of its elements
+ --> tests/check/stacks.lym:8:17
+  |
+8 | function shapes(stack _, stack[integer64, 3] _, stack[list[integer64]] _)
+  |                 ^^^^^ expected `stack[element type]`
+  |
+help: write the type of the elements, as in `stack[integer64]`; a stack grows, so it has no length in its type
+
+error[L0409]: a stack type names the type of its elements
+ --> tests/check/stacks.lym:8:26
+  |
+8 | function shapes(stack _, stack[integer64, 3] _, stack[list[integer64]] _)
+  |                          ^^^^^^^^^^^^^^^^^^^ expected `stack[element type]`
+  |
+help: write the type of the elements, as in `stack[integer64]`; a stack grows, so it has no length in its type
+
+error[L0309]: lists inside other values are not available yet
+ --> tests/check/stacks.lym:8:55
+  |
+8 | function shapes(stack _, stack[integer64, 3] _, stack[list[integer64]] _)
+  |                                                       ^^^^^^^^^^^^^^^ the compiler adds this in roadmap phase 3
+  |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0402]: `pop` works on a stack, but this is a `list[integer64]`
+  --> tests/check/stacks.lym:14:39
+   |
+14 |     constant from_list = pop(variable items)
+   |                                       ^^^^^ not a stack
+   |
+help: a list only grows; declare it as a `stack` to take elements off, or read the last one as `values[length(values) - 1]`
+
+error[L0402]: `top` works on a stack, but this is a `list[integer64]`
+  --> tests/check/stacks.lym:15:27
+   |
+15 |     constant listed = top(items)
+   |                           ^^^^^ not a stack
+   |
+help: a list only grows; declare it as a `stack` to take elements off, or read the last one as `values[length(values) - 1]`
+
+error[L0402]: `top` works on a stack, but this is an `integer64`
+  --> tests/check/stacks.lym:16:27
+   |
+16 |     constant number = top(3)
+   |                           ^ not a stack
+   |
+help: pass a `stack`, as in `variable stack[integer64] values = stack()`
+
+error[L0504]: `pop` changes the stack it is given, so the stack needs `variable`
+  --> tests/check/stacks.lym:19:29
+   |
+19 |     constant unmarked = pop(work)
+   |                             ^^^^ passed without `variable`
+   |
+help: mark the stack `variable`
+   |
+19 |     constant unmarked = pop(variable work)
+
+error[L0501]: `pop` takes 1 argument, but 2 were given
+  --> tests/check/stacks.lym:20:27
+   |
+20 |     constant counted = pop(variable work, 1)
+   |                           ^^^^^^^^^^^^^^^^^^ `pop` takes the top element off one stack
+   |
+help: write `pop(variable values)`
+
+error[L0501]: `top` takes 1 argument, but 0 were given
+  --> tests/check/stacks.lym:21:27
+   |
+21 |     constant nothing = top()
+   |                           ^^ `top` reads the top element of one stack
+   |
+help: write `top(values)`
+
+error[L0412]: `stack()` needs to know which stack to build
+  --> tests/check/stacks.lym:22:24
+   |
+22 |     constant untyped = stack()
+   |                        ^^^^^^^ its element type comes from the type of the place it goes
+   |
+help: write the type where the stack goes, as in `variable stack[integer64] values = stack()`
+
+error[L0208]: `fixed` is a constant, so it cannot change
+  --> tests/check/stacks.lym:24:37
+   |
+23 |     constant stack[integer64] fixed = stack()
+   |                               ----- declared as a constant here
+24 |     constant changed = pop(variable fixed)
+   |                                     ^^^^^ changed here
+   |
+help: declare it with `variable` if it has to change
+   |
+23 |     variable stack[integer64] fixed = stack()
+
+found 11 errors in tests/check/stacks.lym
+run `lymra explain L0409` to read why a rule exists and how to fix it

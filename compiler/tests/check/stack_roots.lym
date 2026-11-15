@@ -1,0 +1,88 @@
+#[
+    Error L0702. A `pop` frees the top element of a stack, so it cannot
+    come while a `for` loop goes over the stack or a view of it, or while
+    a view of it is still used, and neither can a call that can pop it,
+    itself or through another call. A call that only pushes is fine, and
+    so is a pop after the last use of a view. A call that can both replace
+    and pop is reported once, as L0703.
+]#
+
+function take(variable stack[integer64] work) returns integer64
+    return pop(variable work)
+
+function take_through(variable stack[integer64] work) returns integer64
+    return take(variable work)
+
+function add(variable stack[integer64] work)
+    push(variable work, 1)
+
+function clear_or_take(variable stack[integer64] work, boolean clear)
+    if clear
+        work = stack()
+    else
+        constant _ = pop(variable work)
+
+function popped_in_loop()
+    variable stack[integer64] work = stack()
+    push(variable work, 1)
+    for item in work
+        constant done = pop(variable work)
+        print("{item} {done}")
+
+function popped_in_loop_over_view()
+    variable stack[integer64] work = stack()
+    push(variable work, 1)
+    for item in slice(work, 0, 1)
+        constant done = pop(variable work)
+        print("{item} {done}")
+
+function popped_while_viewed()
+    variable stack[integer64] work = stack()
+    push(variable work, 1)
+    constant window = slice(work, 0, 1)
+    constant done = pop(variable work)
+    print("{window[0]} {done}")
+
+function passed_in_loop()
+    variable stack[integer64] work = stack()
+    push(variable work, 1)
+    for item in work
+        constant done = take_through(variable work)
+        add(variable work)
+        print("{item} {done}")
+
+function passed_while_viewed()
+    variable stack[integer64] work = stack()
+    push(variable work, 1)
+    constant window = slice(work, 0, 1)
+    constant done = take(variable work)
+    print("{window[0]} {done}")
+
+function replaced_or_popped()
+    variable stack[integer64] work = stack()
+    push(variable work, 1)
+    for item in work
+        clear_or_take(variable work, item > 0)
+
+function fine()
+    variable stack[integer64] work = stack()
+    push(variable work, 1)
+    constant window = slice(work, 0, 1)
+    print("{window[0]}")
+    constant done = pop(variable work)
+    for item in work
+        push(variable work, item)
+    variable stack[integer64] copy = work
+    for item in work
+        constant taken = pop(variable copy)
+        print("{item} {taken}")
+    print("{done}")
+
+function main()
+    popped_in_loop()
+    popped_in_loop_over_view()
+    popped_while_viewed()
+    passed_in_loop()
+    passed_while_viewed()
+    replaced_or_popped()
+    fine()

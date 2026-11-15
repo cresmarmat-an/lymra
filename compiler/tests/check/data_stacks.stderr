@@ -1,46 +1,57 @@
 error[L0704]: `digits` cannot grow here, where a newer list may sit above it
-  --> tests/check/data_stacks.lym:12:9
+  --> tests/check/data_stacks.lym:13:9
    |
- 8 |     variable list[integer64] higher = list()
+ 9 |     variable list[integer64] higher = list()
    |                              ------ `digits` can be an earlier call's `higher`, and this `higher` sits above it
 ...
-12 |         push(variable digits, digit)
+13 |         push(variable digits, digit)
    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ adds to `digits`
    |
 help: only the newest list on a data stack can change; change `digits` before `higher` is declared, or after the block that declares it ends
 
 error[L0704]: `values` cannot be replaced here, where a newer list may sit above it
-  --> tests/check/data_stacks.lym:18:9
+  --> tests/check/data_stacks.lym:19:9
    |
-15 |     variable list[integer64] mine = list()
+16 |     variable list[integer64] mine = list()
    |                              ---- `values` can be an earlier call's `mine`, and this `mine` sits above it
 ...
-18 |         values = list()
+19 |         values = list()
    |         ^^^^^^ replaces `values`
    |
 help: only the newest list on a data stack can change; change `values` before `mine` is declared, or after the block that declares it ends
 
 error[L0704]: `values` cannot be passed with `variable` here, where a newer list may sit above it
-  --> tests/check/data_stacks.lym:24:17
+  --> tests/check/data_stacks.lym:25:17
    |
-21 |     variable list[integer64] mine = list()
+22 |     variable list[integer64] mine = list()
    |                              ---- `values` can be an earlier call's `mine`, and this `mine` sits above it
 ...
-24 |         add_one(variable values)
+25 |         add_one(variable values)
    |                 ^^^^^^^^^^^^^^^ `add_one` can change `values`
    |
 help: only the newest list on a data stack can change; change `values` before `mine` is declared, or after the block that declares it ends
 
 error[L0704]: `values` cannot grow here, where a newer list may sit above it
-  --> tests/check/data_stacks.lym:33:5
+  --> tests/check/data_stacks.lym:34:5
    |
-30 |     variable list[integer64] mine = list()
+31 |     variable list[integer64] mine = list()
    |                              ---- `values` can be an earlier call's `mine`, and this `mine` sits above it
 ...
-33 |     push(variable values, depth)
+34 |     push(variable values, depth)
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ adds to `values`
    |
 help: only the newest list on a data stack can change; change `values` before `mine` is declared, or after the block that declares it ends
 
-found 4 errors in tests/check/data_stacks.lym
+error[L0704]: `pending` cannot shrink here, where a newer stack may sit above it
+  --> tests/check/data_stacks.lym:75:22
+   |
+70 |     variable stack[integer64] mine = stack()
+   |                               ---- `pending` can be an earlier call's `mine`, and this `mine` sits above it
+...
+75 |         constant _ = pop(variable pending)
+   |                      ^^^^^^^^^^^^^^^^^^^^^ takes an element off `pending`
+   |
+help: only the newest stack on a data stack can change; change `pending` before `mine` is declared, or after the block that declares it ends
+
+found 5 errors in tests/check/data_stacks.lym
 run `lymra explain L0704` to read why a rule exists and how to fix it

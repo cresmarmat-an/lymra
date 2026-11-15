@@ -1,0 +1,11 @@
+#[
+    Popping an empty stack stops the program with an error, and the error
+    says to check the length first.
+]#
+
+function main()
+    variable stack[integer64] work = stack()
+    for value in range(0, 3)
+        push(variable work, value)
+    for _ in range(0, 4)
+        print("{pop(variable work)}")

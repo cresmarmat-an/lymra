@@ -14,7 +14,7 @@ use super::types::{fill_function, list_function};
 use super::{Generator, INDENT, Release, Writer, c_syntax, data_stack, local_access};
 use crate::ir::{
     Argument, ArithmeticOperator, Call, Expr, ExprKind, Extent, FieldValue, FloatType, Function,
-    IntegerType, LogicOperator, Type, Value,
+    IntegerType, LogicOperator, Sequence, Type, Value,
 };
 use crate::source::Span;
 
@@ -27,14 +27,17 @@ pub(super) struct Bounds {
     pub checked: bool,
     /// Where a failed check points.
     pub span: Span,
-    /// What the error calls the value indexed: "an array", "a list" or "a view".
+    /// What the error calls the value indexed: "an array", "a list", "a stack" or "a view".
     pub indexed: &'static str,
 }
 
 /// What an error calls a value that is indexed or sliced.
 pub(super) fn indexed_noun(ty: &Type) -> &'static str {
     match ty {
-        Type::List(_) => "a list",
+        Type::List(list) => match list.kind {
+            Sequence::List => "a list",
+            Sequence::Stack => "a stack",
+        },
         Type::View(_) => "a view",
         Type::String => "a text",
         // Only arrays, lists, views and text are indexed or sliced; the checker rejects anything else.
@@ -188,6 +191,26 @@ impl Generator<'_, '_> {
                 }
             }
             ExprKind::View(items) => self.whole_view(function, items, &expr.ty, writer),
+            ExprKind::Pop(stack) => {
+                let site = self.site(expr.span);
+                let stack_type = self.types.name(&function.locals[*stack].ty);
+                format!(
+                    "{}({}, {site})",
+                    list_function(&stack_type, "pop"),
+                    super::local_address(function, *stack)
+                )
+            }
+            ExprKind::Top(stack) => {
+                let code = self.expr(function, stack, writer);
+                let stored = if is_addressable(stack) {
+                    code
+                } else {
+                    self.temporary(&stack.ty, &code, writer)
+                };
+                let site = self.site(expr.span);
+                let stack_type = self.types.name(&stack.ty);
+                format!("{}(&({stored}), {site})", list_function(&stack_type, "top"))
+            }
             ExprKind::Slice { items, start, end } => {
                 self.slice(function, items, start, end, expr, writer)
             }

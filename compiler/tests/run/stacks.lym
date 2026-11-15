@@ -1,0 +1,65 @@
+#[
+    Stacks grow with `push` and shrink with `pop`, which hands back the top
+    element as a value of its own, while `top` reads it in place. A stack
+    is indexed, measured, walked by `for` and shown by views from the
+    bottom up, in the order its elements were pushed. A copy is
+    independent, and a `variable` parameter reaches the caller's stack.
+]#
+
+type Move
+    integer32 from
+    integer32 to
+
+function filled(integer64 count) returns stack[integer64]
+    variable stack[integer64] made = stack()
+    for value in range(0, count)
+        push(variable made, value * 10)
+    return made
+
+function take_two(variable stack[integer64] values) returns integer64
+    constant first = pop(variable values)
+    constant second = pop(variable values)
+    return first + second
+
+function total(view[integer64] values) returns integer64
+    variable integer64 sum = 0
+    for value in values
+        sum = sum + value
+    return sum
+
+function main()
+    variable stack[integer64] numbers = filled(5)
+    print("top {top(numbers)}, bottom {numbers[0]}, length {length(numbers)}")
+    constant took = take_two(variable numbers)
+    print("took {took}, now {length(numbers)}")
+    for value in numbers
+        push(variable numbers, value + 1)
+    print("pushed while walking: {length(numbers)}, top {top(numbers)}")
+    constant lower = slice(numbers, 0, 3)
+    print("lower total {total(lower)}, whole total {total(numbers)}")
+    numbers[0] = 7
+    print("changed bottom {numbers[0]}")
+    while length(numbers) > 0
+        constant value = pop(variable numbers)
+        print("popped {value}")
+    push(variable numbers, 99)
+    print("grown again: {top(numbers)}")
+
+    variable stack[Move] moves = stack()
+    push(variable moves, Move(from = 1, to = 2))
+    push(variable moves, Move(from = 2, to = 3))
+    constant undone = pop(variable moves)
+    print("undone {undone.from} to {undone.to}, left {top(moves).from}")
+    variable spare = moves
+    constant _ = pop(variable spare)
+    print("copy emptied: {length(spare)}, original keeps {length(moves)}")
+
+    variable stack[boolean] flags = stack()
+    for index in range(0, 10)
+        push(variable flags, index % 3 == 0)
+    variable integer64 set = 0
+    while length(flags) > 0
+        if pop(variable flags)
+            set = set + 1
+    print("flags set {set}")
+    print("top of a fresh stack {top(filled(3))}, its length {length(filled(4))}")

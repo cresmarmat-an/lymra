@@ -1,8 +1,9 @@
 /*!
  * The runtime's data stacks on their own, with every C compiler: the
  * reservation, memory committed in doubling steps as a value grows, moves
- * between and within stacks, freeing, and the two errors a growing value
- * can stop the program with. Programs only reach these through generated
+ * between and within stacks, freeing, shrinking, and the two errors a
+ * growing value can stop the program with. Built with AddressSanitizer, it
+ * also checks which bytes are marked as freed. Programs only reach these through generated
  * code, which cannot make a stack small enough to fill or put a value under
  * another on purpose, so the harness calls the runtime directly.
  */
@@ -34,6 +35,21 @@ static void require(const char *what, bool holds) {
 static size_t span(const char *start, const char *end) {
     return (size_t)(end - start);
 }
+
+#if defined(LYMRA_ADDRESS_SANITIZER)
+int __asan_address_is_poisoned(void const volatile *address);
+
+/* Whether AddressSanitizer marks the `count` bytes at `start` as freed, every one if `freed`, else none. */
+static bool marked(const void *start, size_t count, bool freed) {
+    const char *bytes = (const char *)start;
+    for (size_t index = 0; index < count; index++) {
+        if ((__asan_address_is_poisoned(bytes + index) != 0) != freed) {
+            return false;
+        }
+    }
+    return true;
+}
+#endif
 
 /* Every stack has a range of its own, a multiple of the commit step, with nothing committed or used yet. */
 static void check_reservation(void) {
@@ -166,6 +182,47 @@ static void check_top(void) {
     lymra_data_stack_release(stack, older);
 }
 
+/*
+ * Taking the last elements off a value frees only them, and the value grows
+ * back into their place. One-byte elements end inside the eight-byte blocks
+ * AddressSanitizer marks, which it has to handle a byte at a time.
+ */
+static void check_shrink(void) {
+    lymra_data_stack *stack = &lymra_data_stacks[2];
+    int64_t *numbers = (int64_t *)(void *)lymra_data_stack_align(stack, _Alignof(int64_t));
+    for (size_t count = 0; count < 4; count++) {
+        lymra_data_stack_extend(stack, (char *)(numbers + count), sizeof(int64_t), "numbers");
+        numbers[count] = (int64_t)count;
+    }
+    lymra_data_stack_shrink(stack, (char *)(numbers + 3), sizeof(int64_t));
+    require("shrinking moves the top to the freed element", stack->top == (char *)(numbers + 3));
+    lymra_data_stack_extend(stack, (char *)(numbers + 3), sizeof(int64_t), "numbers again");
+    require("the value grows back into what it freed", stack->top == (char *)(numbers + 4));
+    lymra_data_stack_shrink(stack, (char *)(numbers + 3), sizeof(int64_t));
+    lymra_data_stack_shrink(stack, (char *)(numbers + 2), sizeof(int64_t));
+    require("shrinking keeps the elements below", numbers[0] == 0 && numbers[1] == 1);
+#if defined(LYMRA_ADDRESS_SANITIZER)
+    require("freed elements are marked", marked(numbers + 2, 2 * sizeof(int64_t), true));
+    require("kept elements are not", marked(numbers, 2 * sizeof(int64_t), false));
+#endif
+    lymra_data_stack_release(stack, (char *)numbers);
+
+    unsigned char *bytes = (unsigned char *)lymra_data_stack_align(stack, 1);
+    for (size_t count = 0; count < 13; count++) {
+        lymra_data_stack_extend(stack, (char *)(bytes + count), 1, "bytes");
+        bytes[count] = (unsigned char)count;
+    }
+    for (size_t count = 13; count > 5; count--) {
+        lymra_data_stack_shrink(stack, (char *)(bytes + count - 1), 1);
+    }
+    require("shrinking a byte at a time keeps the bytes below", bytes[4] == 4 && stack->top == (char *)(bytes + 5));
+#if defined(LYMRA_ADDRESS_SANITIZER)
+    require("freed bytes are marked, inside a block too", marked(bytes + 5, 8, true));
+    require("kept bytes are not, inside a block too", marked(bytes, 5, false));
+#endif
+    lymra_data_stack_release(stack, (char *)bytes);
+}
+
 /* Grows a value past the end of a stack whose range is made small. */
 static void fill_up(void) {
     lymra_data_stack *stack = &lymra_data_stacks[0];
@@ -197,6 +254,7 @@ int main(int argc, char **argv) {
     check_large_request();
     check_places();
     check_top();
+    check_shrink();
     printf("%s: %lu checks, %lu wrong\n", failures == 0 ? "ok" : "failed", checks, failures);
     return failures == 0 ? 0 : 1;
 }

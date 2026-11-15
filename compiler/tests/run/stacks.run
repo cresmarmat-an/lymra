@@ -1,0 +1,19 @@
+exit status 0
+--- standard output
+top 40, bottom 0, length 5
+took 70, now 3
+pushed while walking: 6, top 21
+lower total 30, whole total 63
+changed bottom 7
+popped 21
+popped 11
+popped 1
+popped 20
+popped 10
+popped 7
+grown again: 99
+undone 2 to 3, left 1
+copy emptied: 0, original keeps 1
+flags set 4
+top of a fresh stack 20, its length 4
+--- standard error

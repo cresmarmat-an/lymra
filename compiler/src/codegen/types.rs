@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::{INDENT, c_syntax};
-use crate::ir::{ArrayType, ChoiceType, CustomType, FloatType, ListType, Type, ViewType};
+use crate::ir::{ArrayType, ChoiceType, CustomType, FloatType, ListType, Sequence, Type, ViewType};
 
 #[derive(Default)]
 pub(super) struct CTypes {
@@ -152,9 +152,12 @@ impl CTypes {
             return name.clone();
         }
         let element = self.name(&list.element);
-        let name = format!("list_{}", self.lists.len());
+        let name = format!("{}_{}", list.kind.name(), self.lists.len());
         self.definitions
             .push(list_definition(&name, &element, &list.element));
+        if list.kind == Sequence::Stack {
+            self.definitions.push(stack_definition(&name, &element));
+        }
         self.lists.insert(Arc::clone(list), name.clone());
         self.uses_lists = true;
         name
@@ -232,6 +235,34 @@ LYMRA_UNUSED static void {name}_replace({name} *list, const {name} value) {{
     }}
     list->length = value.length;
     lymra_data_stack_release(list->stack, (char *)(list->elements + value.length));
+}}"
+    )
+}
+
+/**
+ * The functions that only a stack has: `pop` takes the top element off
+ * and frees its place, and `top` reads it. Either stops the program when
+ * the stack is empty. A stack is a list in C, so the list's functions build
+ * and grow it.
+ */
+fn stack_definition(name: &str, element: &str) -> String {
+    format!(
+        "LYMRA_UNUSED static {element} {name}_pop({name} *stack, const char *site) {{
+    lymra_data_stack_require_top(stack->stack, (const char *)(stack->elements + stack->length), site);
+    if (stack->length == 0) {{
+        lymra_trap(LYMRA_EMPTY_STACK, site);
+    }}
+    stack->length -= 1;
+    {element} value = stack->elements[stack->length];
+    lymra_data_stack_shrink(stack->stack, (char *)(stack->elements + stack->length), sizeof value);
+    return value;
+}}
+
+LYMRA_UNUSED static {element} {name}_top(const {name} *stack, const char *site) {{
+    if (stack->length == 0) {{
+        lymra_trap(LYMRA_EMPTY_STACK, site);
+    }}
+    return stack->elements[stack->length - 1];
 }}"
     )
 }

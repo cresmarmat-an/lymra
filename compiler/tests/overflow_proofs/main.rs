@@ -65,7 +65,7 @@ impl CheckCount {
             Statement::Assign { target, value } => {
                 for step in &target.steps {
                     if let PlaceStep::Index(index) = step {
-                        self.index(index.length, index.checked);
+                        self.index(index.length(), index.checked);
                         self.expr(&index.value);
                     }
                 }
@@ -152,6 +152,7 @@ impl CheckCount {
             | ExprKind::Length(operand)
             | ExprKind::View(operand)
             | ExprKind::Bytes(operand)
+            | ExprKind::Top(operand)
             | ExprKind::Field {
                 object: operand, ..
             } => {
@@ -177,7 +178,8 @@ impl CheckCount {
             ExprKind::Literal(_)
             | ExprKind::Local(_)
             | ExprKind::Constant(_)
-            | ExprKind::EmptyList => {}
+            | ExprKind::EmptyList
+            | ExprKind::Pop(_) => {}
         }
     }
 

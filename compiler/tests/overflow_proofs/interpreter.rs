@@ -509,6 +509,20 @@ impl Interpreter<'_, '_> {
                 return Ok(Slot::Compound(vec![value; length]));
             }
             ExprKind::EmptyList => return Ok(Slot::Compound(Vec::new())),
+            ExprKind::Pop(stack) => {
+                return match &mut slots[*stack] {
+                    Slot::Compound(elements) => elements.pop().ok_or(Stop::Ended(Ending::Trapped)),
+                    other => Err(Stop::Unsound(format!("a pop from {other:?}"))),
+                };
+            }
+            ExprKind::Top(stack) => {
+                return match self.expr(stack, slots)? {
+                    Slot::Compound(mut elements) => {
+                        elements.pop().ok_or(Stop::Ended(Ending::Trapped))
+                    }
+                    other => Err(Stop::Unsound(format!("the top of {other:?}"))),
+                };
+            }
             /*
              * A view runs as a copy of the elements it shows when it is made.
              * The generators write no program that changes such an element

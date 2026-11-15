@@ -1,0 +1,13 @@
+#[
+    A `pop` shortens the stack, so an index the loop's range allowed when
+    it started falls past the end later. The check stays, and the error
+    names the stack.
+]#
+
+function main()
+    variable stack[integer64] work = stack()
+    for value in range(0, 4)
+        push(variable work, value)
+    for index in range(0, length(work))
+        constant taken = pop(variable work)
+        print("{index} {taken} {work[index]}")

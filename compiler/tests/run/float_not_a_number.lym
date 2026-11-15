@@ -3,8 +3,8 @@
     program.
 ]#
 
-function divide(float64 top, float64 bottom) returns float64
-    return top / bottom
+function divide(float64 numerator, float64 denominator) returns float64
+    return numerator / denominator
 
 function main()
     constant nothing = divide(0.0, 0.0)

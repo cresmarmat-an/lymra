@@ -1,0 +1,62 @@
+error[L0702]: `work` cannot be popped while a `for` loop goes over it
+  --> tests/check/stack_roots.lym:29:25
+   |
+28 |     for item in work
+   |                 ---- the loop goes over it here
+29 |         constant done = pop(variable work)
+   |                         ^^^^^^^^^^^^^^^^^^ this takes the top element off `work`
+   |
+help: to take each element off in turn, loop with `while length(work) > 0` and `pop` inside it
+
+error[L0702]: `work` cannot be popped while a `for` loop goes over it
+  --> tests/check/stack_roots.lym:36:25
+   |
+35 |     for item in slice(work, 0, 1)
+   |                 ----------------- the loop goes over it here
+36 |         constant done = pop(variable work)
+   |                         ^^^^^^^^^^^^^^^^^^ this takes the top element off `work`
+   |
+help: to take each element off in turn, loop with `while length(work) > 0` and `pop` inside it
+
+error[L0702]: `work` cannot be popped while `window`, a view of it, is still used
+  --> tests/check/stack_roots.lym:43:21
+   |
+42 |     constant window = slice(work, 0, 1)
+   |              ------ `window` shows `work`
+43 |     constant done = pop(variable work)
+   |                     ^^^^^^^^^^^^^^^^^^ this frees the top element, which `window` can show
+   |
+help: finish with `window` before `work` changes, or copy what `window` shows into a list of its own
+
+error[L0702]: `work` cannot be passed with `variable` while a `for` loop goes over it
+  --> tests/check/stack_roots.lym:50:38
+   |
+49 |     for item in work
+   |                 ---- the loop goes over it here
+50 |         constant done = take_through(variable work)
+   |                                      ^^^^^^^^^^^^^ `take_through` can take elements off `work`
+   |
+help: call `take_through` after the loop, or loop with `while length(work) > 0` instead of `for`
+
+error[L0702]: `work` cannot be passed with `variable` while `window`, a view of it, is still used
+  --> tests/check/stack_roots.lym:58:26
+   |
+57 |     constant window = slice(work, 0, 1)
+   |              ------ `window` shows `work`
+58 |     constant done = take(variable work)
+   |                          ^^^^^^^^^^^^^ `take` can take elements off `work`
+   |
+help: finish with `window` before `work` changes, or copy what `window` shows into a list of its own
+
+error[L0703]: `work` cannot be passed with `variable` while a `for` loop goes over it
+  --> tests/check/stack_roots.lym:65:23
+   |
+64 |     for item in work
+   |                 ---- the loop goes over it here
+65 |         clear_or_take(variable work, item > 0)
+   |                       ^^^^^^^^^^^^^ `clear_or_take` can replace the whole stack
+   |
+help: call `clear_or_take` after the loop; `push` and changing elements are fine inside it
+
+found 6 errors in tests/check/stack_roots.lym
+run `lymra explain L0702` to read why a rule exists and how to fix it

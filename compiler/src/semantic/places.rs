@@ -87,7 +87,7 @@ impl<'src> Checker<'src, '_> {
                     checked.push(ir::PlaceStep::Index(ir::PlaceIndex {
                         checked: self.needs_bounds_check(&value, length)?,
                         value,
-                        length,
+                        indexed: ty,
                         span: *span,
                     }));
                     ty = element;

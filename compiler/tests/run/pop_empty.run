@@ -1,0 +1,12 @@
+exit status 70
+--- standard output
+2
+1
+0
+--- standard error
+error: the stack is empty
+  --> tests/run/pop_empty.lym:11:17
+   |
+11 |         print("{pop(variable work)}")
+   |                 ^^^^^^^^^^^^^^^^^^
+help: check that `length` is above 0 before `pop` or `top`
