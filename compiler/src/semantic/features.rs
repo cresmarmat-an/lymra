@@ -4,9 +4,7 @@ use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
 use crate::source::Span;
 
 /// Built-in functions the spec describes, with the phase that implements each.
-const FUTURE_FUNCTIONS: [(&str, u8); 10] = [
-    ("bytes", 3),
-    ("slice", 3),
+const FUTURE_FUNCTIONS: [(&str, u8); 8] = [
     ("stack", 3),
     ("pop", 3),
     ("top", 3),
@@ -22,9 +20,11 @@ pub(super) enum Feature {
     Packed,
     NamedArguments,
     TextBuilding,
-    Lists,
+    Stacks,
     /// A list inside another value: an array, a declared type, a choice or a list.
     NestedGrowable,
+    /// A view inside another value, or a view of views.
+    NestedView,
     ForEach,
     RangeValues,
     CodeArguments,
@@ -49,7 +49,7 @@ impl Feature {
     /// The type name `name` belongs to a later phase, if it does.
     pub fn future_type(name: &str) -> Option<Feature> {
         match name {
-            "stack" | "view" => Some(Feature::Lists),
+            "stack" => Some(Feature::Stacks),
             "pool" | "handle" => Some(Feature::Pools),
             _ => None,
         }
@@ -62,10 +62,11 @@ impl Feature {
             Self::TextBuilding => {
                 return "text with interpolation can only be given to `print` for now".to_owned();
             }
-            Self::Lists => "`stack` and `view` are",
+            Self::Stacks => "`stack` is",
             Self::NestedGrowable => "lists inside other values are",
+            Self::NestedView => "views inside other values are",
             Self::ForEach => {
-                return "`for` can only loop over `range` and arrays for now".to_owned();
+                return "`for` cannot loop over the characters of a text yet".to_owned();
             }
             Self::RangeValues => {
                 return "`range` can only be used directly in a `for` loop for now".to_owned();
@@ -83,14 +84,37 @@ impl Feature {
             Self::NamedArguments => 2,
             Self::TextBuilding
             | Self::Packed
-            | Self::Lists
+            | Self::Stacks
             | Self::NestedGrowable
+            | Self::NestedView
             | Self::ForEach
             | Self::RangeValues
             | Self::CodeArguments => 3,
             Self::Modules => 4,
             Self::Pools => 5,
             Self::Function { phase, .. } => phase,
+        }
+    }
+
+    /// What to write instead, until the phase that adds the feature.
+    fn help(self) -> &'static str {
+        match self {
+            Self::ForEach => {
+                "loop over `bytes(text)` to go over its bytes, or write this part another way for now"
+            }
+            Self::Packed
+            | Self::NamedArguments
+            | Self::TextBuilding
+            | Self::Stacks
+            | Self::NestedGrowable
+            | Self::NestedView
+            | Self::RangeValues
+            | Self::CodeArguments
+            | Self::Modules
+            | Self::Pools
+            | Self::Function { .. } => {
+                "write this part another way for now; the roadmap in the README lists what each phase adds"
+            }
         }
     }
 
@@ -102,9 +126,7 @@ impl Feature {
                 span,
                 format!("the compiler adds this in roadmap phase {}", self.phase()),
             ),
-            Help::text(
-                "write this part another way for now; the roadmap in the README lists what each phase adds",
-            ),
+            Help::text(self.help()),
         )
     }
 }

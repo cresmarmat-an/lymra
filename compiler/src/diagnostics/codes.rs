@@ -106,6 +106,7 @@ error_codes! {
     L0508 => "binding changed and used in one expression",
     L0601 => "`break` or `continue` outside a loop",
     L0602 => "unreachable code",
+    L0701 => "view outlives what it shows",
     L0703 => "value replaced while something still uses it",
     L0704 => "list changed while a newer list sits above it",
 }

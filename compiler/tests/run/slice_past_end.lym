@@ -1,0 +1,14 @@
+#[
+    A slice that would end past the end of a list stops the program, and the
+    error says where it would end and how long the list is.
+]#
+
+function tail(view[integer64] values, integer64 from) returns view[integer64]
+    return slice(values, from, from + 3)
+
+function main()
+    variable list[integer64] values = list()
+    for number in range(0, 5)
+        push(variable values, number)
+    print("{length(tail(values, 2))}")
+    print("{length(tail(values, 3))}")

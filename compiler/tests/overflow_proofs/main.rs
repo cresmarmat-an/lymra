@@ -150,10 +150,17 @@ impl CheckCount {
             ExprKind::Not(operand)
             | ExprKind::Fill(operand)
             | ExprKind::Length(operand)
+            | ExprKind::View(operand)
+            | ExprKind::Bytes(operand)
             | ExprKind::Field {
                 object: operand, ..
             } => {
                 self.expr(operand);
+            }
+            ExprKind::Slice { items, start, end } => {
+                self.expr(items);
+                self.expr(start);
+                self.expr(end);
             }
             ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
                 for field in fields {

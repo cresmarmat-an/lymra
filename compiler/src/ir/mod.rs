@@ -11,7 +11,7 @@ mod types;
 
 pub use types::{
     ArrayType, ChoiceType, CustomType, FieldType, FloatType, IntegerType, Layout, ListType, Type,
-    Value,
+    Value, ViewType,
 };
 
 use crate::ast::OptimizeMode;
@@ -231,7 +231,9 @@ impl TextForm {
             Type::Integer(integer) if integer.is_signed() => Some(Self::Signed),
             Type::Integer(_) => Some(Self::Unsigned),
             Type::Float(float) => Some(Self::Float(*float)),
-            Type::Array(_) | Type::Custom(_) | Type::Choice(_) | Type::List(_) => None,
+            Type::Array(_) | Type::Custom(_) | Type::Choice(_) | Type::List(_) | Type::View(_) => {
+                None
+            }
         }
     }
 }
@@ -302,6 +304,21 @@ pub enum ExprKind {
     Fill(Box<Expr>),
     /// `list()`: a list with no elements yet. The expression's type is the list type.
     EmptyList,
+    /// Every element of an array, a list or a view, seen through a view. Nothing is copied.
+    View(Box<Expr>),
+    /**
+     * `slice(items, start, end)`: the elements of an array, a list or a view
+     * from `start` up to `end`, as a view, or the bytes of a text between
+     * them, as a text. The positions are computed in that order, then
+     * checked when the program runs.
+     */
+    Slice {
+        items: Box<Expr>,
+        start: Box<Expr>,
+        end: Box<Expr>,
+    },
+    /// `bytes(text)`: the bytes of a text as a `view[unsigned8]`.
+    Bytes(Box<Expr>),
     /// `length(value)` of a text, or of an array that has to be computed because computing it has effects.
     Length(Box<Expr>),
     /// `Frog(name = "Kero", age = 3)`: a value of a declared type, its fields in the order they are written.
@@ -337,11 +354,16 @@ impl Expr {
             | ExprKind::Convert { operand, .. }
             | ExprKind::Fill(operand)
             | ExprKind::Length(operand)
+            | ExprKind::View(operand)
+            | ExprKind::Bytes(operand)
             | ExprKind::Field {
                 object: operand, ..
             } => operand.mentions(local),
             ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
                 fields.iter().any(|field| field.value.mentions(local))
+            }
+            ExprKind::Slice { items, start, end } => {
+                items.mentions(local) || start.mentions(local) || end.mentions(local)
             }
             ExprKind::Arithmetic { left, right, .. }
             | ExprKind::Compare { left, right, .. }
@@ -374,9 +396,13 @@ impl Expr {
             ExprKind::Not(operand)
             | ExprKind::Fill(operand)
             | ExprKind::Length(operand)
+            | ExprKind::View(operand)
+            | ExprKind::Bytes(operand)
             | ExprKind::Field {
                 object: operand, ..
             } => operand.has_effects(),
+            // A slice whose positions fall outside its items stops the program.
+            ExprKind::Slice { .. } => true,
             ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
                 fields.iter().any(|field| field.value.has_effects())
             }

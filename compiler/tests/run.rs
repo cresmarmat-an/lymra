@@ -1,10 +1,11 @@
 /*!
  * Programs that compile and run.
  *
- * Every `.lym` file under `tests/run` and in `examples` is checked, turned
- * into C, compiled with each C compiler on this machine with all warnings as
- * errors, and run. Its exit status, output and error output have to match
- * the `.run` file recorded for it.
+ * Every `.lym` file under `tests/run` and in `examples`, and the programs of
+ * the memory model study that the compiler can build so far, is checked,
+ * turned into C, compiled with each C compiler on this machine with all
+ * warnings as errors, and run. Its exit status, output and error output have
+ * to match the `.run` file recorded for it.
  *
  * Each program is built twice: with every runtime check, and with the checks
  * the optimizer proves unnecessary removed. Every build, with every compiler,
@@ -24,6 +25,17 @@ use lymra::diagnostics::render_report;
 use lymra::driver::{Compiler, TemporaryDirectory, Warnings};
 use lymra::frontend;
 use lymra::optimize;
+
+/// The programs of the memory model study in `docs/memory` that the compiler builds; later phases add the rest.
+const STUDY_PROGRAMS: [&str; 7] = [
+    "expressions",
+    "life",
+    "routes",
+    "shapes",
+    "statistics",
+    "tokens",
+    "word_count",
+];
 
 /// A program to run, the name it is reported under, and where its recorded result lives.
 struct Case {
@@ -53,7 +65,18 @@ fn cases() -> Vec<Case> {
                 .with_extension("run"),
             source,
         });
-    tests.chain(examples).collect()
+    let study = STUDY_PROGRAMS.iter().map(|name| Case {
+        source: common::repository_root()
+            .join("docs/memory")
+            .join(name)
+            .with_extension("lym"),
+        name: format!("docs/memory/{name}.lym"),
+        golden: run_directory
+            .join("memory")
+            .join(name)
+            .with_extension("run"),
+    });
+    tests.chain(examples).chain(study).collect()
 }
 
 fn file_name(path: &Path) -> String {

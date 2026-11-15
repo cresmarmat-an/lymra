@@ -1,0 +1,9 @@
+exit status 70
+--- standard output
+8 1
+--- standard error
+error: index 1 is out of range for a view of length 1
+  --> tests/run/view_index_past_end.lym:12:13
+   |
+12 |     print("{shown[1]}")
+   |             ^^^^^^^^

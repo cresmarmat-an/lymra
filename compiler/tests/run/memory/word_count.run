@@ -1,0 +1,9 @@
+exit status 0
+--- standard output
+the: 4
+cat: 2
+and: 2
+bird: 1
+saw: 1
+dog: 1
+--- standard error

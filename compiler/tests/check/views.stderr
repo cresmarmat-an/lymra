@@ -1,0 +1,154 @@
+error[L0309]: views inside other values are not available yet
+ --> tests/check/views.lym:2:5
+  |
+2 |     view[integer64] shown
+  |     ^^^^^^^^^^^^^^^ the compiler adds this in roadmap phase 3
+  |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0409]: a view type names the type of its elements
+ --> tests/check/views.lym:4:16
+  |
+4 | function sizes(view _, view[integer64, 3] _, list[view[integer64]] _, view[view[integer64]] _, array[view[integer64], 2] _)
+  |                ^^^^ expected `view[element type]`
+  |
+help: write the type of the elements, as in `view[integer64]`; a view shows any number of them, so it has no length in its type
+
+error[L0409]: a view type names the type of its elements
+ --> tests/check/views.lym:4:24
+  |
+4 | function sizes(view _, view[integer64, 3] _, list[view[integer64]] _, view[view[integer64]] _, array[view[integer64], 2] _)
+  |                        ^^^^^^^^^^^^^^^^^^ expected `view[element type]`
+  |
+help: write the type of the elements, as in `view[integer64]`; a view shows any number of them, so it has no length in its type
+
+error[L0309]: views inside other values are not available yet
+ --> tests/check/views.lym:4:51
+  |
+4 | function sizes(view _, view[integer64, 3] _, list[view[integer64]] _, view[view[integer64]] _, array[view[integer64], 2] _)
+  |                                                   ^^^^^^^^^^^^^^^ the compiler adds this in roadmap phase 3
+  |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: views inside other values are not available yet
+ --> tests/check/views.lym:4:76
+  |
+4 | function sizes(view _, view[integer64, 3] _, list[view[integer64]] _, view[view[integer64]] _, array[view[integer64], 2] _)
+  |                                                                            ^^^^^^^^^^^^^^^ the compiler adds this in roadmap phase 3
+  |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: views inside other values are not available yet
+ --> tests/check/views.lym:4:102
+  |
+4 | function sizes(view _, view[integer64, 3] _, list[view[integer64]] _, view[view[integer64]] _, array[view[integer64], 2] _)
+  |                                                                                                      ^^^^^^^^^^^^^^^ the compiler adds this in roadmap phase 3
+  |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0402]: expected a `view[integer64]`, found a `list[integer32]`
+  --> tests/check/views.lym:12:43
+   |
+12 |     constant view[integer64] mismatched = small
+   |                                           ^^^^^ this is a `list[integer32]`
+   |
+help: Lymra never converts a value to another type by itself; use a value of the expected type
+
+error[L0208]: `cursor` is a view, so its elements cannot change through it
+  --> tests/check/views.lym:15:5
+   |
+15 |     cursor[0] = 2
+   |     ^^^^^^ a view only reads the elements it shows
+   |
+help: change the element through the array or list the view shows, or pass that one with `variable`
+
+error[L0402]: `push` adds to a list, but this is a `view[integer64]`
+  --> tests/check/views.lym:16:19
+   |
+16 |     push(variable cursor, 3)
+   |                   ^^^^^^ not a list
+   |
+help: pass a `list` binding, marked `variable`, as in `push(variable values, 7)`
+
+error[L0402]: a `view[integer64]` cannot be put into text
+  --> tests/check/views.lym:17:13
+   |
+17 |     print("{window}")
+   |             ^^^^^^ text holds numbers, `boolean` values and text
+   |
+help: put its elements in one by one, as in `{window[0]}`, or print them in a loop
+
+error[L0405]: `==` compares single values, and these are views
+  --> tests/check/views.lym:18:8
+   |
+18 |     if window == window
+   |        ^^^^^^^^^^^^^^^^ comparing views
+   |
+help: compare their lengths, then the elements one by one in a loop
+
+error[L0501]: `slice` takes 3 arguments, but 2 were given
+  --> tests/check/views.lym:20:18
+   |
+20 |     print("{slice(values, 1)}")
+   |                  ^^^^^^^^^^^ `slice` takes the elements from a start up to an end
+   |
+help: write `slice(values, start, end)`, as in `slice(values, 0, 3)` for the first three
+
+error[L0402]: `slice` takes part of an array, a list, a view or a text, but this is an `integer64`
+  --> tests/check/views.lym:21:19
+   |
+21 |     print("{slice(7, 0, 1)}")
+   |                   ^ nothing to take part of
+   |
+help: pass an array, a list, a view or a `string`
+
+error[L0402]: a slice starts and ends at integers, but this is a `boolean`
+  --> tests/check/views.lym:22:27
+   |
+22 |     print("{slice(values, true, 1)}")
+   |                           ^^^^ not an integer
+   |
+help: use a whole number from 0 up to the length, the length included
+
+error[L0402]: `bytes` shows the bytes of a text, but this is a `list[integer64]`
+  --> tests/check/views.lym:23:19
+   |
+23 |     print("{bytes(values)}")
+   |                   ^^^^^^ not a `string`
+   |
+help: pass a `string`; an array, a list or a view goes wherever a view of its elements is expected as it is
+
+error[L0501]: `bytes` takes 1 argument, but 2 were given
+  --> tests/check/views.lym:24:18
+   |
+24 |     print("{bytes("a", "b")}")
+   |                  ^^^^^^^^^^ `bytes` shows the bytes of one text
+   |
+help: write `bytes(text)`
+
+error[L0411]: slice start -1 is negative, and positions count up from 0
+  --> tests/check/views.lym:26:33
+   |
+26 |     print("{length(slice(fixed, -1, 2))}")
+   |                                 ^^ the program would stop here every time it ran this line
+   |
+help: a slice starts and ends at 0 or later, and at most at the length
+
+error[L0411]: slice end 9 is out of range for an array of length 4
+  --> tests/check/views.lym:27:36
+   |
+27 |     print("{length(slice(fixed, 2, 9))}")
+   |                                    ^ the program would stop here every time it ran this line
+   |
+help: a slice of this array starts and ends at 0 to 4
+
+error[L0411]: slice end 1 is before its start 3
+  --> tests/check/views.lym:28:36
+   |
+28 |     print("{length(slice(fixed, 3, 1))}")
+   |                                    ^ the program would stop here every time it ran this line
+   |
+help: a slice ends at its start or after it; an empty slice starts and ends at the same place
+
+found 19 errors in tests/check/views.lym
+run `lymra explain L0309` to read why a rule exists and how to fix it

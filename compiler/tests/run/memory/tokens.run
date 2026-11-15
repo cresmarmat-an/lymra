@@ -1,0 +1,15 @@
+exit status 0
+--- standard output
+0 to 5: total
+6 to 7: =
+8 to 9: (
+9 to 14: price
+15 to 16: +
+17 to 19: 12
+19 to 20: )
+21 to 22: *
+23 to 28: count
+29 to 30: -
+31 to 32: 3
+11 tokens; the third is (
+--- standard error

@@ -21,12 +21,30 @@ use crate::source::Span;
 /// What an index is checked against.
 #[derive(Clone, Copy)]
 pub(super) struct Bounds {
-    /// The length of the array or list.
+    /// The length of the array, list or view.
     pub length: Extent,
     /// Whether the index can fall outside the array.
     pub checked: bool,
     /// Where a failed check points.
     pub span: Span,
+    /// What the error calls the value indexed: "an array", "a list" or "a view".
+    pub indexed: &'static str,
+}
+
+/// What an error calls a value that is indexed or sliced.
+pub(super) fn indexed_noun(ty: &Type) -> &'static str {
+    match ty {
+        Type::List(_) => "a list",
+        Type::View(_) => "a view",
+        Type::String => "a text",
+        // Only arrays, lists, views and text are indexed or sliced; the checker rejects anything else.
+        Type::Array(_)
+        | Type::Integer(_)
+        | Type::Float(_)
+        | Type::Boolean
+        | Type::Custom(_)
+        | Type::Choice(_) => "an array",
+    }
 }
 
 /// Whether `expr` stands for storage C can take the address of: a local, or an element or a field inside one.
@@ -145,6 +163,7 @@ impl Generator<'_, '_> {
                     length: *length,
                     checked: *checked,
                     span: expr.span,
+                    indexed: indexed_noun(&array.ty),
                 };
                 self.element(function, array, index, bounds, writer)
             }
@@ -164,8 +183,23 @@ impl Generator<'_, '_> {
                     | Type::String
                     | Type::Custom(_)
                     | Type::Choice(_)
-                    | Type::List(_) => format!("((int64_t)({code}).length)"),
+                    | Type::List(_)
+                    | Type::View(_) => format!("((int64_t)({code}).length)"),
                 }
+            }
+            ExprKind::View(items) => self.whole_view(function, items, &expr.ty, writer),
+            ExprKind::Slice { items, start, end } => {
+                self.slice(function, items, start, end, expr, writer)
+            }
+            ExprKind::Bytes(text) => {
+                let code = self.expr(function, text, writer);
+                let text = if text.has_effects() {
+                    self.temporary(&text.ty, &code, writer)
+                } else {
+                    code
+                };
+                let view = self.types.name(&expr.ty);
+                format!("(({view}){{ (const uint8_t *)({text}).data, (int64_t)({text}).length }})")
             }
             ExprKind::Construct(fields) => self.construct(function, fields, &expr.ty, writer),
             ExprKind::Variant { variant, fields } => {
@@ -199,6 +233,120 @@ impl Generator<'_, '_> {
         };
         let position = self.position(function, index, bounds, &code, writer);
         format!("{code}.elements[{position}]")
+    }
+
+    /**
+     * A view, of type `view_type`, of every element of `items`, an array or
+     * a list. An array that is not stored anywhere, such as a call's result,
+     * is stored first, so the view has elements to point at; a list that
+     * has to be computed is computed once.
+     */
+    fn whole_view(
+        &mut self,
+        function: &Function<'_>,
+        items: &Expr,
+        view_type: &Type,
+        writer: &mut Writer,
+    ) -> String {
+        let code = self.expr(function, items, writer);
+        let view = self.types.name(view_type);
+        let stored_first = match items.ty.as_array() {
+            Some(_) => !is_addressable(items),
+            None => items.has_effects(),
+        };
+        let stored = if stored_first {
+            self.temporary(&items.ty, &code, writer)
+        } else {
+            code
+        };
+        let length = match items.ty.as_array() {
+            Some(array) => format!("INT64_C({})", array.length),
+            None => format!("({stored}).length"),
+        };
+        format!("(({view}){{ ({stored}).elements, {length} }})")
+    }
+
+    /**
+     * `slice(items, start, end)`: `items`, then `start`, checked, then `end`,
+     * checked, in that order. A slice of text is text; of anything else, a
+     * view of type `slice.ty`. A slice of text also has to start and end
+     * between characters.
+     */
+    fn slice(
+        &mut self,
+        function: &Function<'_>,
+        items: &Expr,
+        start: &Expr,
+        end: &Expr,
+        slice: &Expr,
+        writer: &mut Writer,
+    ) -> String {
+        let site = self.site(slice.span);
+        let indexed = indexed_noun(&items.ty);
+        let text = items.ty == Type::String;
+        let whole = if text || items.ty.as_view().is_some() {
+            self.expr(function, items, writer)
+        } else {
+            self.whole_view(function, items, &slice.ty, writer)
+        };
+        let whole = self.temporary(&slice.ty, &whole, writer);
+        let length = format!("(uint64_t)({whole}).length");
+        let start = self.slice_position(function, start, None, (&length, indexed, &site), writer);
+        if text {
+            writer.line(&format!(
+                "lymra_text_boundary({whole}, {start}, \"start\", {site});"
+            ));
+        }
+        let end = self.slice_position(
+            function,
+            end,
+            Some(&start),
+            (&length, indexed, &site),
+            writer,
+        );
+        if text {
+            writer.line(&format!(
+                "lymra_text_boundary({whole}, {end}, \"end\", {site});"
+            ));
+            return format!(
+                "((lymra_string){{ ({whole}).data + {start}, (size_t)({end} - {start}) }})"
+            );
+        }
+        let view = self.types.name(&slice.ty);
+        format!("(({view}){{ ({whole}).elements + {start}, {end} - {start} }})")
+    }
+
+    /**
+     * Computes one end of a slice into a new `int64_t` and checks it: the
+     * start lies from 0 to the length, the end from `start` to the length.
+     * `limits` holds the length, what the slice is taken from, and the place
+     * a failed check points at.
+     */
+    fn slice_position(
+        &mut self,
+        function: &Function<'_>,
+        position: &Expr,
+        start: Option<&str>,
+        limits: (&str, &str, &str),
+        writer: &mut Writer,
+    ) -> String {
+        let (length, indexed, site) = limits;
+        let code = self.expr(function, position, writer);
+        let signed = position.ty.as_integer().is_some_and(IntegerType::is_signed);
+        let (value, form) = if signed {
+            (format!("(int64_t)({code})"), "signed")
+        } else {
+            (format!("(uint64_t)({code})"), "unsigned")
+        };
+        let check = match start {
+            None => format!("lymra_slice_start_{form}({value}, {length}, \"{indexed}\", {site})"),
+            Some(start) => {
+                format!("lymra_slice_end_{form}({value}, {start}, {length}, \"{indexed}\", {site})")
+            }
+        };
+        let name = self.helper(if start.is_none() { "start" } else { "end" });
+        writer.line(&format!("const int64_t {name} = {check};"));
+        name
     }
 
     /**
@@ -276,10 +424,11 @@ impl Generator<'_, '_> {
             return format!("(size_t)({code})");
         }
         let site = self.site(bounds.span);
-        let (length, noun) = match bounds.length {
-            Extent::Fixed(length) => (format!("UINT64_C({length})"), "an array"),
-            Extent::Dynamic => (format!("(uint64_t)({indexed}).length"), "a list"),
+        let length = match bounds.length {
+            Extent::Fixed(length) => format!("UINT64_C({length})"),
+            Extent::Dynamic => format!("(uint64_t)({indexed}).length"),
         };
+        let noun = bounds.indexed;
         match index.ty.as_integer() {
             Some(integer) if integer.is_signed() => {
                 format!("lymra_index_signed((int64_t)({code}), {length}, \"{noun}\", {site})")
@@ -411,7 +560,8 @@ impl Generator<'_, '_> {
             | Type::Boolean
             | Type::Array(_)
             | Type::Custom(_)
-            | Type::List(_) => {
+            | Type::List(_)
+            | Type::View(_) => {
                 format!("{left} {symbol} {right}")
             }
         }

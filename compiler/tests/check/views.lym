@@ -1,0 +1,29 @@
+type Holder
+    view[integer64] shown
+
+function sizes(view _, view[integer64, 3] _, list[view[integer64]] _, view[view[integer64]] _, array[view[integer64], 2] _)
+    return
+
+function main()
+    variable list[integer64] values = list()
+    push(variable values, 1)
+    constant view[integer64] window = values
+    constant list[integer32] small = list()
+    constant view[integer64] mismatched = small
+    variable view[integer64] cursor = values
+    cursor = slice(cursor, 0, 1)
+    cursor[0] = 2
+    push(variable cursor, 3)
+    print("{window}")
+    if window == window
+        print("same")
+    print("{slice(values, 1)}")
+    print("{slice(7, 0, 1)}")
+    print("{slice(values, true, 1)}")
+    print("{bytes(values)}")
+    print("{bytes("a", "b")}")
+    constant array[integer64, 4] fixed = array(0)
+    print("{length(slice(fixed, -1, 2))}")
+    print("{length(slice(fixed, 2, 9))}")
+    print("{length(slice(fixed, 3, 1))}")
+    print("{length(mismatched)}")

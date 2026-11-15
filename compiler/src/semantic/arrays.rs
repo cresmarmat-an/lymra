@@ -35,12 +35,19 @@ impl<'src> Checker<'src, '_> {
             TypeArgument::Type(named) => (self.length_constant(named), named.span),
         };
         let (element_type, length) = (element?, length?);
-        if element_type.is_growable() {
+        let nested = if element_type.is_growable() {
+            Some(Feature::NestedGrowable)
+        } else if element_type.holds_view() {
+            Some(Feature::NestedView)
+        } else {
+            None
+        };
+        if let Some(feature) = nested {
             let element_span = match &arguments[0] {
                 TypeArgument::Type(element) => element.span,
                 TypeArgument::Size { span, .. } => *span,
             };
-            return Err(self.report(Feature::NestedGrowable.diagnostic(element_span)));
+            return Err(self.report(feature.diagnostic(element_span)));
         }
         let element = element_type;
         if length == 0 {
@@ -109,6 +116,7 @@ impl<'src> Checker<'src, '_> {
         match ty {
             Type::Array(array) => Ok((array.element.clone(), Extent::Fixed(array.length))),
             Type::List(list) => Ok((list.element.clone(), Extent::Dynamic)),
+            Type::View(view) => Ok((view.element.clone(), Extent::Dynamic)),
             other => Err(self.report(errors::not_indexable(other, span))),
         }
     }
@@ -198,7 +206,7 @@ impl<'src> Checker<'src, '_> {
         let operand = self.check_expr_with_hint(value, None)?;
         let known = match &operand.ty {
             Type::Array(array) => (!operand.has_effects()).then_some(array.length),
-            Type::String | Type::List(_) => None,
+            Type::String | Type::List(_) | Type::View(_) => None,
             Type::Integer(_)
             | Type::Float(_)
             | Type::Boolean

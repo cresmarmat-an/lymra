@@ -1,0 +1,12 @@
+#[
+    A view is as long as what it showed when it was made, so an index past
+    its end stops the program even when the list behind it has grown.
+]#
+
+function main()
+    variable list[integer64] values = list()
+    push(variable values, 7)
+    constant view[integer64] shown = values
+    push(variable values, 8)
+    print("{values[1]} {length(shown)}")
+    print("{shown[1]}")

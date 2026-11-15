@@ -1,0 +1,9 @@
+exit status 70
+--- standard output
+3
+--- standard error
+error: slice end 6 is out of range for a view of length 5
+ --> tests/run/slice_past_end.lym:7:12
+  |
+7 |     return slice(values, from, from + 3)
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

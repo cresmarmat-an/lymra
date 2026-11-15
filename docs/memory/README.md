@@ -1,10 +1,12 @@
 # Memory model study
 
-Section 7 of the [specification](../spec.md) is the core of Lymra: memory safety without a garbage collector, reference counting or a borrow checker. None of it is implemented yet, and phase 2 is about to fix how arrays and custom types are laid out. Before that happens, this study tests the model against programs people actually write, while changing it still costs only text.
+Section 7 of the [specification](../spec.md) is the core of Lymra: memory safety without a garbage collector, reference counting or a borrow checker. This study tested the model against programs people actually write before any of it was implemented, while changing it still cost only text.
+
+**Status:** data stacks, lists, views and the rules that keep them safe (L0701, L0703, L0704) are implemented. Seven of the twelve programs build and run, and the run tests check their output with every C compiler: expressions, life, routes, shapes, statistics, tokens and word_count. The rest wait for stacks, pools, lists inside values, text built from values and `with` blocks.
 
 ## Method
 
-Twelve programs, written strictly in Lymra as the spec defines it. Where the spec has no way to do something a program needs, the program uses the smallest operation that would do it, and this page lists every such operation. Each program says in its opening comment where its memory lives. `compiler/tests/memory_study.rs` parses all of them, so they stay valid Lymra as the grammar changes. None of them runs yet: they use phase 2 and phase 3 features.
+Twelve programs, written strictly in Lymra as the spec defines it. Where the spec has no way to do something a program needs, the program uses the smallest operation that would do it, and this page lists every such operation. Each program says in its opening comment where its memory lives. `compiler/tests/memory_study.rs` parses all of them, so they stay valid Lymra as the grammar changes, and `compiler/tests/run.rs` builds and runs the ones the compiler can build so far.
 
 | Program | What it does | What it puts under strain |
 |---|---|---|

@@ -398,6 +398,37 @@ impl Interpreter<'_, '_> {
         Ok(values)
     }
 
+    /**
+     * `slice(items, start, end)`: the start is computed and checked before
+     * the end, as in the compiled program, and a slice of text has to start
+     * and end between characters.
+     */
+    fn slice(&mut self, items: &Expr, start: &Expr, end: &Expr, slots: &mut [Slot]) -> Eval<Slot> {
+        let items = self.expr(items, slots)?;
+        let length = match &items {
+            Slot::Compound(values) => values.len(),
+            Slot::Text(text) => text.len(),
+            other => return Err(Stop::Unsound(format!("a slice of {other:?}"))),
+        };
+        let start = self.integer(start, slots)?;
+        let start = slice_position(start, 0, length)?;
+        if let Slot::Text(text) = &items {
+            if !text.is_char_boundary(start) {
+                return Err(Stop::Ended(Ending::Trapped));
+            }
+        }
+        let end = self.integer(end, slots)?;
+        let end = slice_position(end, start, length)?;
+        match items {
+            Slot::Compound(values) => Ok(Slot::Compound(values[start..end].to_vec())),
+            Slot::Text(text) => text
+                .get(start..end)
+                .map(|part| Slot::Text(part.to_owned()))
+                .ok_or(Stop::Ended(Ending::Trapped)),
+            other => Err(Stop::Unsound(format!("a slice of {other:?}"))),
+        }
+    }
+
     fn condition(&mut self, expr: &Expr, slots: &mut [Slot]) -> Eval<bool> {
         Ok(matches!(self.expr(expr, slots)?, Slot::Boolean(true)))
     }
@@ -478,6 +509,25 @@ impl Interpreter<'_, '_> {
                 return Ok(Slot::Compound(vec![value; length]));
             }
             ExprKind::EmptyList => return Ok(Slot::Compound(Vec::new())),
+            /*
+             * A view runs as a copy of the elements it shows when it is made.
+             * The generators write no program that changes such an element
+             * while the view is in use, where a copy and a view would differ.
+             */
+            ExprKind::View(items) => return self.expr(items, slots),
+            ExprKind::Slice { items, start, end } => {
+                return self.slice(items, start, end, slots);
+            }
+            ExprKind::Bytes(text) => {
+                return match self.expr(text, slots)? {
+                    Slot::Text(text) => Ok(Slot::Compound(
+                        text.bytes()
+                            .map(|byte| Slot::Integer(i128::from(byte)))
+                            .collect(),
+                    )),
+                    other => Err(Stop::Unsound(format!("the bytes of {other:?}"))),
+                };
+            }
             ExprKind::Construct(fields) => {
                 let count = match &expr.ty {
                     Type::Custom(custom) => custom.fields.len(),
@@ -612,6 +662,14 @@ fn check_index(index: i128, length: usize, checked: bool, span: Span) -> Eval<us
     Err(Stop::Unsound(format!(
         "unchecked index {index} at {span:?} is outside a value of length {length}"
     )))
+}
+
+/// A start or an end of a slice that lies from `low` to `length`, or else the program stops there.
+fn slice_position(position: i128, low: usize, length: usize) -> Eval<usize> {
+    match usize::try_from(position) {
+        Ok(position) if (low..=length).contains(&position) => Ok(position),
+        _ => Err(Stop::Ended(Ending::Trapped)),
+    }
 }
 
 /// How many elements an array or a list holds now.

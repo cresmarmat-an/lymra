@@ -42,9 +42,9 @@ const STATEMENTS: usize = 4;
 /// How deep loops and branches nest.
 const NESTING: usize = 3;
 
-/// The function every program has, which adds up the elements of a list.
+/// The function every program has, which adds up the elements a view shows: each list it gets becomes one.
 const TOTAL: &str = "\
-function total(list[integer64] values) returns integer64
+function total(view[integer64] values) returns integer64
     variable integer64 sum = 0
     for value in values
         sum = sum + value
@@ -579,11 +579,20 @@ impl Writer {
         self.line(&format!("    print(\"longer than {limit}\")"));
     }
 
+    /// Prints the total of a list, or of the second half of it, which a slice shows.
     fn show_a_temporary(&mut self) {
         let Some(value) = self.temporary_or_binding() else {
             return;
         };
-        self.line(&format!("print(\"total {{total({value})}}\")"));
+        if self.random.chance(50) {
+            self.line(&format!("print(\"total {{total({value})}}\")"));
+            return;
+        }
+        let half = self.name("half");
+        self.line(&format!("constant {half} = {value}"));
+        self.line(&format!(
+            "print(\"second half {{total(slice({half}, length({half}) / 2, length({half})))}}\")"
+        ));
     }
 }
 

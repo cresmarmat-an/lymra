@@ -27,6 +27,9 @@ impl<'src> Checker<'src, '_> {
         if element_type.is_growable() {
             return Err(self.report(Feature::NestedGrowable.diagnostic(element.span)));
         }
+        if element_type.holds_view() {
+            return Err(self.report(Feature::NestedView.diagnostic(element.span)));
+        }
         Ok(Type::list(element_type))
     }
 
@@ -118,21 +121,5 @@ impl<'src> Checker<'src, '_> {
                 Err(self.report(Feature::NamedArguments.diagnostic(target.span)))
             }
         }
-    }
-
-    /// Reports the list binding `id` if a `for` loop around this point goes over it, as replacing it would free what the loop reads.
-    pub(super) fn check_not_iterated(
-        &mut self,
-        id: ir::LocalId,
-        name: &str,
-        span: Span,
-        passed: bool,
-    ) -> CheckResult<()> {
-        let Some(&(_, iterable)) = self.iterated.iter().find(|(local, _)| *local == id) else {
-            return Ok(());
-        };
-        Err(self.report(errors::replaced_while_iterated(
-            name, span, iterable, passed,
-        )))
     }
 }

@@ -21,10 +21,3 @@ function main()
     if values == made
         print("same")
     print("{length(values + made)}")
-    for value in values
-        values = list()
-        clear(variable values)
-        print("{value}")
-
-function clear(variable list[integer64] values)
-    values = list()

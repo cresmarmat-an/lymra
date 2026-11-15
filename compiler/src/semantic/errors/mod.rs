@@ -6,6 +6,8 @@ mod custom_types;
 mod cycles;
 mod floats;
 mod lists;
+mod roots;
+mod views;
 
 pub(super) use arrays::{
     compound_in_text, empty_array, fill_argument_count, fill_into, fill_without_type,
@@ -25,7 +27,16 @@ pub(super) use floats::{conversion_never_fits, float_remainder, float_too_large,
 pub(super) use lists::{
     Change, changed_below_newer, empty_list_arguments, empty_list_into, empty_list_without_type,
     malformed_list_type, negative_index, push_argument_count, push_needs_variable, push_not_list,
-    pushed_value_marked, replaced_while_iterated,
+    pushed_value_marked,
+};
+pub(super) use roots::{
+    Replacement, replaced_while_iterated, replaced_while_viewed, returned_view_of_local,
+    returned_view_of_temporary, view_escapes_call, view_of_temporary, view_outlives_root,
+};
+pub(super) use views::{
+    bytes_argument_count, bytes_of_non_text, malformed_view_type, not_sliceable,
+    position_not_integer, slice_argument_count, slice_backwards, slice_position_out_of_range,
+    view_element_changed,
 };
 
 use super::BuiltIn;
@@ -287,7 +298,8 @@ pub(super) fn condition_not_boolean(found: &Type, span: Span, source: &str) -> D
         | Type::Array(_)
         | Type::Custom(_)
         | Type::Choice(_)
-        | Type::List(_) => Help::text("write a comparison or another `boolean` here"),
+        | Type::List(_)
+        | Type::View(_) => Help::text("write a comparison or another `boolean` here"),
     };
     Diagnostic::new(
         ErrorCode::L0402,
@@ -303,7 +315,9 @@ pub(super) fn condition_not_boolean(found: &Type, span: Span, source: &str) -> D
 /// `source` is the argument as written, used to suggest interpolation.
 pub(super) fn print_needs_text(found: &Type, span: Span, source: &str) -> Diagnostic {
     let help = match found {
-        Type::Array(_) | Type::List(_) => Help::text("print its elements one by one, in a loop"),
+        Type::Array(_) | Type::List(_) | Type::View(_) => {
+            Help::text("print its elements one by one, in a loop")
+        }
         Type::Custom(custom) => Help::text(format!(
             "print its fields, as in `print(\"{{{source}.{}}}\")`",
             custom

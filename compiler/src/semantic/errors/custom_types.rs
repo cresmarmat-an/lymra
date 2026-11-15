@@ -36,6 +36,9 @@ pub(in crate::semantic) fn no_fields(found: &Type, object: Span, field: &str) ->
         Type::List(_) => {
             "a list has elements, not fields; to read one, index it, as in `values[0]`".to_owned()
         }
+        Type::View(_) => {
+            "a view has elements, not fields; to read one, index it, as in `values[0]`".to_owned()
+        }
         Type::Choice(choice) => match choice
             .variants
             .iter()

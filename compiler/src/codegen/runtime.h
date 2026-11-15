@@ -623,7 +623,7 @@ LYMRA_UNUSED static void lymra_write_error_number(uint64_t magnitude, bool negat
 
 /*
  * Stops the program because an index of `magnitude`, negative or not, lies
- * outside `indexed`, "an array" or "a list", of `length` elements.
+ * outside `indexed`, "an array", "a list" or "a view", of `length` elements.
  */
 LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap_index(uint64_t magnitude, bool negative, uint64_t length,
                                                           const char *indexed, const char *site) {
@@ -639,7 +639,7 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap_index(uint64_t magnitude, bo
     exit(LYMRA_RUNTIME_ERROR_STATUS);
 }
 
-/* Checks a signed index into `indexed`, an array or a list of `length` elements, and returns it as a position. */
+/* Checks a signed index into `indexed`, of `length` elements, and returns it as a position. */
 LYMRA_UNUSED static inline size_t lymra_index_signed(int64_t index, uint64_t length, const char *indexed,
                                                      const char *site) {
     if (index < 0) {
@@ -651,13 +651,115 @@ LYMRA_UNUSED static inline size_t lymra_index_signed(int64_t index, uint64_t len
     return (size_t)index;
 }
 
-/* Checks an unsigned index into `indexed`, an array or a list of `length` elements, and returns it as a position. */
+/* Checks an unsigned index into `indexed`, of `length` elements, and returns it as a position. */
 LYMRA_UNUSED static inline size_t lymra_index_unsigned(uint64_t index, uint64_t length, const char *indexed,
                                                        const char *site) {
     if (index >= length) {
         lymra_trap_index(index, false, length, indexed, site);
     }
     return (size_t)index;
+}
+
+/*
+ * Stops the program because a slice cannot start, or end, at `magnitude`,
+ * negative or not: `part` says which. `indexed` is what the slice is taken
+ * from, as "a list" or "a text", which has `length` elements or bytes.
+ */
+LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap_slice(const char *part, uint64_t magnitude, bool negative,
+                                                          uint64_t length, const char *indexed,
+                                                          const char *site) {
+    lymra_write_finished();
+    lymra_write_error("error: slice ");
+    lymra_write_error(part);
+    lymra_write_error(" ");
+    lymra_write_error_number(magnitude, negative);
+    lymra_write_error(" is out of range for ");
+    lymra_write_error(indexed);
+    lymra_write_error(" of length ");
+    lymra_write_error_number(length, false);
+    lymra_write_error("\n");
+    lymra_write_error(site);
+    exit(LYMRA_RUNTIME_ERROR_STATUS);
+}
+
+/* Stops the program because a slice would end at `end`, before its `start`. */
+LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap_slice_order(int64_t start, int64_t end, const char *site) {
+    lymra_write_finished();
+    lymra_write_error("error: slice end ");
+    lymra_write_error_number((uint64_t)end, false);
+    lymra_write_error(" is before its start ");
+    lymra_write_error_number((uint64_t)start, false);
+    lymra_write_error("\n");
+    lymra_write_error(site);
+    exit(LYMRA_RUNTIME_ERROR_STATUS);
+}
+
+/* Checks a signed start of a slice of `indexed`, of `length` elements: from 0 to `length`. */
+LYMRA_UNUSED static inline int64_t lymra_slice_start_signed(int64_t start, uint64_t length, const char *indexed,
+                                                            const char *site) {
+    if (start < 0) {
+        lymra_trap_slice("start", (uint64_t)0 - (uint64_t)start, true, length, indexed, site);
+    }
+    if ((uint64_t)start > length) {
+        lymra_trap_slice("start", (uint64_t)start, false, length, indexed, site);
+    }
+    return start;
+}
+
+/* Checks an unsigned start of a slice of `indexed`, of `length` elements: at most `length`. */
+LYMRA_UNUSED static inline int64_t lymra_slice_start_unsigned(uint64_t start, uint64_t length,
+                                                              const char *indexed, const char *site) {
+    if (start > length) {
+        lymra_trap_slice("start", start, false, length, indexed, site);
+    }
+    return (int64_t)start;
+}
+
+/* Checks a signed end of a slice of `indexed`, of `length` elements, starting at `start`: up to `length`. */
+LYMRA_UNUSED static inline int64_t lymra_slice_end_signed(int64_t end, int64_t start, uint64_t length,
+                                                          const char *indexed, const char *site) {
+    if (end < 0) {
+        lymra_trap_slice("end", (uint64_t)0 - (uint64_t)end, true, length, indexed, site);
+    }
+    if ((uint64_t)end > length) {
+        lymra_trap_slice("end", (uint64_t)end, false, length, indexed, site);
+    }
+    if (end < start) {
+        lymra_trap_slice_order(start, end, site);
+    }
+    return end;
+}
+
+/* Checks an unsigned end of a slice of `indexed`, of `length` elements, starting at `start`: up to `length`. */
+LYMRA_UNUSED static inline int64_t lymra_slice_end_unsigned(uint64_t end, int64_t start, uint64_t length,
+                                                            const char *indexed, const char *site) {
+    if (end > length) {
+        lymra_trap_slice("end", end, false, length, indexed, site);
+    }
+    if ((int64_t)end < start) {
+        lymra_trap_slice_order(start, (int64_t)end, site);
+    }
+    return (int64_t)end;
+}
+
+/*
+ * Checks that a slice of `text` starts, or ends, between two characters at
+ * `position`, which lies within the text: `part` says which. A UTF-8
+ * character goes on with bytes of the form 10xxxxxx, so a position at one
+ * of them falls inside a character.
+ */
+LYMRA_UNUSED static inline void lymra_text_boundary(lymra_string text, int64_t position, const char *part,
+                                                    const char *site) {
+    if ((size_t)position < text.length && ((unsigned char)text.data[position] & 0xC0) == 0x80) {
+        lymra_write_finished();
+        lymra_write_error("error: slice ");
+        lymra_write_error(part);
+        lymra_write_error(" ");
+        lymra_write_error_number((uint64_t)position, false);
+        lymra_write_error(" falls inside a character of the text\n");
+        lymra_write_error(site);
+        exit(LYMRA_RUNTIME_ERROR_STATUS);
+    }
 }
 
 /* Checks a conversion from a signed type: the value has to lie within [minimum, maximum]. */

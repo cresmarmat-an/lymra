@@ -1,0 +1,10 @@
+exit status 70
+--- standard output
+start
+end
+--- standard error
+error: slice end 1 is before its start 3
+  --> tests/run/slice_backwards.lym:12:21
+   |
+12 |     constant part = slice(values, noted("start", 3), noted("end", 1))
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

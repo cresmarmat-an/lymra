@@ -1,0 +1,116 @@
+error[L0701]: `first_one` returns a view of `numbers`, which is freed when it returns
+  --> tests/check/roots.lym:10:12
+   |
+10 |     return slice(numbers, 0, 1)
+   |            ^^^^^^^^^^^^^^^^^^^^ a view of `numbers`
+   |
+help: return `numbers` itself, or a view of one of the parameters, which the caller keeps
+
+error[L0701]: `window` would show a value that is freed at the end of this statement
+  --> tests/check/roots.lym:18:39
+   |
+18 |     constant view[integer64] window = made()
+   |                                       ^^^^^^ this value has no binding, so it lasts only as long as its statement
+   |
+help: keep the value in a binding first, then give `window` a view of that binding
+
+error[L0701]: this returns a view of a value that is freed at the end of the `return`
+  --> tests/check/roots.lym:22:12
+   |
+22 |     return made()
+   |            ^^^^^^ this value has no binding, so it lasts only as long as its statement
+   |
+help: return the value itself, as a list or an array, instead of a view of it
+
+error[L0701]: `window` would outlive `inner`, which it shows
+  --> tests/check/roots.lym:31:18
+   |
+29 |         variable list[integer64] inner = list()
+   |                                  ----- `inner` is freed at the end of its block, before `window` is
+...
+31 |         window = inner
+   |                  ^^^^^ `window` shows `inner` from here
+   |
+help: use `window` only inside the block of `inner`, or keep what it shows in a binding declared where `window` is
+
+error[L0701]: `cursor` would show `local`, which is freed when `escaped` returns
+  --> tests/check/roots.lym:37:14
+   |
+37 |     cursor = local
+   |              ^^^^^ the caller keeps `cursor` after the call
+   |
+help: give `cursor` a part of what it showed, or a view of another parameter
+
+error[L0703]: `values` cannot be replaced while `window`, a view of it, is still used
+  --> tests/check/roots.lym:53:5
+   |
+52 |     constant window = slice(values, 0, 1)
+   |              ------ `window` shows `values`
+53 |     values = list()
+   |     ^^^^^^ this frees the elements `window` shows
+   |
+help: finish with `window` before `values` changes, or copy what `window` shows into a list of its own
+
+error[L0703]: `values` cannot be passed with `variable` while `window`, a view of it, is still used
+  --> tests/check/roots.lym:60:11
+   |
+59 |     constant view[integer64] window = values
+   |                              ------ `window` shows `values`
+60 |     clear(variable values)
+   |           ^^^^^^^^^^^^^^^ `clear` can replace the whole list
+   |
+help: finish with `window` before `values` changes, or copy what `window` shows into a list of its own
+
+error[L0703]: `values` cannot be passed with `variable` while `window`, a view of it, is still used
+  --> tests/check/roots.lym:67:33
+   |
+66 |     constant view[integer64] window = values
+   |                              ------ `window` shows `values`
+67 |     return total_after_clearing(variable values, window)
+   |                                 ^^^^^^^^^^^^^^^ `total_after_clearing` can replace the whole list
+   |
+help: finish with `window` before `values` changes, or copy what `window` shows into a list of its own
+
+error[L0703]: `values` cannot be replaced while a `for` loop goes over it
+  --> tests/check/roots.lym:73:9
+   |
+72 |     for value in values
+   |                  ------ the loop goes over it here
+73 |         values = list()
+   |         ^^^^^^ this replaces the whole list
+   |
+help: change its elements or `push` to it inside the loop, and replace it after the loop ends
+
+error[L0703]: `values` cannot be passed with `variable` while a `for` loop goes over it
+  --> tests/check/roots.lym:74:15
+   |
+72 |     for value in values
+   |                  ------ the loop goes over it here
+...
+74 |         clear(variable values)
+   |               ^^^^^^^^^^^^^^^ `clear` can replace the whole list
+   |
+help: call `clear` after the loop; `push` and changing elements are fine inside it
+
+error[L0703]: `values` cannot be passed with `variable` while `window`, a view of it, is still used
+  --> tests/check/roots.lym:86:16
+   |
+85 |     constant view[integer64] window = values
+   |                              ------ `window` shows `values`
+86 |     if cleared(variable values)
+   |                ^^^^^^^^^^^^^^^ `cleared` can replace the whole list
+   |
+help: finish with `window` before `values` changes, or copy what `window` shows into a list of its own
+
+error[L0701]: `kept` would outlive `row`, which it shows
+  --> tests/check/roots.lym:95:16
+   |
+94 |     for row in rows
+   |         --- `row` is freed at the end of its block, before `kept` is
+95 |         kept = slice(row, 0, 2)
+   |                ^^^^^^^^^^^^^^^^ `kept` shows `row` from here
+   |
+help: use `kept` only inside the block of `row`, or keep what it shows in a binding declared where `kept` is
+
+found 12 errors in tests/check/roots.lym
+run `lymra explain L0701` to read why a rule exists and how to fix it

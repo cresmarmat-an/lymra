@@ -1,5 +1,6 @@
 //! The targets of assignments: a binding, or an element or a field inside one, as in `grid[row].cells[column]`.
 
+use super::errors;
 use super::{CheckResult, Checker};
 use crate::ast;
 use crate::ir::{self, Type};
@@ -86,6 +87,11 @@ impl<'src> Checker<'src, '_> {
                     object,
                     span,
                 } => {
+                    if ty.as_view().is_some() {
+                        self.check_for_errors(index);
+                        let source = self.text(*object);
+                        return Err(self.report(errors::view_element_changed(source, *object)));
+                    }
                     let value = self.check_index_value(index)?;
                     let (element, length) = self.elements_of(&ty, *object)?;
                     checked.push(ir::PlaceStep::Index(ir::PlaceIndex {

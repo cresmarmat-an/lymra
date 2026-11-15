@@ -149,12 +149,12 @@ pub(in crate::semantic) fn length_argument_count(found: usize, call: Span) -> Di
 pub(in crate::semantic) fn not_indexable(found: &Type, span: Span) -> Diagnostic {
     operator_type(
         format!(
-            "only arrays and lists can be indexed, and this is {}",
+            "only arrays, lists and views can be indexed, and this is {}",
             described(found)
         ),
         span,
-        "not an array or a list".to_owned(),
-        "index an array or a list, as in `values[0]`",
+        "not an array, a list or a view".to_owned(),
+        "index an array, a list or a view, as in `values[0]`; for the bytes of a text, index `bytes(text)`",
     )
 }
 
@@ -170,12 +170,12 @@ pub(in crate::semantic) fn index_not_integer(found: &Type, span: Span) -> Diagno
 pub(in crate::semantic) fn no_length(found: &Type, span: Span) -> Diagnostic {
     operator_type(
         format!(
-            "`length` counts the elements of an array or a list, or the bytes of a text, but this is {}",
+            "`length` counts the elements of an array, a list or a view, or the bytes of a text, but this is {}",
             described(found)
         ),
         span,
         "has no length".to_owned(),
-        "pass an array, a list or a `string`",
+        "pass an array, a list, a view or a `string`",
     )
 }
 
@@ -198,7 +198,8 @@ pub(in crate::semantic) fn compound_in_text(found: &Type, span: Span, source: &s
         | Type::Boolean
         | Type::String
         | Type::Array(_)
-        | Type::List(_) => {
+        | Type::List(_)
+        | Type::View(_) => {
             format!(
                 "put its elements in one by one, as in `{{{source}[0]}}`, or print them in a loop"
             )
@@ -212,7 +213,7 @@ pub(in crate::semantic) fn compound_in_text(found: &Type, span: Span, source: &s
     )
 }
 
-/// `for` over a value that is neither `range(start, end)` nor an array. `source` is the value as written.
+/// `for` over a value that is not `range(start, end)` or something with elements. `source` is the value as written.
 pub(in crate::semantic) fn not_iterable(found: &Type, span: Span, source: &str) -> Diagnostic {
     let help = match found {
         Type::Integer(_) => Help::replace(
@@ -220,21 +221,26 @@ pub(in crate::semantic) fn not_iterable(found: &Type, span: Span, source: &str) 
             span,
             format!("range(0, {source})"),
         ),
+        Type::String => Help::replace(
+            "to go over the bytes of a text, loop over `bytes`",
+            span,
+            format!("bytes({source})"),
+        ),
         Type::Float(_)
         | Type::Boolean
-        | Type::String
         | Type::Array(_)
         | Type::Custom(_)
         | Type::Choice(_)
-        | Type::List(_) => Help::text("loop over `range(start, end)`, an array or a list"),
+        | Type::List(_)
+        | Type::View(_) => Help::text("loop over `range(start, end)`, an array, a list or a view"),
     };
     Diagnostic::new(
         ErrorCode::L0405,
         format!(
-            "`for` loops over a range or an array, but this is {}",
+            "`for` loops over a range, an array, a list or a view, but this is {}",
             described(found)
         ),
-        Label::new(span, "not a range or an array"),
+        Label::new(span, "nothing to loop over"),
         help,
     )
 }

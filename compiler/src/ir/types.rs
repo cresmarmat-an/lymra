@@ -152,6 +152,8 @@ pub enum Type {
     Choice(Arc<ChoiceType>),
     /// `list[element]`, which grows while it lives (spec 4.4), shared like an array.
     List(Arc<ListType>),
+    /// `view[element]`, a read-only window into elements kept elsewhere (spec 4.4), shared like an array.
+    View(Arc<ViewType>),
 }
 
 /**
@@ -248,6 +250,12 @@ pub struct ListType {
     pub element: Type,
 }
 
+/// Elements of one type that an array, a list or a text keeps, read through a window that owns none of them (spec 4.4).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ViewType {
+    pub element: Type,
+}
+
 impl Type {
     pub fn array(element: Type, length: u64) -> Type {
         Type::Array(Arc::new(ArrayType { element, length }))
@@ -255,6 +263,10 @@ impl Type {
 
     pub fn list(element: Type) -> Type {
         Type::List(Arc::new(ListType { element }))
+    }
+
+    pub fn view(element: Type) -> Type {
+        Type::View(Arc::new(ViewType { element }))
     }
 
     pub const fn as_integer(&self) -> Option<IntegerType> {
@@ -266,7 +278,8 @@ impl Type {
             | Self::Array(_)
             | Self::Custom(_)
             | Self::Choice(_)
-            | Self::List(_) => None,
+            | Self::List(_)
+            | Self::View(_) => None,
         }
     }
 
@@ -279,7 +292,8 @@ impl Type {
             | Self::Array(_)
             | Self::Custom(_)
             | Self::Choice(_)
-            | Self::List(_) => None,
+            | Self::List(_)
+            | Self::View(_) => None,
         }
     }
 
@@ -292,7 +306,8 @@ impl Type {
             | Self::String
             | Self::Custom(_)
             | Self::Choice(_)
-            | Self::List(_) => None,
+            | Self::List(_)
+            | Self::View(_) => None,
         }
     }
 
@@ -305,7 +320,22 @@ impl Type {
             | Self::String
             | Self::Array(_)
             | Self::Custom(_)
-            | Self::Choice(_) => None,
+            | Self::Choice(_)
+            | Self::View(_) => None,
+        }
+    }
+
+    pub fn as_view(&self) -> Option<&ViewType> {
+        match self {
+            Self::View(view) => Some(view),
+            Self::Integer(_)
+            | Self::Float(_)
+            | Self::Boolean
+            | Self::String
+            | Self::Array(_)
+            | Self::Custom(_)
+            | Self::Choice(_)
+            | Self::List(_) => None,
         }
     }
 
@@ -327,7 +357,39 @@ impl Type {
                 .variants
                 .iter()
                 .any(|variant| variant.fields.iter().any(|field| field.ty.is_growable())),
+            Self::Integer(_) | Self::Float(_) | Self::Boolean | Self::String | Self::View(_) => {
+                false
+            }
+        }
+    }
+
+    /// Whether a value of the type holds a view, which shows data that belongs to something else.
+    pub fn holds_view(&self) -> bool {
+        match self {
+            Self::View(_) => true,
+            Self::Array(array) => array.element.holds_view(),
+            Self::List(list) => list.element.holds_view(),
+            Self::Custom(custom) => custom.fields.iter().any(|field| field.ty.holds_view()),
+            Self::Choice(choice) => choice
+                .variants
+                .iter()
+                .any(|variant| variant.fields.iter().any(|field| field.ty.holds_view())),
             Self::Integer(_) | Self::Float(_) | Self::Boolean | Self::String => false,
+        }
+    }
+
+    /// The type of the elements, for a list or a view, whose length only the running program knows.
+    pub fn dynamic_elements(&self) -> Option<&Type> {
+        match self {
+            Self::List(list) => Some(&list.element),
+            Self::View(view) => Some(&view.element),
+            Self::Integer(_)
+            | Self::Float(_)
+            | Self::Boolean
+            | Self::String
+            | Self::Array(_)
+            | Self::Custom(_)
+            | Self::Choice(_) => None,
         }
     }
 
@@ -350,6 +412,8 @@ impl Type {
             Self::String => Some(Layout { size: 16, align: 8 }),
             // Where its elements start, how many there are, and the data stack they grow on.
             Self::List(_) => Some(Layout { size: 24, align: 8 }),
+            // Where its elements start, and how many there are.
+            Self::View(_) => Some(Layout { size: 16, align: 8 }),
             Self::Array(array) => {
                 let element = array.element.layout()?;
                 Some(Layout {
@@ -395,6 +459,7 @@ impl fmt::Display for Type {
             Self::Custom(custom) => formatter.write_str(&custom.name),
             Self::Choice(choice) => formatter.write_str(&choice.name),
             Self::List(list) => write!(formatter, "list[{}]", list.element),
+            Self::View(view) => write!(formatter, "view[{}]", view.element),
         }
     }
 }

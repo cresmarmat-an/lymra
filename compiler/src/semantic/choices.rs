@@ -53,7 +53,8 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             | Type::String
             | Type::Array(_)
             | Type::Custom(_)
-            | Type::List(_) => Err(ErrorReported),
+            | Type::List(_)
+            | Type::View(_) => Err(ErrorReported),
         }
     }
 

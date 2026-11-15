@@ -32,7 +32,8 @@ impl Number {
             | Type::Array(_)
             | Type::Custom(_)
             | Type::Choice(_)
-            | Type::List(_) => None,
+            | Type::List(_)
+            | Type::View(_) => None,
         }
     }
 

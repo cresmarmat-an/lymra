@@ -500,7 +500,8 @@ impl<'function> Analyzer<'function> {
                 | Type::String
                 | Type::Custom(_)
                 | Type::Choice(_)
-                | Type::List(_) => Interval {
+                | Type::List(_)
+                | Type::View(_) => Interval {
                     low: 0,
                     high: whole_type.high,
                 },
@@ -513,6 +514,9 @@ impl<'function> Analyzer<'function> {
             | ExprKind::Logic { .. }
             | ExprKind::Index { .. }
             | ExprKind::Fill(_)
+            | ExprKind::View(_)
+            | ExprKind::Slice { .. }
+            | ExprKind::Bytes(_)
             | ExprKind::EmptyList
             | ExprKind::Construct(_)
             | ExprKind::Variant { .. }
@@ -581,10 +585,17 @@ impl<'function> Analyzer<'function> {
             | ExprKind::Convert { operand, .. }
             | ExprKind::Fill(operand)
             | ExprKind::Length(operand)
+            | ExprKind::View(operand)
+            | ExprKind::Bytes(operand)
             | ExprKind::Field {
                 object: operand, ..
             } => {
                 self.remove_checks(operand, bounds);
+            }
+            ExprKind::Slice { items, start, end } => {
+                self.remove_checks(items, bounds);
+                self.remove_checks(start, bounds);
+                self.remove_checks(end, bounds);
             }
             ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
                 for field in fields {
@@ -1221,11 +1232,11 @@ impl<'function> Analyzer<'function> {
         }
     }
 
-    /// A list's length less a constant, as in `length(items) - 1`: the list and the constant.
+    /// The length of a list or a view less a constant, as in `length(items) - 1`: the list or view and the constant.
     fn length_less(&self, expr: &Expr, bounds: &Bounds) -> Option<(LocalId, i128)> {
         match &expr.kind {
             ExprKind::Length(operand) => match operand.kind {
-                ExprKind::Local(list) if operand.ty.is_growable() => Some((list, 0)),
+                ExprKind::Local(list) if operand.ty.dynamic_elements().is_some() => Some((list, 0)),
                 _ => None,
             },
             ExprKind::Arithmetic {

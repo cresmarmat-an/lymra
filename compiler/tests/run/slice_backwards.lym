@@ -1,0 +1,13 @@
+#[
+    A slice that would end before it starts stops the program, after its
+    start is computed and checked and before anything later runs.
+]#
+
+function noted(string name, integer64 value) returns integer64
+    print("{name}")
+    return value
+
+function main()
+    constant array[integer64, 4] values = array(1)
+    constant part = slice(values, noted("start", 3), noted("end", 1))
+    print("{length(part)}")

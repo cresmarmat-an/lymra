@@ -1,0 +1,9 @@
+exit status 70
+--- standard output
+hé
+--- standard error
+error: slice end 2 falls inside a character of the text
+ --> tests/run/text_slice_inside_character.lym:7:12
+  |
+7 |     return slice(text, 0, count)
+  |            ^^^^^^^^^^^^^^^^^^^^^

@@ -72,13 +72,13 @@ error[L0412]: `array(value)` needs to know which array to build
    |
 help: write the type where the array goes, as in `variable array[integer64, 10] values = array(0)`
 
-error[L0405]: only arrays and lists can be indexed, and this is an `integer64`
+error[L0405]: only arrays, lists and views can be indexed, and this is an `integer64`
   --> tests/check/arrays.lym:15:13
    |
 15 |     print("{number[0]}")
-   |             ^^^^^^ not an array or a list
+   |             ^^^^^^ not an array, a list or a view
    |
-help: index an array or a list, as in `values[0]`
+help: index an array, a list or a view, as in `values[0]`; for the bytes of a text, index `bytes(text)`
 
 error[L0402]: an index is an integer, but this is a `boolean`
   --> tests/check/arrays.lym:16:20
@@ -104,31 +104,31 @@ error[L0402]: `print` takes text, but this is an `array[integer64, 3]`
    |
 help: print its elements one by one, in a loop
 
-error[L0405]: `for` loops over a range or an array, but this is an `integer64`
+error[L0405]: `for` loops over a range, an array, a list or a view, but this is an `integer64`
   --> tests/check/arrays.lym:19:17
    |
 19 |     for item in number
-   |                 ^^^^^^ not a range or an array
+   |                 ^^^^^^ nothing to loop over
    |
 help: to count up to a number, loop over a range
    |
 19 |     for item in range(0, number)
 
-error[L0309]: `for` can only loop over `range` and arrays for now
+error[L0309]: `for` cannot loop over the characters of a text yet
   --> tests/check/arrays.lym:21:22
    |
 21 |     for character in "text"
    |                      ^^^^^^ the compiler adds this in roadmap phase 3
    |
-help: write this part another way for now; the roadmap in the README lists what each phase adds
+help: loop over `bytes(text)` to go over its bytes, or write this part another way for now
 
-error[L0405]: `length` counts the elements of an array or a list, or the bytes of a text, but this is an `integer64`
+error[L0405]: `length` counts the elements of an array, a list or a view, or the bytes of a text, but this is an `integer64`
   --> tests/check/arrays.lym:23:20
    |
 23 |     print("{length(number)}")
    |                    ^^^^^^ has no length
    |
-help: pass an array, a list or a `string`
+help: pass an array, a list, a view or a `string`
 
 error[L0501]: `length` takes 1 argument, but 2 were given
   --> tests/check/arrays.lym:24:19

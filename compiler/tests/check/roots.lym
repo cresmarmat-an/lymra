@@ -1,0 +1,145 @@
+#[
+    Errors L0701 and L0703. A view cannot outlive what it shows, and a list
+    cannot be replaced while a view of it, or a `for` loop over it, still
+    reads its elements. The functions after `main` are accepted.
+]#
+
+function first_one() returns view[integer64]
+    variable list[integer64] numbers = list()
+    push(variable numbers, 1)
+    return slice(numbers, 0, 1)
+
+function made() returns list[integer64]
+    variable list[integer64] numbers = list()
+    push(variable numbers, 1)
+    return numbers
+
+function view_of_temporary() returns integer64
+    constant view[integer64] window = made()
+    return length(window)
+
+function returned_temporary() returns view[integer64]
+    return made()
+
+function outlived() returns integer64
+    variable list[integer64] outer = list()
+    push(variable outer, 1)
+    variable view[integer64] window = outer
+    if length(outer) > 0
+        variable list[integer64] inner = list()
+        push(variable inner, 2)
+        window = inner
+    return length(window)
+
+function escaped(variable view[integer64] cursor)
+    variable list[integer64] local = list()
+    push(variable local, 3)
+    cursor = local
+
+function clear(variable list[integer64] values)
+    values = list()
+
+function grow(variable list[integer64] values)
+    push(variable values, 9)
+
+function total_after_clearing(variable list[integer64] values, view[integer64] window) returns integer64
+    clear(variable values)
+    return length(window)
+
+function replaced_while_viewed() returns integer64
+    variable list[integer64] values = list()
+    push(variable values, 1)
+    constant window = slice(values, 0, 1)
+    values = list()
+    return window[0]
+
+function passed_while_viewed() returns integer64
+    variable list[integer64] values = list()
+    push(variable values, 1)
+    constant view[integer64] window = values
+    clear(variable values)
+    return length(window)
+
+function passed_with_its_view() returns integer64
+    variable list[integer64] values = list()
+    push(variable values, 1)
+    constant view[integer64] window = values
+    return total_after_clearing(variable values, window)
+
+function looped()
+    variable list[integer64] values = list()
+    push(variable values, 1)
+    for value in values
+        values = list()
+        clear(variable values)
+        grow(variable values)
+        print("{value}")
+
+function cleared(variable list[integer64] values) returns boolean
+    values = list()
+    return true
+
+function replaced_in_a_condition()
+    variable list[integer64] values = list()
+    push(variable values, 1)
+    constant view[integer64] window = values
+    if cleared(variable values)
+        print("{length(window)}")
+
+function kept_past_the_loop() returns integer64
+    variable list[array[integer64, 3]] rows = list()
+    push(variable rows, array(1))
+    constant array[integer64, 3] spare = array(0)
+    variable view[integer64] kept = spare
+    for row in rows
+        kept = slice(row, 0, 2)
+    return kept[0]
+
+function main()
+    print("{length(first_one())} {view_of_temporary()} {length(returned_temporary())} {outlived()}")
+    variable list[integer64] numbers = list()
+    push(variable numbers, 4)
+    variable view[integer64] cursor = numbers
+    escaped(variable cursor)
+    print("{replaced_while_viewed()} {passed_while_viewed()} {passed_with_its_view()} {length(cursor)}")
+    looped()
+    accepted()
+
+function last(view[integer64] values) returns view[integer64]
+    return slice(values, length(values) - 1, length(values))
+
+function either(view[integer64] first, view[integer64] second, boolean pick_first) returns view[integer64]
+    if pick_first
+        return first
+    return second
+
+function step(variable view[integer64] cursor)
+    cursor = slice(cursor, 1, length(cursor))
+
+function copied(view[integer64] values) returns list[integer64]
+    variable list[integer64] copy = list()
+    for value in values
+        push(variable copy, value)
+    return copy
+
+function accepted()
+    variable list[integer64] values = list()
+    push(variable values, 1)
+    push(variable values, 2)
+    constant window = slice(values, 0, 1)
+    print("{window[0]}")
+    values = list()
+    push(variable values, 5)
+    variable view[integer64] cursor = values
+    push(variable values, 6)
+    step(variable cursor)
+    print("{length(cursor)} {length(last(values))}")
+    variable array[integer64, 3] fixed = array(7)
+    constant shown = either(fixed, values, true)
+    fixed = array(8)
+    print("{shown[0]}")
+    constant before = values
+    values = copied(before)
+    for value in values
+        grow(variable values)
+        print("{value}")

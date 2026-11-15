@@ -6,19 +6,22 @@
  *
  * A list type becomes a struct that says where its elements start on their
  * data stack, how many there are, and which stack they grow on, with the
- * functions that build, grow and replace such a list.
+ * functions that build, grow and replace such a list. A view type becomes a
+ * struct that says where the elements it shows start and how many there
+ * are, which it can only read.
  */
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::{INDENT, c_syntax};
-use crate::ir::{ArrayType, ChoiceType, CustomType, FloatType, ListType, Type};
+use crate::ir::{ArrayType, ChoiceType, CustomType, FloatType, ListType, Type, ViewType};
 
 #[derive(Default)]
 pub(super) struct CTypes {
     arrays: HashMap<Arc<ArrayType>, String>,
     lists: HashMap<Arc<ListType>, String>,
+    views: HashMap<Arc<ViewType>, String>,
     /// The declared types and choices defined so far, by name, which is unique in a program.
     customs: HashMap<String, String>,
     /// The structs, and the fill functions of arrays, in the order C needs them.
@@ -47,6 +50,7 @@ impl CTypes {
             Type::Custom(custom) => self.custom_name(custom),
             Type::Choice(choice) => self.choice_name(choice),
             Type::List(list) => self.list_name(list),
+            Type::View(view) => self.view_name(view),
         }
     }
 
@@ -153,6 +157,20 @@ impl CTypes {
             .push(list_definition(&name, &element, &list.element));
         self.lists.insert(Arc::clone(list), name.clone());
         self.uses_lists = true;
+        name
+    }
+
+    fn view_name(&mut self, view: &Arc<ViewType>) -> String {
+        if let Some(name) = self.views.get(view) {
+            return name.clone();
+        }
+        let element = self.name(&view.element);
+        let name = format!("view_{}", self.views.len());
+        self.definitions.push(format!(
+            "/* view[{}] */\ntypedef struct {{\n{INDENT}const {element} *elements;\n{INDENT}int64_t length;\n}} {name};",
+            view.element
+        ));
+        self.views.insert(Arc::clone(view), name.clone());
         name
     }
 

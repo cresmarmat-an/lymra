@@ -95,38 +95,6 @@ pub(in crate::semantic) fn push_not_list(found: &Type, span: Span) -> Diagnostic
     )
 }
 
-/**
- * A list replaced, or passed to a function that could replace it, while a
- * `for` loop goes over it. `passed` is true for the second.
- */
-pub(in crate::semantic) fn replaced_while_iterated(
-    name: &str,
-    span: Span,
-    iterable: Span,
-    passed: bool,
-) -> Diagnostic {
-    let (message, label, help) = if passed {
-        (
-            format!("`{name}` cannot be passed with `variable` while a `for` loop goes over it"),
-            "the function could replace the whole list",
-            "pass it without `variable`, or call the function after the loop; `push` and changing elements are fine inside it",
-        )
-    } else {
-        (
-            format!("`{name}` cannot be replaced while a `for` loop goes over it"),
-            "this replaces the whole list",
-            "change its elements or `push` to it inside the loop, and replace it after the loop ends",
-        )
-    };
-    Diagnostic::new(
-        ErrorCode::L0703,
-        message,
-        Label::new(span, label),
-        Help::text(help),
-    )
-    .with_secondary(Label::new(iterable, "the loop goes over it here"))
-}
-
 /// How a list is changed where error L0704 points.
 #[derive(Clone, Copy, Debug)]
 pub(in crate::semantic) enum Change<'a> {

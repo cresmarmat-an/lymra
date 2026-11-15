@@ -87,6 +87,10 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     self.report(Feature::NestedGrowable.diagnostic(field.ty.span));
                     failed = true;
                 }
+                Ok(ty) if ty.holds_view() => {
+                    self.report(Feature::NestedView.diagnostic(field.ty.span));
+                    failed = true;
+                }
                 Ok(ty) => resolved.push(FieldType {
                     name: field.name.text.to_owned(),
                     ty,

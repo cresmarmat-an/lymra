@@ -157,6 +157,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         if name.text == "list" {
             return self.resolve_list_type(arguments, ty.span);
         }
+        if name.text == "view" {
+            return self.resolve_view_type(arguments, ty.span);
+        }
         if let Some(Global::Type(id)) = self.globals.get(name.text).copied() {
             self.no_arguments(name.text, arguments, ty.span)?;
             return self.declared_type(id, name.span);
@@ -187,7 +190,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 let known = IntegerType::ALL
                     .iter()
                     .map(|integer| integer.name())
-                    .chain(["float32", "float64", "boolean", "string", "array", "list"])
+                    .chain([
+                        "float32", "float64", "boolean", "string", "array", "list", "view",
+                    ])
                     .chain(declared);
                 let suggestion = similarity::closest_match(name.text, known);
                 Err(self.report(errors::unknown_type(
@@ -300,6 +305,8 @@ fn runtime_part(expr: &ir::Expr) -> Span {
         | ir::ExprKind::Not(operand)
         | ir::ExprKind::Convert { operand, .. }
         | ir::ExprKind::Length(operand)
+        | ir::ExprKind::View(operand)
+        | ir::ExprKind::Bytes(operand)
         | ir::ExprKind::Index { array: operand, .. }
         | ir::ExprKind::Field {
             object: operand, ..
@@ -323,6 +330,7 @@ fn runtime_part(expr: &ir::Expr) -> Span {
         | ir::ExprKind::Call(_)
         | ir::ExprKind::Fill(_)
         | ir::ExprKind::EmptyList
+        | ir::ExprKind::Slice { .. }
         | ir::ExprKind::Construct(_)
         | ir::ExprKind::Variant { .. } => expr.span,
     }

@@ -2,7 +2,7 @@
 
 Status: draft. Every rule here can change until a compiler implements it and a test proves it.
 
-The compiler in `compiler/` implements the syntax of this whole document. Its test suite parses every code sample here, so the spec and the parser cannot drift apart. It also checks and compiles the core of the language: integers, floats, booleans, text values, functions, arrays, custom types, choices and `match`, lists of fixed-size values, `if`, `while`, `for`, and `print`. The rest arrives in the phases of the roadmap in the README, and until then the compiler rejects it with `L0309`, naming the phase.
+The compiler in `compiler/` implements the syntax of this whole document. Its test suite parses every code sample here, so the spec and the parser cannot drift apart. It also checks and compiles the core of the language: integers, floats, booleans, text values, functions, arrays, custom types, choices and `match`, lists of fixed-size values, views, `if`, `while`, `for`, and `print`. The rest arrives in the phases of the roadmap in the README, and until then the compiler rejects it with `L0309`, naming the phase.
 
 ## 1. Goals
 
@@ -270,6 +270,23 @@ function main()
     print("{length(values)} {values[3]} {values[4]}")
 ```
 
+A view reads elements that an array, a list or a text keeps, and copies none of them. An array or a list goes wherever a view of its elements is expected, so one function that takes a `view[integer64]` works on arrays of any length and on lists. `slice(items, start, end)` shows part of an array, a list or a view, and `bytes(text)` shows the bytes of a text. A view reads the elements as they are when it reads them; nothing changes through it (`L0208`). Its length is the one it had when it was made: a `push` adds to the list behind it, not to the view. A view can't outlive what it shows (`L0701`), and a list can't be replaced while a view of it is still used (`L0703`); Section 7.4 has the rules. In 0.1 a view lives in a binding, a parameter or a function's result, not inside another value.
+
+```lymra
+function total(view[integer64] values) returns integer64
+    variable integer64 sum = 0
+    for value in values
+        sum = sum + value
+    return sum
+
+function main()
+    constant array[integer64, 3] fixed = array(2)
+    variable list[integer64] growing = list()
+    push(variable growing, 5)
+    push(variable growing, 7)
+    print("{total(fixed)} {total(growing)} {total(slice(growing, 1, 2))}")
+```
+
 An array is a value, like a number. Assigning it to another binding or passing it to a function gives an independent copy (Section 3.1); the compiler passes an array parameter by address, which no one can tell apart, since the function cannot change it. A `variable` parameter changes the caller's array. An array lives on the call stack, so one array takes at most 1 MiB, its length times the size of an element (`L0410`): a call stack holds a few MiB in all. Larger data belongs in a `list`. Arrays cannot be compared with `==` or put into text; compare or print their elements.
 
 ```lymra
@@ -394,10 +411,12 @@ function main()
 |---|---|
 | `print(string text)` | Writes the text and a line break to standard output, as one whole line. The values in the text are computed first, so a call among them that prints writes its own line before this one. |
 | `range(start, end)` | The integers from `start` up to `end`, without `end`. It is only used in a `for` loop for now. |
-| `length(items)` | The number of elements of an array or a list, or of bytes in a `string`, as an `integer64`. An array's length is part of its type, so it is known while compiling. Phase 3 adds stacks and views. |
+| `length(items)` | The number of elements of an array, a list or a view, or of bytes in a `string`, as an `integer64`. An array's length is part of its type, so it is known while compiling. Phase 3 adds stacks. |
 | `array(value)` | An array with every element set to `value`. Its type, and so its length, comes from the place it goes: a declared type, a parameter, or a function's return type (`L0412`). |
 | `list()` | An empty list. Its type comes from the place it goes, as for `array(value)` (`L0412`). |
 | `push(variable items, value)` | Adds `value` to the end of a list. Elements never move, so nothing that reads the list sees it change but for its new end. |
+| `slice(items, start, end)` | The elements of an array, a list or a view from `start` up to `end`, without `end`, as a view, with nothing copied. A slice of a `string` is a `string` that shares its bytes; its ends have to fall between characters. Each position is checked as soon as it is computed: the start lies from 0 to the length, the end from the start to the length. |
+| `bytes(text)` | The UTF-8 bytes of a `string`, as a `view[unsigned8]` |
 | `wrapping_add(left, right)`, `wrapping_subtract`, `wrapping_multiply` | Arithmetic that wraps around the type instead of stopping the program: the exact result, keeping only as many low bits as the type has, read as two's complement for a signed type. The operands follow the rules of `+`. |
 | `integer8(value)` to `integer64(value)` | Converts an integer to that signed type |
 | `unsigned8(value)` to `unsigned64(value)` | Converts an integer to that unsigned type |
@@ -408,8 +427,6 @@ Later phases add these, and until then the compiler rejects each with `L0309`:
 
 | Function | Does | Phase |
 |---|---|---|
-| `bytes(text)` | The UTF-8 bytes of a `string`, as a `view[unsigned8]` | 3 |
-| `slice(items, start, end)` | The elements from `start` up to `end`, without `end`, as a `view`. A slice of a `string` is a `string` that shares storage (Section 3.1); its ends have to fall between characters. | 3 |
 | `stack()` | An empty stack | 3 |
 | `push(variable items, value)` on a stack | Adds `value` to the top of a stack | 3 |
 | `pop(variable items)` | Removes the top of a stack and returns it | 3 |
@@ -442,7 +459,7 @@ for index in range(0, 10)
 - A condition needs no parentheses, and nothing follows it on its line: no `:`, no `then`, no `{`.
 - A condition is a `boolean`. Lymra has no "truthy" values: write `if count != 0`, not `if count` (`L0402`).
 - `for name in range(start, end)` computes `start`, then `end`, each once, then runs the block with `name` set to each integer from `start` up to `end`, without `end`. The loop variable cannot be changed. Name it `_` when the loop only repeats.
-- `for name in items` over an array or a list runs the block once for each element, in order, with `name` set to a copy of it. The array or list is computed once, and each element is read when its turn comes, so a change the block makes to a later element is seen. A list is walked over the elements it holds when the loop starts, so the block can `push` to it without making the loop longer; replacing the list, or passing it with `variable`, would free the elements the loop reads, and is error `L0703`. Phase 3 adds loops over stacks and views.
+- `for name in items` over an array, a list or a view runs the block once for each element, in order, with `name` set to a copy of it. The array, list or view is computed once, and each element is read when its turn comes, so a change the block makes to a later element is seen. A list is walked over the elements it holds when the loop starts, so the block can `push` to it without making the loop longer; replacing the list, or passing it with `variable` to a function that can replace it, would free the elements the loop reads, and is error `L0703`. A view binding the block gives another view leaves the loop going over the first one. Phase 3 adds loops over stacks.
 - `else if` continues a chain. There is no `elif`.
 - `break` and `continue` work in `while` and `for`. Anywhere else they are error `L0601`.
 - A statement after `return`, `break` or `continue`, or after an `if` whose every branch leaves, can never run. It is error `L0602`.
@@ -488,10 +505,10 @@ Values on the call stack (integers, floats, fixed arrays) aren't "freed" at all.
 
 ### 7.4 References and roots
 
-- A `view[T]`, or any other reference, has a **root**: the binding that owns the data it points to. The compiler infers the root. You never write it.
-- A reference can't outlive its root. If it would (by being returned from the root's scope, or stored in something that outlives the root), the program is rejected with error `L0701`. The message names the root and the place the reference escapes to.
-- Functions are specialized based on the roots of their arguments, which is why no lifetime annotations are needed.
-- A value can't be replaced while a reference into it is still used, when the replacement could change what its bytes mean: assigning a choice, which can change its variant, assigning a growable value, whose storage is released (Section 7.9), or removing a pool slot. Each is error `L0703`, and the message names the reference and where it is used next. Holding a reference into a `stack` past the next `pop` is the same mistake, `L0702`.
+- A `view[T]`, or any other reference, has a **root**: what keeps the data it points to. That is a binding of the function, a parameter, whose root the caller keeps alive through the call, text in the program itself, or a value a statement computes without a binding, which it frees when it ends. The compiler infers the roots of every reference, from everything it is given anywhere in its function. You never write them.
+- A reference can't outlive its root, and the program is rejected with error `L0701` where it would: a binding that holds a reference to a value its statement frees, or to a binding of a block that ends before the reference's; a function that returns a reference to one of its own bindings; or a `variable` reference parameter given a reference to a binding of the function, which the caller would keep. The message names the root.
+- A function that returns a reference returns one rooted in some of its parameters, and the compiler works out which ones across the whole program. A call's result then has the roots of the arguments it passed there. That is why no lifetime annotations are needed.
+- A value can't be replaced while a reference into it is still used, when the replacement could change what its bytes mean: assigning a choice, which can change its variant, assigning a growable value, whose storage is released (Section 7.9), or removing a pool slot. Each is error `L0703`, and so is passing the value with `variable` to a function that can replace it. A reference is still used when a later statement can read it, or a `for` loop around the replacement goes over it. The message names the reference and where it was made. Holding a reference into a `stack` past the next `pop` is the same mistake, `L0702`.
 - These are the only reference rules. There are no exclusivity rules: two mutable references to the same data may exist at once. That is safe because memory never moves while a reference to it lives (Section 4.4), nothing is freed while its root is in scope, and no value changes layout under a reference. Threads share nothing (Section 9), so two references never race.
 
 ### 7.5 Known limitations of this model
@@ -501,6 +518,7 @@ These are the costs of having no heap. They are intentional.
 - A value can't grow while another value sits above it on its data stack (`L0704`). Nested lists are built in order: an earlier element's list can't take an item that arrives later. Group the input first, or keep the items in one flat list, as `docs/memory/routes.lym` does. A recursive function adds to the one list it was given, or returns a new list, rather than filling a list of an earlier call while holding one of its own.
 - The elements of a list whose elements differ in size can't be replaced (`L0407`), and a `packed` list can't be indexed (`L0408`).
 - No closures that escape their defining scope. No function pointers.
+- In 0.1, a view can't be stored inside another value: an array, a list, or a declared type. Values keep positions into a list instead, as `docs/memory/tokens.lym` does.
 - Whole-program compilation only. No separately compiled libraries in 0.1.
 
 ### 7.6 Pools and generation-checked handles

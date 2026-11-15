@@ -196,8 +196,9 @@ impl Generator<'_, '_> {
     /**
      * `items = value` for a list. Only the newest value on a data stack can be
      * replaced, so the runtime checks that first. A value that reads the old
-     * list is built right above it and then moved down into its place; any
-     * other replaces it after it is freed, with no copy (spec 7.9).
+     * list, itself or through a view, is built right above it and then moved
+     * down into its place; any other replaces it after it is freed, with no
+     * copy (spec 7.9).
      */
     fn replace_list(
         &mut self,
@@ -212,7 +213,9 @@ impl Generator<'_, '_> {
             "lymra_data_stack_require_top(({list}).stack, (const char *)(({list}).elements + ({list}).length), {site});"
         ));
         let stack = format!("({list}).stack");
-        if value.mentions(target) {
+        let reads_a_view = (0..function.locals.len())
+            .any(|local| function.locals[local].ty.as_view().is_some() && value.mentions(local));
+        if value.mentions(target) || reads_a_view {
             let code = self.build_list(function, value, &stack, writer);
             let built = self.temporary(&value.ty, &code, writer);
             let list_type = self.types.name(&value.ty);
@@ -343,6 +346,11 @@ impl Generator<'_, '_> {
                 length: index.length,
                 checked: index.checked,
                 span: index.span,
+                // Only arrays and lists can be changed through an index; a view only reads.
+                indexed: match index.length {
+                    Extent::Fixed(_) => "an array",
+                    Extent::Dynamic => "a list",
+                },
             };
             let code = self.position(function, &index.value, bounds, &place, writer);
             let later_effect = effects[position + 1..].iter().any(|&effect| effect);
@@ -490,7 +498,8 @@ impl Generator<'_, '_> {
         let position = self.helper("position");
         self.open_wrapper(writer);
         let code = self.expr(function, array, writer);
-        let address = if is_addressable(array) {
+        // A view is copied: the loop goes over what it shows when the loop starts, whatever the binding shows later.
+        let address = if is_addressable(array) && array.ty.as_view().is_none() {
             format!("&({code})")
         } else {
             format!("&{}", self.temporary(&array.ty, &code, writer))

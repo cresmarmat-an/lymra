@@ -1,0 +1,11 @@
+#[
+    A slice of text starts and ends between characters. One that would cut
+    a character in two stops the program.
+]#
+
+function first(string text, integer64 count) returns string
+    return slice(text, 0, count)
+
+function main()
+    print("{first("héllo", 3)}")
+    print("{first("héllo", 2)}")

@@ -233,12 +233,6 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }
         local.written = true;
         let local_type = local.ty.clone();
-        if steps.is_empty() {
-            if let Err(error) = self.check_not_iterated(id, name, root.span, false) {
-                self.check_for_errors(value);
-                return Err(error);
-            }
-        }
         let place = local_type.and_then(|ty| self.check_place_steps(ty, &steps));
         match place {
             Ok((steps, ty)) => {
@@ -379,17 +373,6 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         body: &ast::Block<'src>,
     ) -> Checked {
         let iteration = self.check_iterable(iterable);
-        // A list the loop goes over by name cannot be replaced inside it, which would free what the loop reads.
-        let iterated = match &iteration {
-            Ok(Iteration::Elements { array, .. }) => match array.kind {
-                ir::ExprKind::Local(local) if array.ty.as_list().is_some() => Some(local),
-                _ => None,
-            },
-            Ok(Iteration::Range { .. }) | Err(_) => None,
-        };
-        if let Some(local) = iterated {
-            self.iterated.push((local, iterable.span));
-        }
         if let Some(scope) = self.scope.as_mut() {
             scope.open_block();
         }
@@ -405,9 +388,6 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 .map(Some)
         };
         let (body, _) = self.check_loop_body(body);
-        if iterated.is_some() {
-            self.iterated.pop();
-        }
         let closed = self
             .scope
             .as_mut()
@@ -457,6 +437,11 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             }),
             Type::List(list) => Ok(Iteration::Elements {
                 element: list.element.clone(),
+                length: Extent::Dynamic,
+                array: checked,
+            }),
+            Type::View(view) => Ok(Iteration::Elements {
+                element: view.element.clone(),
                 length: Extent::Dynamic,
                 array: checked,
             }),

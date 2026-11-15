@@ -1,0 +1,20 @@
+exit status 0
+--- standard output
+whole: 18 55
+window 3: 4 16, total 29
+a view reads the elements as they are now: 40
+a push leaves the view as it was: 3 of 7
+middles: 6 91 1
+larger: 65 18
+cursor 4 from 9
+loop over what the view showed: 2
+loop over what the view showed: 2
+loop over what the view showed: 2
+loop over what the view showed: 2
+loop over what the view showed: 10
+walking now shows 1
+rebuilt from its own view: 3 0 400
+héllo|wörld||
+13 bytes, 1 plain vowels
+empty slice 0 0
+--- standard error

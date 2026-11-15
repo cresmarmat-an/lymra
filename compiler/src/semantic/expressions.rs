@@ -14,6 +14,7 @@ use super::items::is_sized_integer_name;
 use super::places::place_parts;
 use super::scope::{Local, LocalKind};
 use super::values::{self, FoldError, LiteralError};
+use super::views;
 use super::{BuiltIn, CheckResult, Checker, DISCARD, Global};
 use crate::ast::{self, ArgumentKind, BinaryOperator, UnaryOperator};
 use crate::diagnostics::{Diagnostic, ErrorReported, Help};
@@ -77,7 +78,12 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         expr: &ast::Expr<'src>,
         expected: Option<&Type>,
     ) -> CheckResult<ir::Expr> {
-        let checked = self.check_expr_with_hint(expr, expected)?;
+        let hint = expected.and_then(views::hint_for);
+        let checked = self.check_expr_with_hint(expr, hint.as_ref().or(expected))?;
+        let checked = match expected {
+            Some(expected) => views::seen_as(checked, expected),
+            None => checked,
+        };
         match expected {
             Some(expected) if checked.ty != *expected => {
                 // A literal has no type of its own until a context gives it one, so it is just "a number" here.
@@ -359,7 +365,12 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 "`-` works on numbers, but this is a `boolean`".to_owned(),
                 "to flip a `boolean`, use `not`".to_owned(),
             ),
-            Type::String | Type::Array(_) | Type::Custom(_) | Type::Choice(_) | Type::List(_) => (
+            Type::String
+            | Type::Array(_)
+            | Type::Custom(_)
+            | Type::Choice(_)
+            | Type::List(_)
+            | Type::View(_) => (
                 format!(
                     "`-` works on numbers, but this is {}",
                     described(&operand.ty)
@@ -450,7 +461,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     Type::String => {
                         "to put text together, interpolate it: `print(\"{first}{second}\")`"
                     }
-                    Type::Array(_) | Type::List(_) => {
+                    Type::Array(_) | Type::List(_) | Type::View(_) => {
                         "arithmetic works on single numbers; work on the elements one by one"
                     }
                     Type::Custom(_) => {
@@ -573,6 +584,14 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     format!("`{symbol}` compares single values, and these are lists"),
                     span,
                     "comparing lists".to_owned(),
+                    "compare their lengths, then the elements one by one in a loop",
+                )));
+            }
+            Type::View(_) => {
+                return Err(self.report(errors::operator_type(
+                    format!("`{symbol}` compares single values, and these are views"),
+                    span,
+                    "comparing views".to_owned(),
                     "compare their lengths, then the elements one by one in a loop",
                 )));
             }
@@ -766,6 +785,8 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             "array" => return self.check_fill(call, span, hint),
             "list" => return self.check_empty_list(call, span, hint),
             "push" => return self.check_push(call, span),
+            "slice" => return self.check_slice(call, span),
+            "bytes" => return self.check_bytes(call, span),
             "length" => return self.check_length(call, span),
             _ => {}
         }
@@ -1003,9 +1024,6 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             }
             (ArgumentKind::Mutable(place), true) => {
                 let id = self.check_reference(place, parameter.ty.as_ref())?;
-                if let ast::ExprKind::Name(name) = &place.kind {
-                    self.check_not_iterated(id, name, argument.span, true)?;
-                }
                 Ok(ir::Argument::Reference {
                     local: id,
                     span: argument.span,

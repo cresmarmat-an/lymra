@@ -1,7 +1,8 @@
 /*!
  * The programs of the memory model study in `docs/memory` have to stay valid
  * Lymra as the grammar changes, and the study's page has to list each one.
- * They use features of later phases, so they are parsed, not compiled.
+ * Some use features of later phases, so all are parsed here; `run.rs` builds
+ * and runs the ones the compiler can build so far.
  */
 
 mod common;

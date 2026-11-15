@@ -1,0 +1,76 @@
+#[
+    Views read elements kept elsewhere, with nothing copied: an array or a
+    list goes wherever a view of its elements is expected, `slice` takes
+    part of one, and `bytes` shows the bytes of a text. A view shows the
+    elements as they are when it reads them, and a `for` loop goes over
+    what its view showed when the loop started.
+]#
+
+function total(view[integer64] values) returns integer64
+    variable integer64 sum = 0
+    for value in values
+        sum = sum + value
+    return sum
+
+function middle(view[integer64] values) returns view[integer64]
+    return slice(values, 1, length(values) - 1)
+
+function larger(view[integer64] first, view[integer64] second) returns view[integer64]
+    if total(first) > total(second)
+        return first
+    return second
+
+function step(variable view[integer64] cursor)
+    cursor = slice(cursor, 1, length(cursor))
+
+function copied(view[integer64] values) returns list[integer64]
+    variable list[integer64] copy = list()
+    for value in values
+        push(variable copy, value * 10)
+    return copy
+
+function vowels(string text) returns integer64
+    variable integer64 count = 0
+    for byte in bytes(text)
+        if byte == 97 or byte == 101 or byte == 105 or byte == 111 or byte == 117
+            count = count + 1
+    return count
+
+function main()
+    variable array[integer64, 5] fixed = array(2)
+    fixed[4] = 10
+    variable list[integer64] growing = list()
+    for number in range(0, 6)
+        push(variable growing, number * number)
+    print("whole: {total(fixed)} {total(growing)}")
+
+    constant view[integer64] window = slice(growing, 2, 5)
+    print("window {length(window)}: {window[0]} {window[2]}, total {total(window)}")
+    growing[2] = 40
+    print("a view reads the elements as they are now: {window[0]}")
+    push(variable growing, 36)
+    print("a push leaves the view as it was: {length(window)} of {length(growing)}")
+
+    print("middles: {total(middle(fixed))} {total(middle(growing))} {length(middle(window))}")
+    print("larger: {total(larger(fixed, window))} {total(larger(slice(fixed, 0, 1), fixed))}")
+
+    variable view[integer64] cursor = growing
+    while length(cursor) > 4
+        step(variable cursor)
+    print("cursor {length(cursor)} from {cursor[0]}")
+
+    variable view[integer64] walking = fixed
+    for value in walking
+        walking = slice(walking, 0, 1)
+        print("loop over what the view showed: {value}")
+    print("walking now shows {length(walking)}")
+
+    constant before = slice(growing, 0, 3)
+    growing = copied(before)
+    print("rebuilt from its own view: {length(growing)} {growing[0]} {growing[2]}")
+
+    constant text = "héllo wörld"
+    print("{slice(text, 0, 6)}|{slice(text, 7, length(text))}|{slice(text, 3, 3)}|")
+    print("{length(bytes(text))} bytes, {vowels(text)} plain vowels")
+    constant empty = slice(fixed, 5, 5)
+    print("empty slice {length(empty)} {total(empty)}")

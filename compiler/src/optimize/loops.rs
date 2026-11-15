@@ -129,9 +129,10 @@ pub(super) fn changed_outside(block: &Block) -> HashSet<LocalId> {
 }
 
 /**
- * The lists that live outside a block and can get shorter in it: replaced
- * whole, or passed with `variable` to a function that could replace them.
- * A `push` or a changed element leaves a list at least as long as it was.
+ * The lists and views that live outside a block and can get shorter in it:
+ * replaced whole, or passed with `variable` to a function that could
+ * replace them. A `push` or a changed element leaves a list at least as
+ * long as it was.
  */
 pub(super) fn shortened_outside(block: &Block) -> HashSet<LocalId> {
     collect_changed(block, Assigned::Whole)
@@ -271,10 +272,17 @@ pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
         | ExprKind::Convert { operand, .. }
         | ExprKind::Fill(operand)
         | ExprKind::Length(operand)
+        | ExprKind::View(operand)
+        | ExprKind::Bytes(operand)
         | ExprKind::Field {
             object: operand, ..
         } => {
             collect_references(operand, changed);
+        }
+        ExprKind::Slice { items, start, end } => {
+            collect_references(items, changed);
+            collect_references(start, changed);
+            collect_references(end, changed);
         }
         ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
             for field in fields {
@@ -307,9 +315,16 @@ pub(super) fn collect_calls<'expr>(expr: &'expr Expr, calls: &mut Vec<&'expr Cal
         | ExprKind::Convert { operand, .. }
         | ExprKind::Fill(operand)
         | ExprKind::Length(operand)
+        | ExprKind::View(operand)
+        | ExprKind::Bytes(operand)
         | ExprKind::Field {
             object: operand, ..
         } => collect_calls(operand, calls),
+        ExprKind::Slice { items, start, end } => {
+            collect_calls(items, calls);
+            collect_calls(start, calls);
+            collect_calls(end, calls);
+        }
         ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
             for field in fields {
                 collect_calls(&field.value, calls);

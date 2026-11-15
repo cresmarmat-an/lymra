@@ -66,5 +66,6 @@ From 04 on, they are the chapter of the [specification](../spec.md) the rule com
 | [L0508](L0508.md) | binding changed and used in one expression |
 | [L0601](L0601.md) | `break` or `continue` outside a loop |
 | [L0602](L0602.md) | unreachable code |
+| [L0701](L0701.md) | view outlives what it shows |
 | [L0703](L0703.md) | value replaced while something still uses it |
 | [L0704](L0704.md) | list changed while a newer list sits above it |

@@ -22,9 +22,12 @@ mod floats;
 mod items;
 mod lists;
 mod places;
+mod roots;
 mod scope;
 mod statements;
 mod values;
+mod views;
+mod walk;
 mod wrapping;
 
 #[cfg(test)]
@@ -42,18 +45,22 @@ use scope::{FunctionScope, LocalKind};
 type CheckResult<T> = Result<T, ErrorReported>;
 
 /// The built-in functions the compiler implements.
-const BUILT_IN_FUNCTIONS: [&str; 7] = [
+const BUILT_IN_FUNCTIONS: [&str; 9] = [
     "print",
     "range",
     "length",
     "push",
+    "slice",
+    "bytes",
     "wrapping_add",
     "wrapping_subtract",
     "wrapping_multiply",
 ];
 
 /// Built-in types that are not integers. Calling `array` or `list` builds one.
-const OTHER_TYPE_NAMES: [&str; 6] = ["boolean", "string", "array", "list", "float32", "float64"];
+const OTHER_TYPE_NAMES: [&str; 7] = [
+    "boolean", "string", "array", "list", "view", "float32", "float64",
+];
 
 /// What a name the language itself defines stands for. No declaration can take such a name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -223,8 +230,6 @@ struct Checker<'src, 'ast> {
     prove_bounds: bool,
     /// The function whose body is being checked. `None` while top-level constants are computed.
     scope: Option<FunctionScope<'src>>,
-    /// The list bindings the `for` loops around the current point go over, each with where its loop names it.
-    iterated: Vec<(ir::LocalId, Span)>,
 }
 
 impl<'src, 'ast> Checker<'src, 'ast> {
@@ -241,7 +246,6 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             optimize: None,
             prove_bounds: false,
             scope: None,
-            iterated: Vec::new(),
         }
     }
 
@@ -531,10 +535,12 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         };
         match (functions, constants) {
             (Ok(functions), Ok(constants)) => {
-                // Where lists can travel is known only once every function is checked.
-                let unordered = data_stacks::check(&functions);
-                if !unordered.is_empty() {
-                    return Err(unordered);
+                // Where lists and views can travel is known only once every function is checked.
+                let mut unsafe_memory = data_stacks::check(&functions);
+                unsafe_memory.extend(roots::check(&functions));
+                if !unsafe_memory.is_empty() {
+                    unsafe_memory.sort_by_key(|diagnostic| diagnostic.primary.span.start);
+                    return Err(unsafe_memory);
                 }
                 Ok(Program {
                     constants,
