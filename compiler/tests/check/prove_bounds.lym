@@ -10,9 +10,13 @@ function shifted(array[integer32, 4] values, integer64 position) returns integer
 
 function main()
     variable array[integer32, 4] values = array(1)
+    constant array[unsigned8, 2] picks = array(1)
+    constant array[integer64, 2] offsets = array(2)
+    values[2] = 2
     variable integer64 count = 0
-    while count < 4
-        values[count] = 2
+    while values[count] != 2
+        count = count + 1
+    while count < length(values) and values[count] != 1
         count = count + 1
     for index in range(0, 5)
-        print("{values[index]} {at(values, 1)} {shifted(values, 2)}")
+        print("{values[index]} {at(values, picks[0])} {shifted(values, offsets[1])}")

@@ -8,7 +8,8 @@
  * operation where it happens. So every check the compiler can prove
  * unnecessary is worth removing.
  *
- * The proofs come from interval analysis (see `analysis.rs`). An operation
+ * The proofs come from interval analysis (see `analysis.rs`), with what is
+ * known across calls (see `facts.rs`). An operation
  * whose operands lie within proven bounds, and whose every possible result
  * fits its type, cannot fail, and is compiled to plain C arithmetic. When the
  * analysis cannot prove that, the check stays. It never weakens a guarantee:
@@ -16,9 +17,11 @@
  */
 
 mod analysis;
+mod facts;
 mod interval;
 mod loops;
 mod proof;
+mod while_loops;
 
 pub use proof::UnprovenIndex;
 
@@ -33,10 +36,12 @@ pub fn remove_proven_checks(program: &mut Program<'_>) -> Vec<UnprovenIndex> {
         .iter()
         .map(|constant| constant.value.clone())
         .collect();
+    let facts = facts::program_facts(program, &constants);
     program
         .functions
         .iter_mut()
-        .flat_map(|function| analysis::optimize_function(function, &constants))
+        .enumerate()
+        .flat_map(|(id, function)| analysis::optimize_function(function, id, &constants, &facts))
         .collect()
 }
 

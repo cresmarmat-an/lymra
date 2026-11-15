@@ -14,7 +14,8 @@ use std::collections::{HashMap, HashSet};
 
 use super::interval::Interval;
 use crate::ir::{
-    Argument, ArithmeticOperator, Block, Expr, ExprKind, LocalId, PlaceStep, PrintPart, Statement,
+    Argument, ArithmeticOperator, Block, Call, Expr, ExprKind, LocalId, PlaceStep, PrintPart,
+    Statement,
 };
 
 /// How far an iteration has moved a variable from its value at the start of the iteration.
@@ -260,6 +261,46 @@ pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
             collect_references(right, changed);
         }
         ExprKind::Call(call) => collect_call_references(&call.arguments, changed),
+    }
+}
+
+/// Collects every call inside an expression, its arguments' calls included.
+pub(super) fn collect_calls<'expr>(expr: &'expr Expr, calls: &mut Vec<&'expr Call>) {
+    match &expr.kind {
+        ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) => {}
+        ExprKind::Negate { operand, .. }
+        | ExprKind::Not(operand)
+        | ExprKind::Convert { operand, .. }
+        | ExprKind::Fill(operand)
+        | ExprKind::Length(operand)
+        | ExprKind::Field {
+            object: operand, ..
+        } => collect_calls(operand, calls),
+        ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
+            for field in fields {
+                collect_calls(&field.value, calls);
+            }
+        }
+        ExprKind::Arithmetic { left, right, .. }
+        | ExprKind::Compare { left, right, .. }
+        | ExprKind::Logic { left, right, .. }
+        | ExprKind::Wrapping { left, right, .. }
+        | ExprKind::Index {
+            array: left,
+            index: right,
+            ..
+        } => {
+            collect_calls(left, calls);
+            collect_calls(right, calls);
+        }
+        ExprKind::Call(call) => {
+            for argument in &call.arguments {
+                if let Argument::Value(value) = argument {
+                    collect_calls(value, calls);
+                }
+            }
+            calls.push(call);
+        }
     }
 }
 

@@ -7,13 +7,13 @@
 
 use lymra::ir::IntegerType;
 
-use super::generator::{PROBE, literal_text};
+use super::generator::{PROBE, literal_text, probe_caller};
 
 /// The 8-bit types, whose every value a probe can be run on.
-const TYPES: [IntegerType; 2] = [IntegerType::Integer8, IntegerType::Unsigned8];
+pub const TYPES: [IntegerType; 2] = [IntegerType::Integer8, IntegerType::Unsigned8];
 
 /// Each comparison with the one that means the same when its sides are swapped.
-const COMPARISONS: [(&str, &str); 6] = [
+pub const COMPARISONS: [(&str, &str); 6] = [
     ("<", ">"),
     ("<=", ">="),
     (">", "<"),
@@ -29,7 +29,7 @@ pub struct Probe {
 }
 
 /// Values at and next to each end of the type, and around zero.
-fn edges(ty: IntegerType) -> Vec<i128> {
+pub fn edges(ty: IntegerType) -> Vec<i128> {
     let (minimum, maximum) = (ty.minimum(), ty.maximum());
     let mut values = vec![
         minimum,
@@ -50,7 +50,7 @@ fn edges(ty: IntegerType) -> Vec<i128> {
 }
 
 /// Positive amounts that take `bound` to an end of the type, or one or two past it, and the smallest steps.
-fn amounts(ty: IntegerType, bound: i128) -> Vec<i128> {
+pub fn amounts(ty: IntegerType, bound: i128) -> Vec<i128> {
     let distances = [ty.maximum() - bound, bound - ty.minimum()];
     let mut amounts: Vec<i128> = distances
         .iter()
@@ -96,21 +96,131 @@ pub fn narrowing() -> Vec<Probe> {
     probes
 }
 
+/**
+ * Compares the square of the input with a literal, then adds or subtracts an
+ * amount in both branches, as `narrowing` does. The comparison bounds the
+ * input by a square root, and the amounts take each root next to the literal
+ * to an end of the type, give or take one. The square overflows for most
+ * inputs, which stops both runs alike.
+ */
+pub fn squares() -> Vec<Probe> {
+    let mut probes = Vec::new();
+    for ty in TYPES {
+        for bound in [
+            -1, 0, 1, 2, 3, 4, 8, 9, 10, 99, 100, 101, 120, 121, 122, 255,
+        ] {
+            if !ty.contains(bound) {
+                continue;
+            }
+            let root = bound.max(0).isqrt();
+            let mut sizes: Vec<i128> = [-root - 1, -root, root, root + 1]
+                .into_iter()
+                .flat_map(|edge| amounts(ty, edge))
+                .collect();
+            sizes.sort_unstable();
+            sizes.dedup();
+            for (operator, _) in COMPARISONS {
+                let condition = format!("input * input {operator} {}", literal_text(bound));
+                for arithmetic in ["+", "-"] {
+                    for &amount in &sizes {
+                        probes.push(Probe {
+                            text: narrowing_probe(ty, &condition, arithmetic, amount),
+                            ty,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    probes
+}
+
+/**
+ * Divides by the square of the input, kept to a small range around zero. The
+ * division's check may go only when the range leaves zero out, since the
+ * square of zero is zero whichever side the range starts on.
+ */
+pub fn square_divisors() -> Vec<Probe> {
+    let mut probes = Vec::new();
+    for ty in TYPES {
+        let name = ty.name();
+        for low in [-3, -2, -1, 0, 1] {
+            for high in [-1, 0, 1, 2, 3] {
+                if low > high || !ty.contains(low) {
+                    continue;
+                }
+                for operator in ["/", "%"] {
+                    let text = format!(
+                        "\
+function {PROBE}({name} input)
+    variable {name} result = 0
+    if input >= {} and input <= {high}
+        result = 100 {operator} (input * input)
+    print(\"{{result}}\")
+
+{}",
+                        literal_text(low),
+                        probe_caller(ty)
+                    );
+                    probes.push(Probe { text, ty });
+                }
+            }
+        }
+    }
+    probes
+}
+
+/**
+ * Joins a comparison of the input with a literal to a second comparison by
+ * `and` or `or`, and the second adds an amount to the input or subtracts it.
+ * The second runs only when the first leaves the result open, so its check
+ * may go only when the first comparison's outcome there proves it safe.
+ */
+pub fn short_circuits() -> Vec<Probe> {
+    let mut probes = Vec::new();
+    for ty in TYPES {
+        let name = ty.name();
+        for bound in edges(ty) {
+            let bound_text = literal_text(bound);
+            for (operator, _) in COMPARISONS {
+                for logic in ["and", "or"] {
+                    for arithmetic in ["+", "-"] {
+                        for amount in amounts(ty, bound) {
+                            let text = format!(
+                                "\
+function {PROBE}({name} input)
+    variable {name} result = 0
+    if input {operator} {bound_text} {logic} input {arithmetic} {amount} != 0
+        result = 1
+    print(\"{{result}}\")
+
+{}",
+                                probe_caller(ty)
+                            );
+                            probes.push(Probe { text, ty });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    probes
+}
+
 fn narrowing_probe(ty: IntegerType, condition: &str, arithmetic: &str, amount: i128) -> String {
-    let ty = ty.name();
+    let name = ty.name();
     format!(
         "\
-function {PROBE}({ty} input)
-    variable {ty} result = 0
+function {PROBE}({name} input)
+    variable {name} result = 0
     if {condition}
         result = input {arithmetic} {amount}
     else
         result = input {arithmetic} {amount}
     print(\"{{result}}\")
 
-function main()
-    {PROBE}(0)
-"
+{}",
+        probe_caller(ty)
     )
 }
 
@@ -211,10 +321,9 @@ function {PROBE}({name} input)
         total = total {arithmetic} 1
     print(\"{{total}}\")
 
-function main()
-    {PROBE}(0)
-",
-                    literal_text(start)
+{}",
+                    literal_text(start),
+                    probe_caller(ty)
                 );
                 probes.push(Probe { text, ty });
             }

@@ -9,24 +9,30 @@
  * - Straight-line code updates the bounds exactly.
  * - An `if` narrows the bounds by its conditions in each branch and joins the
  *   branches that continue afterward. An `assert` narrows them after it.
- * - A loop is not iterated to a fixed point. Each variable it changes gets
+ * - A `for` loop runs a known number of times. Each variable it changes gets
  *   bounds that hold at every point of every iteration (see `loops.rs`), and
  *   the body is walked once more with those, to remove checks.
+ * - A `while` loop is worked out to a fixed point at its head (see
+ *   `while_loops.rs`), and its body is walked once more with that.
+ * - Parameters start with the bounds of every call in the program, and a
+ *   call gives the bounds of every value its function returns (see
+ *   `facts.rs`).
  *
- * Anything else is treated as any value of its type: parameters, results of
- * calls, and variables changed in ways the analysis does not follow. Its
- * mistakes can only keep a check that could have gone.
+ * Anything else is treated as any value of its type, such as a variable
+ * changed in ways the analysis does not follow. Its mistakes can only keep a
+ * check that could have gone.
  */
 
 use std::collections::HashSet;
 
+use super::facts::Facts;
 use super::interval::Interval;
 use super::loops::{self, Change, Changes, Followed};
 use super::proof::UnprovenIndex;
 use crate::ir::{
     Argument, ArithmeticOperator, Block, Branch, Call, Case, ComparisonOperator, Expr, ExprKind,
-    Function, IntegerType, Local, LocalId, LogicOperator, PlaceStep, PrintPart, Statement, Type,
-    Value,
+    Function, FunctionId, IntegerType, Local, LocalId, LogicOperator, PlaceStep, PrintPart,
+    Statement, Type, Value,
 };
 
 /**
@@ -36,17 +42,29 @@ use crate::ir::{
  */
 const REFINEMENT_ROUNDS: usize = 3;
 
+/**
+ * Rounds of a fixed point in which bounds grow as they are, before a bound
+ * that still moves is widened to the end of its type. A loop that runs a few
+ * times, or a recursion a few levels deep, settles within them exactly.
+ */
+pub(super) const WIDENING_DELAY: usize = 3;
+
+/**
+ * Body walks a function may spend working `while` loops out to a fixed
+ * point. Nested loops multiply them; past the limit, a loop forgets what it
+ * changes, as every loop once did, so compiling stays fast.
+ */
+const LOOP_BUDGET: usize = 4_000;
+
 /// Removes the checks in one function that its bounds prove unnecessary, and returns the indexes it could not prove.
 pub(super) fn optimize_function(
     function: &mut Function<'_>,
+    id: FunctionId,
     constants: &[Value],
+    facts: &Facts,
 ) -> Vec<UnprovenIndex> {
-    let mut analyzer = Analyzer {
-        locals: &function.locals,
-        constants,
-        unproven: Vec::new(),
-    };
-    let mut bounds = Bounds(vec![None; function.locals.len()]);
+    let mut analyzer = Analyzer::new(&function.locals, constants, facts, None);
+    let mut bounds = analyzer.entry(&function.parameters, id);
     analyzer.walk_block(
         &mut function.body,
         &mut bounds,
@@ -56,23 +74,79 @@ pub(super) fn optimize_function(
     analyzer.unproven
 }
 
+/**
+ * Records into `observed` what one function's calls pass and what it
+ * returns, assuming `facts` about the others. The analysis runs as it does
+ * to remove checks, on a copy, so it sees the same bounds.
+ */
+pub(super) fn observe_function(
+    function: &Function<'_>,
+    id: FunctionId,
+    constants: &[Value],
+    facts: &Facts,
+    observed: &mut Facts,
+) {
+    let mut copy = function.clone();
+    let mut analyzer = Analyzer::new(&function.locals, constants, facts, Some((id, observed)));
+    let mut bounds = analyzer.entry(&function.parameters, id);
+    analyzer.walk_block(
+        &mut copy.body,
+        &mut bounds,
+        &mut Changes::new(),
+        Mode::Remove,
+    );
+}
+
 /// Bounds for each local, by id. `None` stands for any value of the local's type.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct Bounds(Vec<Option<Interval>>);
+pub(super) struct Bounds(Vec<Option<Interval>>);
 
 impl Bounds {
-    fn get(&self, local: LocalId) -> Option<Interval> {
+    pub fn get(&self, local: LocalId) -> Option<Interval> {
         self.0.get(local).copied().flatten()
     }
 
-    fn set(&mut self, local: LocalId, bounds: Option<Interval>) {
+    pub fn set(&mut self, local: LocalId, bounds: Option<Interval>) {
         if let Some(slot) = self.0.get_mut(local) {
             *slot = bounds;
         }
     }
 
+    /// The locals and their bounds, by id.
+    pub fn iter(&self) -> impl Iterator<Item = (LocalId, Option<Interval>)> + '_ {
+        self.0.iter().copied().enumerate()
+    }
+
+    /// Bounds that hold where both do: on a path that has passed both tests.
+    pub fn meet(&self, other: &Bounds) -> Bounds {
+        let met = self
+            .0
+            .iter()
+            .zip(&other.0)
+            .map(|(first, second)| match (first, second) {
+                // An empty meet is a place no value reaches; either side holds there.
+                (Some(first), Some(second)) => Some(first.intersect(*second).unwrap_or(*first)),
+                (Some(only), None) | (None, Some(only)) => Some(*only),
+                (None, None) => None,
+            })
+            .collect();
+        Bounds(met)
+    }
+
+    /// Whether every value these bounds allow, `other` allows too.
+    pub fn within(&self, other: &Bounds) -> bool {
+        self.0
+            .iter()
+            .zip(&other.0)
+            .all(|(inner, outer)| match (inner, outer) {
+                (_, None) => true,
+                (None, Some(_)) => false,
+                (Some(inner), Some(outer)) => outer.low <= inner.low && inner.high <= outer.high,
+            })
+    }
+
     /// Bounds that hold on either of two paths.
-    fn join(&self, other: &Bounds) -> Bounds {
+    pub fn join(&self, other: &Bounds) -> Bounds {
         let joined = self
             .0
             .iter()
@@ -88,9 +162,24 @@ impl Bounds {
 
 /// Whether control can reach the statement after this one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Flow {
+pub(super) enum Flow {
     Continues,
     Leaves,
+}
+
+/// Where the iterations of a loop leave early: the bounds at its `break` statements, and at its `continue` ones.
+#[derive(Default)]
+pub(super) struct Exits {
+    pub broken: Option<Bounds>,
+    pub continued: Option<Bounds>,
+}
+
+/// Joins `bounds` into what is there, if anything is.
+pub(super) fn join_into(slot: &mut Option<Bounds>, bounds: &Bounds) {
+    *slot = Some(match slot.take() {
+        Some(previous) => previous.join(bounds),
+        None => bounds.clone(),
+    });
 }
 
 /// What holds after the paths of an `if` or a `match` meet again.
@@ -120,18 +209,26 @@ impl Merge {
 
 /// What a walk does besides tracking bounds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Mode {
+pub(super) enum Mode {
     /// Only learn what a loop body changes. Nothing is removed.
     Probe,
-    /// Remove every check the bounds prove unnecessary.
+    /// Remove every check the bounds prove unnecessary, and record calls and returns when facts are being worked out.
     Remove,
 }
 
-struct Analyzer<'function> {
+pub(super) struct Analyzer<'function> {
     locals: &'function [Local<'function>],
     constants: &'function [Value],
+    /// What every function of the program receives and returns.
+    facts: &'function Facts,
+    /// When facts are being worked out: the function analyzed, and where its calls and returns are recorded.
+    observer: Option<(FunctionId, &'function mut Facts)>,
     /// Every index check that stays, with what is known about the index there.
     unproven: Vec<UnprovenIndex>,
+    /// The loops around the current point, innermost last.
+    exits: Vec<Exits>,
+    /// Body walks left for working `while` loops out to a fixed point.
+    pub budget: usize,
 }
 
 /// True if no value from the operand intervals can make the operation fail.
@@ -173,8 +270,85 @@ fn mirrored(operator: ComparisonOperator) -> ComparisonOperator {
     }
 }
 
-impl Analyzer<'_> {
-    fn integer_type(&self, local: LocalId) -> Option<IntegerType> {
+impl<'function> Analyzer<'function> {
+    fn new(
+        locals: &'function [Local<'function>],
+        constants: &'function [Value],
+        facts: &'function Facts,
+        observer: Option<(FunctionId, &'function mut Facts)>,
+    ) -> Self {
+        Analyzer {
+            locals,
+            constants,
+            facts,
+            observer,
+            unproven: Vec::new(),
+            exits: Vec::new(),
+            budget: LOOP_BUDGET,
+        }
+    }
+
+    /// Bounds where the function starts: its parameters have the bounds of every call to it.
+    fn entry(&self, parameters: &[LocalId], function: FunctionId) -> Bounds {
+        let mut bounds = Bounds(vec![None; self.locals.len()]);
+        if self.facts.is_called(function) {
+            for (position, &local) in parameters.iter().enumerate() {
+                bounds.set(local, self.facts.parameter(function, position));
+            }
+        }
+        bounds
+    }
+
+    /// Records a call with the bounds of its arguments, when facts are being worked out.
+    fn observe_call(&mut self, call: &Call, bounds: &Bounds) {
+        if self.observer.is_none() {
+            return;
+        }
+        let arguments: Vec<Option<Interval>> = call
+            .arguments
+            .iter()
+            .map(|argument| match argument {
+                Argument::Value(value) => self.range(value, bounds),
+                Argument::Reference(local) => self.local_range(bounds, *local),
+            })
+            .collect();
+        if let Some((_, observed)) = self.observer.as_mut() {
+            observed.observe_call(call.function, &arguments);
+        }
+    }
+
+    /// Records every call inside `expr`, with the bounds of its arguments.
+    fn observe_calls(&mut self, expr: &Expr, bounds: &Bounds) {
+        let mut calls = Vec::new();
+        loops::collect_calls(expr, &mut calls);
+        for call in calls {
+            self.observe_call(call, bounds);
+        }
+    }
+
+    /// Records a `return`, when facts are being worked out.
+    fn observe_return(&mut self, value: &Expr, bounds: &Bounds) {
+        let range = self.range(value, bounds);
+        if let Some((function, observed)) = self.observer.as_mut() {
+            observed.observe_return(*function, range);
+        }
+    }
+
+    /// Walks a loop's body once, and returns how it ends and where it leaves early.
+    pub fn walk_loop_body(
+        &mut self,
+        body: &mut Block,
+        bounds: &mut Bounds,
+        changes: &mut Changes,
+        mode: Mode,
+    ) -> (Flow, Exits) {
+        self.exits.push(Exits::default());
+        let flow = self.walk_block(body, bounds, changes, mode);
+        let exits = self.exits.pop().unwrap_or_default();
+        (flow, exits)
+    }
+
+    pub fn integer_type(&self, local: LocalId) -> Option<IntegerType> {
         self.locals
             .get(local)
             .and_then(|local| local.ty.as_integer())
@@ -206,6 +380,7 @@ impl Analyzer<'_> {
                 right,
                 ..
             } => match (self.range(left, bounds), self.range(right, bounds)) {
+                (Some(value), Some(_)) if squared_local(expr).is_some() => value.square(),
                 (Some(left), Some(right)) => left.apply(*operator, right).unwrap_or(whole_type),
                 _ => whole_type,
             },
@@ -234,11 +409,12 @@ impl Analyzer<'_> {
                     high: whole_type.high,
                 },
             },
+            // A call returns what its function's `return` statements give.
+            ExprKind::Call(call) => self.facts.result(call.function).unwrap_or(whole_type),
             ExprKind::Literal(_)
             | ExprKind::Not(_)
             | ExprKind::Compare { .. }
             | ExprKind::Logic { .. }
-            | ExprKind::Call(_)
             | ExprKind::Index { .. }
             | ExprKind::Fill(_)
             | ExprKind::Construct(_)
@@ -292,9 +468,19 @@ impl Analyzer<'_> {
                     self.remove_checks(&mut field.value, bounds);
                 }
             }
+            ExprKind::Logic {
+                operator,
+                left,
+                right,
+            } => {
+                self.remove_checks(left, bounds);
+                // The right side runs only when the left one leaves the result open: true for `and`, false for `or`.
+                let mut open = bounds.clone();
+                self.refine(&mut open, left, *operator == LogicOperator::And);
+                self.remove_checks(right, &open);
+            }
             ExprKind::Arithmetic { left, right, .. }
             | ExprKind::Compare { left, right, .. }
-            | ExprKind::Logic { left, right, .. }
             | ExprKind::Wrapping { left, right, .. }
             | ExprKind::Index {
                 array: left,
@@ -361,7 +547,7 @@ impl Analyzer<'_> {
      * that is the job, then forgets what is known about every local it
      * passes with `variable`, since the called function may change it.
      */
-    fn evaluate(
+    pub fn evaluate(
         &mut self,
         expr: &mut Expr,
         bounds: &mut Bounds,
@@ -369,6 +555,7 @@ impl Analyzer<'_> {
         mode: Mode,
     ) {
         if mode == Mode::Remove {
+            self.observe_calls(expr, bounds);
             self.remove_checks(expr, bounds);
         }
         let mut passed = HashSet::new();
@@ -431,6 +618,12 @@ impl Analyzer<'_> {
             Statement::Discard(value) => self.evaluate(value, bounds, changes, mode),
             Statement::Call(call) => {
                 if mode == Mode::Remove {
+                    for argument in &call.arguments {
+                        if let Argument::Value(value) = argument {
+                            self.observe_calls(value, bounds);
+                        }
+                    }
+                    self.observe_call(call, bounds);
                     self.remove_argument_checks(call, bounds);
                 }
                 let mut passed = HashSet::new();
@@ -490,11 +683,25 @@ impl Analyzer<'_> {
             }
             Statement::Return(value) => {
                 if let Some(value) = value {
+                    if mode == Mode::Remove {
+                        self.observe_return(value, bounds);
+                    }
                     self.evaluate(value, bounds, changes, mode);
                 }
                 return Flow::Leaves;
             }
-            Statement::Break | Statement::Continue => return Flow::Leaves,
+            Statement::Break => {
+                if let Some(exits) = self.exits.last_mut() {
+                    join_into(&mut exits.broken, bounds);
+                }
+                return Flow::Leaves;
+            }
+            Statement::Continue => {
+                if let Some(exits) = self.exits.last_mut() {
+                    join_into(&mut exits.continued, bounds);
+                }
+                return Flow::Leaves;
+            }
         }
         Flow::Continues
     }
@@ -569,24 +776,6 @@ impl Analyzer<'_> {
         }
     }
 
-    /// A `while` loop runs an unknown number of times, so every variable it changes can hold any value.
-    fn walk_while(
-        &mut self,
-        condition: &mut Expr,
-        body: &mut Block,
-        bounds: &mut Bounds,
-        changes: &mut Changes,
-        mode: Mode,
-    ) {
-        let mut changed = loops::changed_outside(body);
-        loops::collect_references(condition, &mut changed);
-        forget(&changed, bounds, changes);
-        self.evaluate(condition, bounds, changes, mode);
-        let mut inside = bounds.clone();
-        self.refine(&mut inside, condition, true);
-        self.walk_block(body, &mut inside, &mut Changes::new(), mode);
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn walk_for(
         &mut self,
@@ -604,7 +793,13 @@ impl Analyzer<'_> {
         self.evaluate(end, bounds, changes, mode);
         let changed = loops::changed_outside(body);
         let (Some(start_range), Some(end_range)) = (start_range, end_range) else {
+            // Bounds the analysis cannot follow: the body still runs, any number of times, so its calls count.
             forget(&changed, bounds, changes);
+            let mut inside = bounds.clone();
+            if let Some(variable) = variable {
+                inside.set(variable, None);
+            }
+            self.walk_loop_body(body, &mut inside, &mut Changes::new(), mode);
             return;
         };
         let trips = loops::trip_count(start_range, end_range);
@@ -666,7 +861,7 @@ impl Analyzer<'_> {
             if let Some((variable, value)) = variable {
                 inside.set(variable, value);
             }
-            self.walk_block(body, &mut inside, &mut Changes::new(), Mode::Remove);
+            self.walk_loop_body(body, &mut inside, &mut Changes::new(), Mode::Remove);
         }
         // After the loop, every variable it changed is still within its loop-wide bounds.
         for &local in changed {
@@ -714,7 +909,7 @@ impl Analyzer<'_> {
                     (local, followed)
                 })
                 .collect();
-            self.walk_block(body, &mut probe, &mut changes, Mode::Probe);
+            self.walk_loop_body(body, &mut probe, &mut changes, Mode::Probe);
 
             extents = changed
                 .iter()
@@ -753,7 +948,7 @@ impl Analyzer<'_> {
     }
 
     /// Narrows the bounds to where `condition` has the value `outcome`.
-    fn refine(&self, bounds: &mut Bounds, condition: &Expr, outcome: bool) {
+    pub fn refine(&self, bounds: &mut Bounds, condition: &Expr, outcome: bool) {
         match &condition.kind {
             ExprKind::Not(inner) => self.refine(bounds, inner, !outcome),
             ExprKind::Logic {
@@ -792,8 +987,59 @@ impl Analyzer<'_> {
                         self.narrow(bounds, local, mirrored(operator), other);
                     }
                 }
+                if let Some(local) = squared_local(left) {
+                    if let Some(other) = self.range(right, bounds) {
+                        self.narrow_square(bounds, local, operator, other);
+                    }
+                }
+                if let Some(local) = squared_local(right) {
+                    if let Some(other) = self.range(left, bounds) {
+                        self.narrow_square(bounds, local, mirrored(operator), other);
+                    }
+                }
             }
             _ => {}
+        }
+    }
+
+    /**
+     * Narrows a local to where `local * local operator other` holds, as in
+     * `while divisor * divisor <= candidate`. The multiplication is checked,
+     * so wherever the comparison runs, the square is exact.
+     */
+    fn narrow_square(
+        &self,
+        bounds: &mut Bounds,
+        local: LocalId,
+        operator: ComparisonOperator,
+        other: Interval,
+    ) {
+        let Some(current) = self.local_range(bounds, local) else {
+            return;
+        };
+        let squares = match operator {
+            ComparisonOperator::Less => Interval {
+                low: i128::MIN,
+                high: other.high.saturating_sub(1),
+            },
+            ComparisonOperator::LessEqual => Interval {
+                low: i128::MIN,
+                high: other.high,
+            },
+            ComparisonOperator::Greater => Interval {
+                low: other.low.saturating_add(1),
+                high: i128::MAX,
+            },
+            ComparisonOperator::GreaterEqual => Interval {
+                low: other.low,
+                high: i128::MAX,
+            },
+            ComparisonOperator::Equal => other,
+            ComparisonOperator::NotEqual => return,
+        };
+        // No value of the local can make it hold there, so the bounds stay as they are, as in `narrow`.
+        if let Some(roots) = current.square_roots(squares) {
+            bounds.set(local, Some(roots));
         }
     }
 
@@ -834,6 +1080,23 @@ impl Analyzer<'_> {
     }
 }
 
+/// The local `expr` multiplies by itself, as in `divisor * divisor`, if it does.
+fn squared_local(expr: &Expr) -> Option<LocalId> {
+    let ExprKind::Arithmetic {
+        operator: ArithmeticOperator::Multiply,
+        left,
+        right,
+        ..
+    } = &expr.kind
+    else {
+        return None;
+    };
+    match (&left.kind, &right.kind) {
+        (ExprKind::Local(first), ExprKind::Local(second)) if first == second => Some(*first),
+        _ => None,
+    }
+}
+
 /// What `loop_bounds` works out for the variables a `for` loop changes.
 struct LoopBounds {
     /// Bounds that hold at every point of every iteration, and after the loop.
@@ -865,10 +1128,17 @@ fn assign(
 }
 
 /// Forgets what is known about locals that something may have changed in an unknown way.
-fn forget(locals: &HashSet<LocalId>, bounds: &mut Bounds, changes: &mut Changes) {
+pub(super) fn forget(locals: &HashSet<LocalId>, bounds: &mut Bounds, changes: &mut Changes) {
     for &local in locals {
         bounds.set(local, None);
-        if let Some(followed) = changes.get_mut(&local) {
+    }
+    unfollow(locals, changes);
+}
+
+/// Tells a loop being probed that these locals change in ways it cannot add up.
+pub(super) fn unfollow(locals: &HashSet<LocalId>, changes: &mut Changes) {
+    for local in locals {
+        if let Some(followed) = changes.get_mut(local) {
             followed.change = Change::Unknown;
             followed.loop_wide = None;
         }

@@ -89,6 +89,86 @@ impl Interval {
         }
     }
 
+    /**
+     * `next`, with each end that moved past `self` taken to that end of
+     * `whole`. A bound that keeps moving gets there in one step, so a fixed
+     * point that adds iteration after iteration is reached in a few rounds.
+     */
+    #[must_use]
+    pub fn widen(self, next: Self, whole: Self) -> Self {
+        Self {
+            low: if next.low < self.low {
+                whole.low
+            } else {
+                next.low
+            },
+            high: if next.high > self.high {
+                whole.high
+            } else {
+                next.high
+            },
+        }
+    }
+
+    /// Every square of a value in the interval. Unlike a product of two values taken apart, it is never negative.
+    #[must_use]
+    pub fn square(self) -> Self {
+        let (low, high) = (
+            self.low.saturating_mul(self.low),
+            self.high.saturating_mul(self.high),
+        );
+        if self.low >= 0 {
+            Self { low, high }
+        } else if self.high <= 0 {
+            Self {
+                low: high,
+                high: low,
+            }
+        } else {
+            Self {
+                low: 0,
+                high: low.max(high),
+            }
+        }
+    }
+
+    /**
+     * The values whose square lies in `squares`, within `self`. A value
+     * whose square is at least the low end lies on either side of zero, so
+     * that bound only narrows an interval that stays on one side. `None` when
+     * no value of `self` has such a square.
+     */
+    pub fn square_roots(self, squares: Self) -> Option<Self> {
+        if squares.high < 0 {
+            return None;
+        }
+        let largest = squares.high.isqrt();
+        let mut roots = self.intersect(Self {
+            low: -largest,
+            high: largest,
+        })?;
+        if squares.low > 0 {
+            let floor = squares.low.isqrt();
+            let smallest = if floor * floor < squares.low {
+                floor + 1
+            } else {
+                floor
+            };
+            if roots.low >= 0 {
+                roots = roots.intersect(Self {
+                    low: smallest,
+                    high: i128::MAX,
+                })?;
+            } else if roots.high <= 0 {
+                roots = roots.intersect(Self {
+                    low: i128::MIN,
+                    high: -smallest,
+                })?;
+            }
+        }
+        Some(roots)
+    }
+
     /// The interval scaled by a count of at least zero, as for a change repeated `count` times.
     #[must_use]
     pub fn repeat(self, count: i128) -> Self {
@@ -191,6 +271,39 @@ mod tests {
             operands.apply(ArithmeticOperator::Multiply, interval(-2, 3)),
             Some(interval(-10, 15))
         );
+    }
+
+    #[test]
+    fn squares_and_their_roots_stay_exact() {
+        assert_eq!(interval(-3, 5).square(), interval(0, 25));
+        assert_eq!(interval(-5, -2).square(), interval(4, 25));
+        assert_eq!(interval(2, 4).square(), interval(4, 16));
+        let squares = |low, high| interval(low, high);
+        // `divisor * divisor <= 3_000_000` keeps the divisor at most 1732.
+        assert_eq!(
+            interval(2, i128::from(i64::MAX)).square_roots(squares(i128::MIN, 3_000_000)),
+            Some(interval(2, 1732))
+        );
+        assert_eq!(
+            interval(-100, 100).square_roots(squares(0, 16)),
+            Some(interval(-4, 4))
+        );
+        // At least 10 needs a root of at least 4 on the side the interval keeps to.
+        assert_eq!(
+            interval(0, 100).square_roots(squares(10, i128::MAX)),
+            Some(interval(4, 100))
+        );
+        assert_eq!(
+            interval(-100, 0).square_roots(squares(9, i128::MAX)),
+            Some(interval(-100, -3))
+        );
+        // Both sides of zero stay possible, so a low end cannot narrow.
+        assert_eq!(
+            interval(-100, 100).square_roots(squares(9, i128::MAX)),
+            Some(interval(-100, 100))
+        );
+        assert_eq!(interval(0, 100).square_roots(squares(i128::MIN, -1)), None);
+        assert_eq!(interval(0, 3).square_roots(squares(10, 20)), None);
     }
 
     #[test]

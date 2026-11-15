@@ -10,11 +10,13 @@
  * prints the program. The generator has a fixed seed, so it reproduces.
  */
 
+mod call_facts;
 #[path = "../common/mod.rs"]
 mod common;
 mod generator;
 mod grids;
 mod interpreter;
+mod loop_paths;
 
 use lymra::diagnostics::render_report;
 use lymra::frontend;
@@ -316,9 +318,40 @@ fn removed_checks_never_fail_on_any_input() {
 
 #[test]
 fn removed_checks_never_fail_at_the_edges_of_conditions() {
+    check_probes(&grids::narrowing());
+}
+
+#[test]
+fn removed_checks_never_fail_past_squares() {
+    let mut probes = grids::squares();
+    probes.extend(grids::square_divisors());
+    check_probes(&probes);
+}
+
+#[test]
+fn removed_checks_never_fail_past_short_circuits() {
+    check_probes(&grids::short_circuits());
+}
+
+#[test]
+fn removed_checks_never_fail_on_any_way_through_a_while_loop() {
+    let mut probes = loop_paths::ways();
+    probes.extend(loop_paths::changed_by_conditions());
+    check_probes(&probes);
+}
+
+#[test]
+fn removed_checks_never_fail_across_calls() {
+    let mut probes = call_facts::parameters();
+    probes.extend(call_facts::results());
+    probes.extend(call_facts::recursion());
+    check_probes(&probes);
+}
+
+/// Checks grid probes, which are written to pass the checker.
+fn check_probes(probes: &[grids::Probe]) {
     let mut totals = Totals::default();
-    let probes = grids::narrowing();
-    for probe in &probes {
+    for probe in probes {
         assert_accepted(check_probe(&probe.text, probe.ty, &mut totals), &probe.text);
     }
     totals.assert_meaningful(probes.len());
@@ -361,6 +394,40 @@ function main()
 ",
     );
     assert_eq!((count.operations, count.checked), (3, 0));
+}
+
+/**
+ * The benchmark programs keep only checks that can fail as far as the
+ * analysis can see: `collatz` grows its value and its count of steps with no
+ * bound in sight, and `fibonacci` adds the results of calls that grow with
+ * every level. Every other check goes.
+ */
+#[test]
+fn the_benchmarks_keep_only_checks_that_can_fail() {
+    let programs = common::repository_root().join("bench/programs");
+    let mut kept = Vec::new();
+    for name in [
+        "collatz",
+        "fibonacci",
+        "gcd_sum",
+        "modulo_sum",
+        "primes",
+        "sum_formula",
+    ] {
+        let text = common::read(&programs.join(name).join("program.lym"));
+        kept.push((name, optimized_count(name, &text).checked));
+    }
+    assert_eq!(
+        kept,
+        [
+            ("collatz", 3),
+            ("fibonacci", 1),
+            ("gcd_sum", 0),
+            ("modulo_sum", 0),
+            ("primes", 0),
+            ("sum_formula", 0),
+        ]
+    );
 }
 
 #[test]

@@ -62,7 +62,7 @@ Directives in 0.1:
 
 `#!prove bounds` is the safe replacement for `#!nocheck`. Instead of switching checks off and trusting the programmer, it makes the compiler show that no check is needed. Hot loops get check-free code and keep their safety guarantee. The usual fix for an `L0104` is one `assert` before the loop, such as `assert length(items) >= count`, which pays for one check instead of one per iteration.
 
-The compiler proves an index from what it knows at that point: the bounds of a `for` loop over `range`, the conditions of `if`, `while` and `assert`, and values known while compiling, carried through arithmetic. A later compiler may prove more, never less, so a file that compiles with `#!prove bounds` keeps compiling.
+The compiler proves an index from what it knows at that point: the bounds of a `for` loop over `range`, the conditions of `if`, `while` and `assert`, the left side of `and` and `or`, and values known while compiling, carried through arithmetic. It follows each variable through a `while` loop until what it knows settles, a parameter holds the values every call in the program passes to it, and a call gives the values its function can return. A value read from an array can be any value of its type. A later compiler may prove more, never less, so a file that compiles with `#!prove bounds` keeps compiling.
 
 Rejected directives: `#!nocheck` and `#!nonstrict` would turn off safety, which contradicts Goal 1. `#!strict` would do nothing, because Lymra is always strict.
 
@@ -430,7 +430,7 @@ for index in range(0, 10)
 - A statement after `return`, `break` or `continue`, or after an `if` whose every branch leaves, can never run. It is error `L0602`.
 - `match` picks a block by the variant of a `choice` (Section 4.7).
 - `return` ends the function, with a value when the function `returns` one.
-- `assert condition` stops the program with a runtime error if the condition is false. The compiler will also use it as a fact when it removes bounds checks (Section 2.3).
+- `assert condition` stops the program with a runtime error if the condition is false. The compiler also uses it as a fact when it removes checks (Section 2.3).
 
 ## 7. Memory model
 

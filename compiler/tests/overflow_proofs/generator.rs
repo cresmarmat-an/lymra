@@ -1,7 +1,8 @@
 /*!
  * Writes random programs in the part of Lymra the optimizer reasons about:
  * integer variables, arithmetic, an array of them, `if`, `for` and `while`
- * loops, and calls that change a variable through a `variable` argument.
+ * loops, calls that change a variable through a `variable` argument, and
+ * calls of functions that return a value, one of them recursive.
  *
  * Literals cluster at the edges of the program's type, and some are picked to
  * land exactly on, or one past, a bound that an earlier condition set. Those
@@ -49,7 +50,7 @@ pub fn program(random: &mut Random) -> String {
     let ty = *random.pick(&IntegerType::ALL);
     let mut writer = Writer::new(random, ty);
     writer.line("function main()");
-    writer.body(None);
+    writer.body(&[]);
     writer.finish()
 }
 
@@ -62,10 +63,23 @@ pub fn probe(random: &mut Random) -> (String, IntegerType) {
     let ty = *random.pick(&[IntegerType::Integer8, IntegerType::Unsigned8]);
     let mut writer = Writer::new(random, ty);
     writer.line(&format!("function {PROBE}({} input)", ty.name()));
-    writer.body(Some("input"));
-    writer.line("function main()");
-    writer.line(&format!("    {PROBE}(0)"));
-    (writer.finish(), ty)
+    writer.body(&["input"]);
+    (writer.finish() + &probe_caller(ty), ty)
+}
+
+/**
+ * The `main` of a probe program, which calls `probe` with every value of
+ * `ty`, as the test does. The optimizer learns what a parameter holds from
+ * the calls that pass it, so a `main` that passed fewer values would let it
+ * remove checks that the test's other inputs reach.
+ */
+pub fn probe_caller(ty: IntegerType) -> String {
+    format!(
+        "function main()\n    for value in range({}, {})\n        {PROBE}({}(value))\n",
+        literal_text(ty.minimum()),
+        ty.maximum() + 1,
+        ty.name()
+    )
 }
 
 pub fn literal_text(value: i128) -> String {
@@ -78,6 +92,12 @@ pub fn literal_text(value: i128) -> String {
 
 /// The array every function body has, of the program's type.
 const ARRAY: &str = "cells";
+
+/// The recursive function, which calls itself until its depth runs out.
+const DESCEND: &str = "descend";
+
+/// The deepest `descend` goes, so a run stays well inside the interpreter's stack.
+const DEEPEST: usize = 8;
 
 struct Writer {
     random: Random,
@@ -94,6 +114,10 @@ struct Writer {
     /// How many loops are around the current line, so `break` and `continue` are only written inside one.
     loop_depth: usize,
     loops_written: usize,
+    /// The functions of two values of the program's type that the current body can call.
+    helpers: Vec<String>,
+    /// Whether the current body returns a value, so its branches can end with `return`.
+    returns: bool,
 }
 
 impl Writer {
@@ -109,6 +133,8 @@ impl Writer {
             depth: 0,
             loop_depth: 0,
             loops_written: 0,
+            helpers: Vec::new(),
+            returns: false,
         };
         let name = ty.name();
         writer.line(&format!(
@@ -122,7 +148,63 @@ impl Writer {
         writer.line("    target = target - amount");
         writer.line("    return amount");
         writer.line("");
+        if writer.random.chance(50) {
+            writer.descend();
+        }
+        let helpers = writer.random.below(3);
+        for index in 0..helpers {
+            writer.helper(index);
+        }
         writer
+    }
+
+    /**
+     * A function that calls itself with one less depth until the depth runs
+     * out, changing its amount on the way down or its result on the way up.
+     * The analysis has to work out what both parameters and the result can
+     * hold from every call, its own among them.
+     */
+    fn descend(&mut self) {
+        let name = self.ty.name();
+        let deepest = self.random.below(DEEPEST) + 1;
+        self.line(&format!(
+            "function {DESCEND}({name} depth, {name} amount) returns {name}"
+        ));
+        self.line(&format!("    if depth <= 0 or depth > {deepest}"));
+        self.line("        return amount");
+        let operator = *self.random.pick(&["+", "-", "*", "/", "%"]);
+        let operand = match self.random.below(3) {
+            0 => "depth".to_owned(),
+            1 => "amount".to_owned(),
+            _ => self.literal(),
+        };
+        let step = format!("amount {operator} {operand}");
+        let recursion = format!("{DESCEND}(depth - 1, {step})");
+        let result = match self.random.below(3) {
+            0 => recursion,
+            1 => format!("{} + {recursion}", self.literal()),
+            _ => format!("{recursion} - depth"),
+        };
+        self.line(&format!("    return {result}"));
+        self.line("");
+        self.helpers.push(DESCEND.to_owned());
+    }
+
+    /**
+     * A function of two values that returns one. Its body is written like
+     * any other, with `return` ending some of its branches, and it can call
+     * the functions written before it.
+     */
+    fn helper(&mut self, index: usize) {
+        let name = format!("helper_{index}");
+        let ty = self.ty.name();
+        self.line(&format!(
+            "function {name}({ty} first, {ty} second) returns {ty}"
+        ));
+        self.returns = true;
+        self.body(&["first", "second"]);
+        self.returns = false;
+        self.helpers.push(name);
     }
 
     fn finish(self) -> String {
@@ -133,17 +215,22 @@ impl Writer {
         let _ = writeln!(self.source, "{}{text}", "    ".repeat(self.depth));
     }
 
-    /// A function body: variables, random statements, then a line that changes and prints each variable.
-    fn body(&mut self, input: Option<&str>) {
+    /**
+     * A function body: variables, random statements, then lines that change
+     * and print each variable. A body that returns a value ends with a
+     * `return`; any other calls every function it can, so each is called.
+     */
+    fn body(&mut self, inputs: &[&str]) {
         self.depth = 1;
-        self.readable.extend(input.map(str::to_owned));
+        self.readable
+            .extend(inputs.iter().map(|&input| input.to_owned()));
         let count = self.random.below(3) + 2;
         for index in 0..count {
             let name = format!("value_{index}");
-            // In a probe, the first variable starts as the input, so it can hold any value of its type.
-            let initial = match input {
-                Some(input) if index == 0 => input.to_owned(),
-                _ => self.literal(),
+            // The first variables start as the inputs, so they can hold any value an input can.
+            let initial = match inputs.get(index) {
+                Some(&input) => input.to_owned(),
+                None => self.literal(),
             };
             self.line(&format!("variable {} {name} = {initial}", self.ty.name()));
             self.variables.push(name);
@@ -165,6 +252,15 @@ impl Writer {
         self.line(&format!("{ARRAY}[0] = {ARRAY}[length({ARRAY}) - 1]"));
         self.line(&format!("for element in {ARRAY}"));
         self.line("    print(\"{element}\")");
+        if self.returns {
+            let value = self.expression(2);
+            self.line(&format!("return {value}"));
+        } else {
+            for helper in self.helpers.clone() {
+                let (first, second) = (self.operand(), self.operand());
+                self.line(&format!("print(\"{{{helper}({first}, {second})}}\")"));
+            }
+        }
         self.depth = 0;
         self.line("");
         self.variables.clear();
@@ -214,12 +310,17 @@ impl Writer {
     }
 
     fn operand(&mut self) -> String {
-        match self.random.below(12) {
+        match self.random.below(13) {
             0..=3 => self.random.pick(&self.variables).clone(),
             4..=6 if !self.readable.is_empty() => self.random.pick(&self.readable).clone(),
             7 | 8 => {
                 let index = self.index();
                 format!("{ARRAY}[{index}]")
+            }
+            9 if !self.helpers.is_empty() => {
+                let helper = self.random.pick(&self.helpers).clone();
+                let (first, second) = (self.operand(), self.operand());
+                format!("{helper}({first}, {second})")
             }
             _ => self.literal(),
         }
@@ -407,14 +508,26 @@ impl Writer {
         self.depth -= 1;
     }
 
+    /**
+     * A `while` loop that a counter keeps short. Its condition tests the
+     * counter, the program's variables, or both; a loop on the variables
+     * alone leaves through a `break` once the counter runs out.
+     */
     fn while_loop(&mut self) {
         let counter = format!("count_{}", self.loops_written);
         self.loops_written += 1;
         let limit = self.random.below(30) + 1;
         self.line(&format!("variable integer64 {counter} = 0"));
-        self.line(&format!("while {counter} < {limit}"));
+        let condition = match self.random.below(3) {
+            0 => format!("{counter} < {limit}"),
+            1 => format!("{counter} < {limit} and ({})", self.condition()),
+            _ => self.condition(),
+        };
+        self.line(&format!("while {condition}"));
         self.depth += 1;
         self.line(&format!("{counter} = {counter} + 1"));
+        self.line(&format!("if {counter} > {limit}"));
+        self.line("    break");
         self.loop_depth += 1;
         self.statements(1, 3);
         self.loop_depth -= 1;
@@ -428,6 +541,9 @@ impl Writer {
         if self.loop_depth > 0 && self.random.chance(25) {
             let jump = *self.random.pick(&["break", "continue"]);
             self.line(jump);
+        } else if self.returns && self.random.chance(15) {
+            let value = self.expression(1);
+            self.line(&format!("return {value}"));
         }
         self.depth -= 1;
     }
