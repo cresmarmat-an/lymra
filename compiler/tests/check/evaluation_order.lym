@@ -7,6 +7,10 @@ function swap(variable integer64 first, variable integer64 second)
     first = second
     second = saved
 
+function emptied(variable list[integer64] items) returns integer64
+    items = list()
+    return 0
+
 function main()
     variable integer64 apples = 5
     variable integer64 pears = 2
@@ -18,9 +22,14 @@ function main()
     while take_one(variable pears) < pears
         pears = 3
     assert take_one(variable apples) + take_one(variable apples) == 2
+    variable list[integer64] items = list()
+    push(variable items, 1)
+    items[0] = emptied(variable items)
 
     # Each of these is allowed: the uses happen in separate expressions, one after another.
     apples = take_one(variable apples)
+    constant cleared = emptied(variable items)
+    push(variable items, cleared)
     if take_one(variable pears) > 0
         print("first")
     else if pears > 2

@@ -175,7 +175,7 @@ error[L0508]: `values` is passed with `variable` and also used elsewhere in the 
    |
 31 |     values[values[0]] = take_back(variable values)
    |                                   ^^^^^^^^^^^^^^^ `take_back` may change `values` here
-   |            ------ `values` is used here too, so the result depends on which runs first
+   |     ------ `values` is used here too, so the result depends on which runs first
    |
 help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `values`
 

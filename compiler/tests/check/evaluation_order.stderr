@@ -1,56 +1,65 @@
 error[L0508]: `apples` is passed with `variable` and also used elsewhere in the same expression
-  --> tests/check/evaluation_order.lym:13:40
+  --> tests/check/evaluation_order.lym:17:40
    |
-13 |     constant total = apples + take_one(variable apples)
+17 |     constant total = apples + take_one(variable apples)
    |                                        ^^^^^^^^^^^^^^^ `take_one` may change `apples` here
    |                      ------ `apples` is used here too, so the result depends on which runs first
    |
 help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `apples`
 
 error[L0508]: `apples` is passed with `variable` and also used elsewhere in the same expression
-  --> tests/check/evaluation_order.lym:14:10
+  --> tests/check/evaluation_order.lym:18:10
    |
-14 |     swap(variable apples, variable apples)
+18 |     swap(variable apples, variable apples)
    |          ^^^^^^^^^^^^^^^ `swap` may change `apples` here
    |                           --------------- `apples` is used here too, so the result depends on which runs first
    |
 help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `apples`
 
 error[L0508]: `apples` is passed with `variable` and also used elsewhere in the same expression
-  --> tests/check/evaluation_order.lym:15:31
+  --> tests/check/evaluation_order.lym:19:31
    |
-15 |     print("{apples} {take_one(variable apples)}")
+19 |     print("{apples} {take_one(variable apples)}")
    |                               ^^^^^^^^^^^^^^^ `take_one` may change `apples` here
    |             ------ `apples` is used here too, so the result depends on which runs first
    |
 help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `apples`
 
 error[L0508]: `pears` is passed with `variable` and also used elsewhere in the same expression
-  --> tests/check/evaluation_order.lym:16:31
+  --> tests/check/evaluation_order.lym:20:31
    |
-16 |     if pears > 0 and take_one(variable pears) > 0
+20 |     if pears > 0 and take_one(variable pears) > 0
    |                               ^^^^^^^^^^^^^^ `take_one` may change `pears` here
    |        ----- `pears` is used here too, so the result depends on which runs first
    |
 help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `pears`
 
 error[L0508]: `pears` is passed with `variable` and also used elsewhere in the same expression
-  --> tests/check/evaluation_order.lym:18:20
+  --> tests/check/evaluation_order.lym:22:20
    |
-18 |     while take_one(variable pears) < pears
+22 |     while take_one(variable pears) < pears
    |                    ^^^^^^^^^^^^^^ `take_one` may change `pears` here
    |                                      ----- `pears` is used here too, so the result depends on which runs first
    |
 help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `pears`
 
 error[L0508]: `apples` is passed with `variable` and also used elsewhere in the same expression
-  --> tests/check/evaluation_order.lym:20:21
+  --> tests/check/evaluation_order.lym:24:21
    |
-20 |     assert take_one(variable apples) + take_one(variable apples) == 2
+24 |     assert take_one(variable apples) + take_one(variable apples) == 2
    |                     ^^^^^^^^^^^^^^^ `take_one` may change `apples` here
    |                                                 --------------- `apples` is used here too, so the result depends on which runs first
    |
 help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `apples`
 
-found 6 errors in tests/check/evaluation_order.lym
+error[L0508]: `items` is passed with `variable` and also used elsewhere in the same expression
+  --> tests/check/evaluation_order.lym:27:24
+   |
+27 |     items[0] = emptied(variable items)
+   |                        ^^^^^^^^^^^^^^ `emptied` may change `items` here
+   |     ----- `items` is used here too, so the result depends on which runs first
+   |
+help: make the call a statement of its own and save any result in a `constant`; the statements after it see the new `items`
+
+found 7 errors in tests/check/evaluation_order.lym
 run `lymra explain L0508` to read why a rule exists and how to fix it

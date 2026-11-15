@@ -86,7 +86,7 @@ impl<'src> Visitor<'src> for Uses<'src> {
 /**
  * The first binding, in source order, that one of `parts` passes with
  * `variable` while it or another part uses the binding elsewhere. The parts
- * run as one: an expression, or the indexes of an assignment's target
+ * run as one: an expression, or the element or field an assignment changes
  * together with its value.
  */
 pub(super) fn find_conflict<'src>(parts: &[&ast::Expr<'src>]) -> Option<Conflict<'src>> {

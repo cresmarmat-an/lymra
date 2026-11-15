@@ -22,16 +22,6 @@ pub(super) enum PlaceStep<'expr, 'src> {
     },
 }
 
-impl<'expr, 'src> PlaceStep<'expr, 'src> {
-    /// The index this step computes, if it is one.
-    pub fn index(&self) -> Option<&'expr ast::Expr<'src>> {
-        match self {
-            Self::Index { index, .. } => Some(index),
-            Self::Field { .. } => None,
-        }
-    }
-}
-
 /**
  * Splits an assignment target into the expression it starts from and its
  * steps, from the outermost inward. `grid[row].cells[column]` starts from

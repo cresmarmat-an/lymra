@@ -130,12 +130,18 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         match &statement.kind {
             ast::StatementKind::Binding(binding) => self.report_order_conflict(&[&binding.value]),
             ast::StatementKind::Assignment { target, value } => {
-                // The target's own binding is where the value goes, not a use; its indexes are uses.
+                /*
+                 * A whole binding is where the value goes, not a use. An
+                 * element or a field is a use of its binding: an index is
+                 * checked against what the binding holds, which a change
+                 * made by the value could free.
+                 */
                 let (_, steps) = place_parts(target);
-                let mut parts: Vec<&ast::Expr<'src>> =
-                    steps.iter().filter_map(|step| step.index()).collect();
-                parts.push(value);
-                self.report_order_conflict(&parts);
+                if steps.is_empty() {
+                    self.report_order_conflict(&[value]);
+                } else {
+                    self.report_order_conflict(&[target, value]);
+                }
             }
             ast::StatementKind::Expression(expr)
             | ast::StatementKind::Assert(expr)
