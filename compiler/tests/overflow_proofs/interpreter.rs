@@ -68,7 +68,11 @@ enum Slot {
     Float(f64),
     Boolean(bool),
     Text(String),
-    /// The elements of an array or a list, or the fields of a value of a declared type, in order.
+    /**
+     * The elements of an array or a list, or the fields of a value of a
+     * declared type, in order. A pool is the list of its slots, each its
+     * generation and its value; a handle is its slot and generation.
+     */
     Compound(Vec<Slot>),
     /// A value of a choice: the position of its variant, and the variant's fields in order.
     Variant {
@@ -195,6 +199,16 @@ impl Interpreter<'_, '_> {
                 match &mut slots[*list] {
                     Slot::Compound(elements) => elements.push(value),
                     other => return Err(Stop::Unsound(format!("a push onto {other:?}"))),
+                }
+            }
+            Statement::Remove { pool, handle, .. } => {
+                let handle = self.expr(handle, slots)?;
+                let slot = found_slot(&mut slots[*pool], &handle)?;
+                if let Slot::Compound(entry) = slot {
+                    entry[0] = match entry[0] {
+                        Slot::Integer(generation) => Slot::Integer(generation + 1),
+                        ref other => return Err(Stop::Unsound(format!("a generation {other:?}"))),
+                    };
                 }
             }
             Statement::Discard(value) => {
@@ -348,6 +362,14 @@ impl Interpreter<'_, '_> {
                     check_index(value, length, index.checked, index.span)?
                 }
                 PlaceStep::Field(field) => *field,
+                PlaceStep::Slot(slot) => {
+                    let handle = self.expr(&slot.handle, slots)?;
+                    let pool = element_mut(&mut slots[local], &positions)?;
+                    found_slot(pool, &handle)?;
+                    positions.push(slot_of(&handle)?);
+                    // The value comes after the slot's generation.
+                    1
+                }
             };
             positions.push(position);
         }
@@ -513,6 +535,26 @@ impl Interpreter<'_, '_> {
                 return match &mut slots[*stack] {
                     Slot::Compound(elements) => elements.pop().ok_or(Stop::Ended(Ending::Trapped)),
                     other => Err(Stop::Unsound(format!("a pop from {other:?}"))),
+                };
+            }
+            ExprKind::Insert { pool, value } => {
+                let value = self.expr(value, slots)?;
+                return match &mut slots[*pool] {
+                    Slot::Compound(entries) => {
+                        // Slots are never reused here, so every value starts the first generation of its own.
+                        let slot = entries.len() as i128;
+                        entries.push(Slot::Compound(vec![Slot::Integer(0), value]));
+                        Ok(Slot::Compound(vec![Slot::Integer(slot), Slot::Integer(0)]))
+                    }
+                    other => Err(Stop::Unsound(format!("an insert into {other:?}"))),
+                };
+            }
+            ExprKind::Slot { pool, handle } => {
+                let mut pool = self.expr(pool, slots)?;
+                let handle = self.expr(handle, slots)?;
+                return match found_slot(&mut pool, &handle)? {
+                    Slot::Compound(entry) => Ok(entry.swap_remove(1)),
+                    other => Err(Stop::Unsound(format!("a slot {other:?}"))),
                 };
             }
             ExprKind::Top(stack) => {
@@ -723,6 +765,41 @@ fn stored_path(expr: &Expr) -> Option<(LocalId, Vec<Stored<'_>>)> {
     }
 }
 
+/// The slot a handle names in `pool`, its generation and its value, or the trap a stale handle stops the program with.
+fn found_slot<'pool>(pool: &'pool mut Slot, handle: &Slot) -> Eval<&'pool mut Slot> {
+    let Slot::Compound(handle_parts) = handle else {
+        return Err(Stop::Unsound(format!("a handle {handle:?}")));
+    };
+    let slot = slot_of(handle)?;
+    let Slot::Compound(entries) = pool else {
+        return Err(Stop::Unsound(format!("a pool {pool:?}")));
+    };
+    let entry = entries.get_mut(slot).ok_or(Stop::Ended(Ending::Trapped))?;
+    let same = match (entry, handle_parts.get(1)) {
+        (Slot::Compound(entry), Some(Slot::Integer(generation))) => {
+            matches!(entry.first(), Some(Slot::Integer(current)) if current == generation)
+        }
+        _ => false,
+    };
+    if !same {
+        return Err(Stop::Ended(Ending::Trapped));
+    }
+    entries.get_mut(slot).ok_or(Stop::Ended(Ending::Trapped))
+}
+
+/// The slot a handle names.
+fn slot_of(handle: &Slot) -> Eval<usize> {
+    match handle {
+        Slot::Compound(parts) => match parts.first() {
+            Some(Slot::Integer(slot)) => {
+                usize::try_from(*slot).map_err(|_| Stop::Unsound(format!("a slot {slot}")))
+            }
+            _ => Err(Stop::Unsound(format!("a handle {handle:?}"))),
+        },
+        other => Err(Stop::Unsound(format!("a handle {other:?}"))),
+    }
+}
+
 /// The element of `slot` at `positions`, one per level of nesting.
 fn element_mut<'slot>(slot: &'slot mut Slot, positions: &[usize]) -> Eval<&'slot mut Slot> {
     let Some((&first, rest)) = positions.split_first() else {
@@ -774,6 +851,17 @@ fn compare(operator: ComparisonOperator, left: &Slot, right: &Slot) -> bool {
         // Only choices whose variants hold no fields are compared, by their variant.
         (Slot::Variant { variant: left, .. }, Slot::Variant { variant: right, .. }) => {
             left.cmp(right)
+        }
+        // Only handles are compared among values that hold others: their slots and generations.
+        (Slot::Compound(left), Slot::Compound(right)) => {
+            let parts = |parts: &[Slot]| match parts {
+                [Slot::Integer(slot), Slot::Integer(generation)] => Some((*slot, *generation)),
+                _ => None,
+            };
+            match (parts(left), parts(right)) {
+                (Some(left), Some(right)) => left.cmp(&right),
+                _ => return false,
+            }
         }
         _ => return false,
     };

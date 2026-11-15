@@ -1,32 +1,82 @@
-//! The wording of the errors about lists and stacks.
+//! The wording of the errors about lists and stacks, and those pools share with them.
 
 use super::described;
 use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
 use crate::ir::{Sequence, Type};
 use crate::source::Span;
 
-/// `list` or `stack` without `[element type]`, or with more between the brackets.
-pub(in crate::semantic) fn malformed_list_type(kind: Sequence, span: Span) -> Diagnostic {
-    let name = kind.name();
+/// What `list()`, `stack()` or `pool()` builds, for the errors they share.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::semantic) enum Collection {
+    List,
+    Stack,
+    Pool,
+}
+
+impl Collection {
+    pub fn of(kind: Sequence) -> Self {
+        match kind {
+            Sequence::List => Self::List,
+            Sequence::Stack => Self::Stack,
+        }
+    }
+
+    /// What a value of `ty`, a growable type, is.
+    pub fn of_type(ty: &Type) -> Self {
+        match (ty.as_pool(), ty.as_list()) {
+            (Some(_), _) => Self::Pool,
+            (None, Some(list)) => Self::of(list.kind),
+            (None, None) => Self::List,
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Stack => "stack",
+            Self::Pool => "pool",
+        }
+    }
+
+    /// One of the things it holds: an element of a list, or a value in a pool.
+    const fn item(self) -> &'static str {
+        match self {
+            Self::List | Self::Stack => "element",
+            Self::Pool => "value",
+        }
+    }
+
+    /// The function that adds to it.
+    const fn adder(self) -> &'static str {
+        match self {
+            Self::List | Self::Stack => "push",
+            Self::Pool => "insert",
+        }
+    }
+}
+
+/// A list, stack or pool type written without exactly one type in brackets.
+pub(in crate::semantic) fn malformed_list_type(kind: Collection, span: Span) -> Diagnostic {
+    let (name, item) = (kind.name(), kind.item());
     Diagnostic::new(
         ErrorCode::L0409,
-        format!("a {name} type names the type of its elements"),
-        Label::new(span, format!("expected `{name}[element type]`")),
+        format!("a {name} type names the type of its {item}s"),
+        Label::new(span, format!("expected `{name}[{item} type]`")),
         Help::text(format!(
-            "write the type of the elements, as in `{name}[integer64]`; a {name} grows, so it has no length in its type"
+            "write the type of the {item}s, as in `{name}[integer64]`; a {name} grows, so it has no length in its type"
         )),
     )
 }
 
-/// `list()` or `stack()` where nothing says which type it builds.
-pub(in crate::semantic) fn empty_list_without_type(kind: Sequence, span: Span) -> Diagnostic {
-    let name = kind.name();
+/// `list()`, `stack()` or `pool()` where nothing says which type it builds.
+pub(in crate::semantic) fn empty_list_without_type(kind: Collection, span: Span) -> Diagnostic {
+    let (name, item) = (kind.name(), kind.item());
     Diagnostic::new(
         ErrorCode::L0412,
         format!("`{name}()` needs to know which {name} to build"),
         Label::new(
             span,
-            "its element type comes from the type of the place it goes",
+            format!("its {item} type comes from the type of the place it goes"),
         ),
         Help::text(format!(
             "write the type where the {name} goes, as in `variable {name}[integer64] values = {name}()`"
@@ -34,9 +84,9 @@ pub(in crate::semantic) fn empty_list_without_type(kind: Sequence, span: Span) -
     )
 }
 
-/// `list()` or `stack()` where a value of another type goes.
+/// `list()`, `stack()` or `pool()` where a value of another type goes.
 pub(in crate::semantic) fn empty_list_into(
-    kind: Sequence,
+    kind: Collection,
     expected: &Type,
     span: Span,
 ) -> Diagnostic {
@@ -52,18 +102,18 @@ pub(in crate::semantic) fn empty_list_into(
 }
 
 pub(in crate::semantic) fn empty_list_arguments(
-    kind: Sequence,
+    kind: Collection,
     found: usize,
     call: Span,
 ) -> Diagnostic {
-    let name = kind.name();
+    let (name, item, adder) = (kind.name(), kind.item(), kind.adder());
     let given = if found == 1 { "was" } else { "were" };
     Diagnostic::new(
         ErrorCode::L0501,
         format!("`{name}` takes no arguments, but {found} {given} given"),
-        Label::new(call, format!("`{name}()` builds a {name} with no elements")),
+        Label::new(call, format!("`{name}()` builds a {name} with no {item}s")),
         Help::text(format!(
-            "write `{name}()`, then add the elements with `push`"
+            "write `{name}()`, then add the {item}s with `{adder}`"
         )),
     )
 }
@@ -191,7 +241,7 @@ pub(in crate::semantic) fn changed_below_newer(
     change: Change<'_>,
     span: Span,
     binding: (&str, Span),
-    kind: Sequence,
+    kind: Collection,
 ) -> Diagnostic {
     let (name, declared) = binding;
     let noun = kind.name();

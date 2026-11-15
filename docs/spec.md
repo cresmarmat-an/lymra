@@ -238,7 +238,7 @@ Every type belongs to exactly one size class. The class decides where a value ca
 |---|---|---|
 | fixed | at compile time | `integer64`, `boolean`, `array[float32, 4]`, a type whose fields are all fixed |
 | frozen | when the value is built, then never changes | `string`, a type with a `string` field |
-| growable | changes while the value lives | `list[T]`, `stack[T]` |
+| growable | changes while the value lives | `list[T]`, `stack[T]`, `pool[T]` |
 
 A custom type's class is the largest class of its fields.
 
@@ -250,6 +250,7 @@ A custom type's class is the largest class of its fields.
 | `list[T]` | growable | Grow-only. `push` adds to the end. |
 | `stack[T]` | growable | Grow and shrink: `push` and `pop`. |
 | `view[T]` | fixed | A read-only window into an array, list, or string. Does not own its data. |
+| `pool[T]` | growable | Values that come and go in any order, each named by a `handle[T]` (Section 7.6). |
 
 `list[T]` never moves its elements, because it always sits on top of its data stack (Section 7.2) and grows in place. A reference to an element stays valid for as long as the list exists, no matter how many pushes come after it. C++ `std::vector` and Rust `Vec` reallocate when they grow, which is why they can't make this promise.
 
@@ -428,6 +429,9 @@ function main()
 | `stack()` | An empty stack. Its type comes from the place it goes, as for `list()` (`L0412`). |
 | `pop(variable items)` | Takes the top element off a stack and returns it. It stops the program when the stack is empty. |
 | `top(items)` | The top element of a stack, left in place. It stops the program when the stack is empty. |
+| `pool()` | An empty pool. Its type comes from the place it goes, as for `list()` (`L0412`). |
+| `insert(variable items, value)` | Stores `value` in a free slot of a pool and returns its handle. A slot that `remove` freed takes the next value, under a new generation. |
+| `remove(variable items, handle)` | Takes the value a handle names out of its pool. The handle is stale from then on: using it, here or anywhere, stops the program. |
 | `slice(items, start, end)` | The elements of an array, a list, a stack or a view from `start` up to `end`, without `end`, as a view, with nothing copied. A slice of a `string` is a `string` that shares its bytes; its ends have to fall between characters. Each position is checked as soon as it is computed: the start lies from 0 to the length, the end from the start to the length. |
 | `bytes(text)` | The UTF-8 bytes of a `string`, as a `view[unsigned8]` |
 | `wrapping_add(left, right)`, `wrapping_subtract`, `wrapping_multiply` | Arithmetic that wraps around the type instead of stopping the program: the exact result, keeping only as many low bits as the type has, read as two's complement for a signed type. The operands follow the rules of `+`. |
@@ -441,7 +445,6 @@ Later phases add these, and until then the compiler rejects each with `L0309`:
 | Function | Does | Phase |
 |---|---|---|
 | `filter(items) with name`, `sort(variable items) with left, right` | The elements the block accepts; the elements in the block's order (Section 7.7) | 3 |
-| `pool()`, `insert(variable items, value)`, `remove(variable items, handle)` | An empty pool; a stored value's handle; a freed slot (Section 7.6) | 5 |
 
 The names of built-in functions and types cannot be declared again (`L0207`). No binding or function can be called `print`, `length`, `wrapping_add`, `integer32`, `boolean`, `array` or `float64`.
 
@@ -486,7 +489,7 @@ A Lymra program has exactly four places memory can live:
 
 1. **Static data.** Top-level constants. Lives for the whole program.
 2. **The call stack.** Fixed-size values: primitives, `array`, and types whose fields are all fixed-size.
-3. **Data stacks.** Frozen and growable values (`string`, `list`, `stack`, and types that contain them). Each data stack is a large reserved range of virtual address space with a bump pointer. The compiler decides how many data stacks a program needs.
+3. **Data stacks.** Frozen and growable values (`string`, `list`, `stack`, `pool`, and types that contain them). Each data stack is a large reserved range of virtual address space with a bump pointer. The compiler decides how many data stacks a program needs.
 4. **Pools.** Slots for data whose lifetime isn't tied to a scope (Section 7.6).
 
 There is no `malloc`, no `new`, and no `free`.
@@ -544,8 +547,22 @@ print("{creatures[handle].health}")   # traps: the handle is stale
 
 - A `handle[T]` is a slot index plus a generation counter. Its root is the pool it came from (Section 7.4): using it with another pool is error `L0705`, and keeping it after its pool ends is `L0701`.
 - `creatures[handle]` reads or changes a slot, as `items[index]` does for a list. Every access checks that the slot exists and that the handle's generation matches the slot's. If not, the program traps.
-- `remove` increments the slot's generation number. Removing a slot while a reference into it is still used is error `L0703`.
+- `remove` increments the slot's generation number. Removing a slot while a reference into it is still used is error `L0703`. A slot whose generation would wrap around is never used again, so no old handle can ever match it.
 - A pool holds fixed-size values, so every slot has the same size (`L0706`). Text that belongs to pool values goes in a list, and the values keep positions into it.
+- Two handles are equal (`==`) when they name the same value: the same slot in the same generation. Handles have no order.
+- The compiler follows every handle from the `insert` that made it, through bindings, lists, the fields of other values and calls. A function that takes a pool and a handle can't know where the handle came from, so it requires that the handle comes from that pool, and every call is checked: error `L0705` points at the call that breaks it.
+- A pool grows on a data stack like a list (Section 7.2): `insert` into a pool that a newer one may sit above is `L0704`. Replacing a pool, or passing it with `variable` to a function that can replace it, while a handle into it is still used or a `for` loop goes over handles into it, is `L0703`: the new pool's slots start over at the first generation, so an old handle could match one. A pool that is copied or returned keeps the handles in its values; they name the slots of the new pool.
+- A type can hold handles to values of its own type, as the nodes of a tree do: a handle holds a slot and a generation, never the value. There is no empty handle. A link that can be missing is a choice:
+
+```lymra
+type Node
+    integer64 value
+    Link next
+
+choice Link
+    End
+    To(handle[Node] node)
+```
 
 Without the generation check, a stale handle would silently read whatever value got put into the slot afterward: the right type, the wrong data. Lymra spends one integer comparison per access to turn that silent bug into an immediate, reported failure.
 

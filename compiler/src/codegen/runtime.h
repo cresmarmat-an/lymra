@@ -111,6 +111,27 @@ typedef struct {
     size_t length;
 } lymra_string;
 
+/*
+ * A value in a pool: the slot that holds it, and the generation the slot had
+ * when it went in. Removing the value moves the slot's generation on, so the
+ * handle no longer matches it.
+ */
+typedef struct {
+    uint32_t slot;
+    uint32_t generation;
+} lymra_handle;
+
+/* No slot, which ends the list of a pool's free slots. A pool has fewer slots than this. */
+#define LYMRA_NO_SLOT UINT32_MAX
+
+/* The generation of a slot that is never used again, since one more removal would wrap its generation around. */
+#define LYMRA_RETIRED_GENERATION UINT32_MAX
+
+/* Whether two handles name the same value: the same slot, in the same generation. */
+LYMRA_UNUSED static inline bool lymra_same_handle(const lymra_handle left, const lymra_handle right) {
+    return left.slot == right.slot && left.generation == right.generation;
+}
+
 typedef enum {
     LYMRA_INTEGER_OVERFLOW,
     LYMRA_DIVISION_BY_ZERO,
@@ -119,7 +140,9 @@ typedef enum {
     LYMRA_DATA_STACK_FULL,
     LYMRA_NOT_ON_TOP,
     LYMRA_OUT_OF_MEMORY,
-    LYMRA_EMPTY_STACK
+    LYMRA_EMPTY_STACK,
+    LYMRA_STALE_HANDLE,
+    LYMRA_POOL_FULL
 } lymra_trap_kind;
 
 /* Where text goes. The values are the POSIX file descriptors. */
@@ -296,6 +319,8 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
         "a list changed while a newer list sat above it on its data stack",
         "out of memory",
         "the stack is empty",
+        "the handle names a value that was removed",
+        "the pool is full",
     };
     static const char *const helps[] = {
         NULL,
@@ -308,6 +333,10 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
         "L0704; please report it with the source file\n",
         "help: the system has no memory left for a list to grow into\n",
         "help: check that `length` is above 0 before `pop` or `top`\n",
+        "help: once its value is removed, a handle names nothing; stop using it there, for example by "
+        "taking it out of the list that keeps it\n",
+        "help: a pool holds at most 4294967295 values at once; remove the ones that are no longer needed, "
+        "or keep them in more than one pool\n",
     };
     lymra_write_finished();
     lymra_write_error("error: ");

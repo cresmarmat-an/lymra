@@ -6,21 +6,25 @@
  *
  * A list type becomes a struct that says where its elements start on their
  * data stack, how many there are, and which stack they grow on, with the
- * functions that build, grow and replace such a list. A view type becomes a
- * struct that says where the elements it shows start and how many there
- * are, which it can only read.
+ * functions that build, grow and replace such a list. A pool type becomes a
+ * list of slots, with the first free slot. A view type becomes a struct that
+ * says where the elements it shows start and how many there are, which it
+ * can only read. Every handle is the runtime's `lymra_handle`.
  */
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::{INDENT, c_syntax};
-use crate::ir::{ArrayType, ChoiceType, CustomType, FloatType, ListType, Sequence, Type, ViewType};
+use crate::ir::{
+    ArrayType, ChoiceType, CustomType, FloatType, ListType, PoolType, Sequence, Type, ViewType,
+};
 
 #[derive(Default)]
 pub(super) struct CTypes {
     arrays: HashMap<Arc<ArrayType>, String>,
     lists: HashMap<Arc<ListType>, String>,
+    pools: HashMap<Arc<PoolType>, String>,
     views: HashMap<Arc<ViewType>, String>,
     /// The declared types and choices defined so far, by name, which is unique in a program.
     customs: HashMap<String, String>,
@@ -28,7 +32,7 @@ pub(super) struct CTypes {
     definitions: Vec<String>,
     /// Whether a float type has been named, so the program uses floats.
     pub uses_floats: bool,
-    /// Whether a list type has been named, so the program needs the runtime's data stacks.
+    /// Whether a list or a pool type has been named, so the program needs the runtime's data stacks.
     pub uses_lists: bool,
 }
 
@@ -51,6 +55,8 @@ impl CTypes {
             Type::Choice(choice) => self.choice_name(choice),
             Type::List(list) => self.list_name(list),
             Type::View(view) => self.view_name(view),
+            Type::Pool(pool) => self.pool_name(pool),
+            Type::Handle(_) => "lymra_handle".to_owned(),
         }
     }
 
@@ -163,6 +169,19 @@ impl CTypes {
         name
     }
 
+    fn pool_name(&mut self, pool: &Arc<PoolType>) -> String {
+        if let Some(name) = self.pools.get(pool) {
+            return name.clone();
+        }
+        let element = self.name(&pool.element);
+        let name = format!("pool_{}", self.pools.len());
+        self.definitions
+            .push(pool_definition(&name, &element, &pool.element));
+        self.pools.insert(Arc::clone(pool), name.clone());
+        self.uses_lists = true;
+        name
+    }
+
     fn view_name(&mut self, view: &Arc<ViewType>) -> String {
         if let Some(name) = self.views.get(view) {
             return name.clone();
@@ -183,7 +202,7 @@ impl CTypes {
     }
 }
 
-/// The function that does `operation` (`start`, `push`, `place` or `replace`) on lists of the C type `name`.
+/// The function that does `operation` (`start`, `push`, `place`, `replace` and the like) on lists or pools of the C type `name`.
 pub(super) fn list_function(name: &str, operation: &str) -> String {
     format!("{name}_{operation}")
 }
@@ -219,12 +238,12 @@ LYMRA_UNUSED static void {name}_push({name} *list, const {element} value, const 
     list->length += 1;
 }}
 
-LYMRA_UNUSED static {name} {name}_place(lymra_data_stack *stack, const {element} *elements, int64_t length,
-                                          const char *site) {{
+LYMRA_UNUSED static {name} {name}_place(lymra_data_stack *stack, const {name} source, const char *site) {{
     {name} list;
-    size_t bytes = (size_t)length * sizeof *elements;
-    list.elements = ({element} *)(void *)lymra_data_stack_place(stack, elements, bytes, _Alignof({element}), site);
-    list.length = length;
+    size_t bytes = (size_t)source.length * sizeof *source.elements;
+    list.elements = ({element} *)(void *)lymra_data_stack_place(stack, source.elements, bytes, _Alignof({element}),
+                                                                 site);
+    list.length = source.length;
     list.stack = stack;
     return list;
 }}
@@ -235,6 +254,101 @@ LYMRA_UNUSED static void {name}_replace({name} *list, const {name} value) {{
     }}
     list->length = value.length;
     lymra_data_stack_release(list->stack, (char *)(list->elements + value.length));
+}}"
+    )
+}
+
+/**
+ * The struct for a pool type, the struct of its slots, and the functions
+ * that work on it. The slots lie on a data stack like the elements of a
+ * list, under the same names, so a pool is freed, moved and replaced as a
+ * list is; `place` and `replace` also carry the first free slot. A free slot
+ * keeps the next one. `find` stops the program unless a handle names a slot
+ * of the pool in its current generation, and `remove` moves the generation
+ * on, then frees the slot, unless one more removal would wrap its
+ * generation around.
+ */
+fn pool_definition(name: &str, element: &str, element_type: &Type) -> String {
+    format!(
+        "/* pool[{element_type}] */
+typedef struct {{
+    uint32_t generation;
+    uint32_t next_free;
+    {element} value;
+}} {name}_slot;
+
+typedef struct {{
+    {name}_slot *elements;
+    int64_t length;
+    uint32_t free;
+    lymra_data_stack *stack;
+}} {name};
+
+LYMRA_UNUSED static {name} {name}_start(lymra_data_stack *stack) {{
+    {name} pool;
+    pool.elements = ({name}_slot *)(void *)lymra_data_stack_align(stack, _Alignof({name}_slot));
+    pool.length = 0;
+    pool.free = LYMRA_NO_SLOT;
+    pool.stack = stack;
+    return pool;
+}}
+
+LYMRA_UNUSED static {name}_slot *{name}_find(const {name} *pool, const lymra_handle handle, const char *site) {{
+    if ((int64_t)handle.slot >= pool->length || pool->elements[handle.slot].generation != handle.generation) {{
+        lymra_trap(LYMRA_STALE_HANDLE, site);
+    }}
+    return &pool->elements[handle.slot];
+}}
+
+LYMRA_UNUSED static lymra_handle {name}_insert({name} *pool, const {element} value, const char *site) {{
+    lymra_handle handle;
+    {name}_slot *slot;
+    if (pool->free != LYMRA_NO_SLOT) {{
+        handle.slot = pool->free;
+        slot = &pool->elements[handle.slot];
+        pool->free = slot->next_free;
+    }} else {{
+        if (pool->length == (int64_t)LYMRA_NO_SLOT) {{
+            lymra_trap(LYMRA_POOL_FULL, site);
+        }}
+        handle.slot = (uint32_t)pool->length;
+        slot = ({name}_slot *)(void *)lymra_data_stack_extend(pool->stack, (char *)(pool->elements + pool->length),
+                                                              sizeof *slot, site);
+        slot->generation = 0;
+        pool->length += 1;
+    }}
+    slot->value = value;
+    handle.generation = slot->generation;
+    return handle;
+}}
+
+LYMRA_UNUSED static void {name}_remove({name} *pool, const lymra_handle handle, const char *site) {{
+    {name}_slot *slot = {name}_find(pool, handle, site);
+    slot->generation += 1;
+    if (slot->generation != LYMRA_RETIRED_GENERATION) {{
+        slot->next_free = pool->free;
+        pool->free = handle.slot;
+    }}
+}}
+
+LYMRA_UNUSED static {name} {name}_place(lymra_data_stack *stack, const {name} source, const char *site) {{
+    {name} pool;
+    size_t bytes = (size_t)source.length * sizeof *source.elements;
+    pool.elements = ({name}_slot *)(void *)lymra_data_stack_place(stack, source.elements, bytes,
+                                                                  _Alignof({name}_slot), site);
+    pool.length = source.length;
+    pool.free = source.free;
+    pool.stack = stack;
+    return pool;
+}}
+
+LYMRA_UNUSED static void {name}_replace({name} *pool, const {name} value) {{
+    if (value.length != 0) {{
+        memmove(pool->elements, value.elements, (size_t)value.length * sizeof *value.elements);
+    }}
+    pool->length = value.length;
+    pool->free = value.free;
+    lymra_data_stack_release(pool->stack, (char *)(pool->elements + value.length));
 }}"
     )
 }

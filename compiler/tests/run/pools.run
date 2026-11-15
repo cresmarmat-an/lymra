@@ -1,0 +1,10 @@
+exit status 0
+--- standard output
+strongest at 0 with 3
+the new value takes a new handle: true, at 99
+same: true, different: true
+alone 10
+chain of three 6
+chained 10
+kept 666, adding up to 332667
+--- standard error

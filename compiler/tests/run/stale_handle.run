@@ -1,0 +1,11 @@
+exit status 70
+--- standard output
+1
+2
+--- standard error
+error: the handle names a value that was removed
+  --> tests/run/stale_handle.lym:16:13
+   |
+16 |     print("{creatures[first].health}")
+   |             ^^^^^^^^^^^^^^^^
+help: once its value is removed, a handle names nothing; stop using it there, for example by taking it out of the list that keeps it

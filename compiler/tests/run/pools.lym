@@ -1,0 +1,99 @@
+#[
+    Pools keep values that come and go in any order. `insert` gives a
+    handle, every access checks it, and a slot freed by `remove` takes the
+    next value under a new generation, so the old handle no longer matches.
+    Handles go into lists and into the fields of other values, functions
+    take a pool and handles into it, and a type can hold handles to values
+    of its own type. A pool a function builds keeps the handles inside it
+    when it is returned.
+]#
+
+type Creature
+    integer32 position
+    integer32 health
+
+type Node
+    integer64 value
+    Link next
+
+choice Link
+    End
+    To(handle[Node] node)
+
+function hurt(variable pool[Creature] creatures, handle[Creature] creature, integer32 amount)
+    creatures[creature].health = creatures[creature].health - amount
+
+function strongest(pool[Creature] creatures, list[handle[Creature]] living) returns handle[Creature]
+    variable best = living[0]
+    for creature in living
+        if creatures[creature].health > creatures[best].health
+            best = creature
+    return best
+
+function spawn(variable pool[Creature] creatures, integer32 position) returns handle[Creature]
+    return insert(variable creatures, Creature(position = position, health = 3))
+
+function chain(integer64 count) returns pool[Node]
+    variable pool[Node] nodes = pool()
+    variable previous = insert(variable nodes, Node(value = 1, next = End))
+    for value in range(2, count + 1)
+        previous = insert(variable nodes, Node(value = value, next = To(node = previous)))
+    return nodes
+
+function chain_into(variable pool[Node] nodes, integer64 count) returns handle[Node]
+    variable previous = insert(variable nodes, Node(value = 1, next = End))
+    for value in range(2, count + 1)
+        previous = insert(variable nodes, Node(value = value, next = To(node = previous)))
+    return previous
+
+function total(pool[Node] nodes, handle[Node] start) returns integer64
+    variable integer64 sum = 0
+    variable cursor = start
+    variable boolean going = true
+    while going
+        sum = sum + nodes[cursor].value
+        match nodes[cursor].next
+            case End
+                going = false
+            case To(node)
+                cursor = node
+    return sum
+
+function main()
+    variable pool[Creature] creatures = pool()
+    variable list[handle[Creature]] living = list()
+    for index in range(0, 4)
+        push(variable living, spawn(variable creatures, integer32(index) * 10))
+    hurt(variable creatures, living[1], 2)
+    hurt(variable creatures, living[3], 1)
+    constant best = strongest(creatures, living)
+    print("strongest at {creatures[best].position} with {creatures[best].health}")
+    constant gone = living[1]
+    remove(variable creatures, gone)
+    constant again = insert(variable creatures, Creature(position = 99, health = 7))
+    print("the new value takes a new handle: {again != gone}, at {creatures[again].position}")
+    print("same: {living[0] == living[0]}, different: {living[0] != living[2]}")
+
+    variable pool[Node] nodes = chain(4)
+    constant newest = insert(variable nodes, Node(value = 10, next = End))
+    print("alone {total(nodes, newest)}")
+    constant head = chain_into(variable nodes, 3)
+    print("chain of three {total(nodes, head)}")
+    variable pool[Node] ring = pool()
+    constant last = insert(variable ring, Node(value = 5, next = End))
+    constant first = insert(variable ring, Node(value = 4, next = To(node = last)))
+    ring[last].value = 6
+    print("chained {total(ring, first)}")
+
+    variable pool[integer64] values = pool()
+    variable list[handle[integer64]] kept = list()
+    for round in range(0, 1000)
+        constant made = insert(variable values, round)
+        if round % 3 == 0
+            remove(variable values, made)
+        else
+            push(variable kept, made)
+    variable integer64 sum = 0
+    for made in kept
+        sum = sum + values[made]
+    print("kept {length(kept)}, adding up to {sum}")

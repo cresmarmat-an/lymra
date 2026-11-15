@@ -456,7 +456,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             | Type::Float(_)
             | Type::Boolean
             | Type::Custom(_)
-            | Type::Choice(_) => {
+            | Type::Choice(_)
+            | Type::Pool(_)
+            | Type::Handle(_) => {
                 let source = self.text(iterable.span);
                 Err(self.report(errors::not_iterable(&checked.ty, iterable.span, source)))
             }

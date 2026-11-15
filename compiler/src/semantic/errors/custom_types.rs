@@ -39,6 +39,13 @@ pub(in crate::semantic) fn no_fields(found: &Type, object: Span, field: &str) ->
         Type::View(_) => {
             "a view has elements, not fields; to read one, index it, as in `values[0]`".to_owned()
         }
+        Type::Pool(_) => {
+            "a pool has slots, not fields; to read a value, give its handle, as in `values[handle]`"
+                .to_owned()
+        }
+        Type::Handle(_) => format!(
+            "a handle only names a slot; read the field from the value in its pool, as in `pool[handle].{field}`"
+        ),
         Type::Choice(choice) => match choice
             .variants
             .iter()

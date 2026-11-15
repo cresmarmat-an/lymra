@@ -1,0 +1,24 @@
+#[
+    Errors in using pools: values of no fixed size (L0706), `insert` and
+    `remove` without `variable`, on something other than a pool, or with
+    the wrong arguments, a pool read through an index, `pool()` with no
+    type to build, and handles put in order.
+]#
+
+type Named
+    string name
+
+function main()
+    variable pool[string] texts = pool()
+    variable pool[Named] named = pool()
+    variable pool[list[integer64]] nested = pool()
+    variable pool[integer64] numbers = pool()
+    constant unmarked = insert(numbers, 5)
+    constant missing = insert(variable numbers)
+    variable list[integer64] items = list()
+    constant pushed = insert(variable items, 3)
+    print("{numbers[0]}")
+    constant untyped = pool()
+    constant handle[integer64] wrong = insert(variable numbers, true)
+    remove(variable numbers, variable wrong)
+    print("{wrong < wrong}")

@@ -64,9 +64,13 @@ impl CheckCount {
         match statement {
             Statement::Assign { target, value } => {
                 for step in &target.steps {
-                    if let PlaceStep::Index(index) = step {
-                        self.index(index.length(), index.checked);
-                        self.expr(&index.value);
+                    match step {
+                        PlaceStep::Index(index) => {
+                            self.index(index.length(), index.checked);
+                            self.expr(&index.value);
+                        }
+                        PlaceStep::Slot(slot) => self.expr(&slot.handle),
+                        PlaceStep::Field(_) => {}
                     }
                 }
                 self.expr(value);
@@ -75,7 +79,8 @@ impl CheckCount {
             | Statement::Discard(value)
             | Statement::Return(Some(value))
             | Statement::Assert { condition: value }
-            | Statement::Push { value, .. } => self.expr(value),
+            | Statement::Push { value, .. }
+            | Statement::Remove { handle: value, .. } => self.expr(value),
             Statement::Call(call) => self.arguments(call),
             Statement::Print(parts) => {
                 for part in parts {
@@ -153,6 +158,7 @@ impl CheckCount {
             | ExprKind::View(operand)
             | ExprKind::Bytes(operand)
             | ExprKind::Top(operand)
+            | ExprKind::Insert { value: operand, .. }
             | ExprKind::Field {
                 object: operand, ..
             } => {
@@ -170,7 +176,11 @@ impl CheckCount {
             }
             ExprKind::Compare { left, right, .. }
             | ExprKind::Logic { left, right, .. }
-            | ExprKind::Wrapping { left, right, .. } => {
+            | ExprKind::Wrapping { left, right, .. }
+            | ExprKind::Slot {
+                pool: left,
+                handle: right,
+            } => {
                 self.expr(left);
                 self.expr(right);
             }

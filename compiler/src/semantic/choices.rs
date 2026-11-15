@@ -54,7 +54,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             | Type::Array(_)
             | Type::Custom(_)
             | Type::List(_)
-            | Type::View(_) => Err(ErrorReported),
+            | Type::View(_)
+            | Type::Pool(_)
+            | Type::Handle(_) => Err(ErrorReported),
         }
     }
 

@@ -5,7 +5,7 @@
  * stack is a list that can also give back its top element.
  */
 
-use super::errors;
+use super::errors::{self, Collection};
 use super::expressions::CheckedCall;
 use super::features::Feature;
 use super::{CheckResult, Checker};
@@ -23,7 +23,7 @@ impl<'src> Checker<'src, '_> {
         kind: Sequence,
     ) -> CheckResult<Type> {
         let [TypeArgument::Type(element)] = arguments else {
-            return Err(self.report(errors::malformed_list_type(kind, span)));
+            return Err(self.report(errors::malformed_list_type(Collection::of(kind), span)));
         };
         let element_type = self.resolve_type(element)?;
         if element_type.is_growable() {
@@ -47,7 +47,7 @@ impl<'src> Checker<'src, '_> {
             self.check_arguments_for_errors(&call.arguments);
             let arguments = Span::new(call.callee.span.end, span.end);
             return Err(self.report(errors::empty_list_arguments(
-                kind,
+                Collection::of(kind),
                 call.arguments.len(),
                 arguments,
             )));
@@ -58,9 +58,13 @@ impl<'src> Checker<'src, '_> {
                 ty: ty.clone(),
                 span,
             })),
-            Some(expected) => Err(self.report(errors::empty_list_into(kind, expected, span))),
+            Some(expected) => Err(self.report(errors::empty_list_into(
+                Collection::of(kind),
+                expected,
+                span,
+            ))),
             None if self.destination_unknown => Err(ErrorReported),
-            None => Err(self.report(errors::empty_list_without_type(kind, span))),
+            None => Err(self.report(errors::empty_list_without_type(Collection::of(kind), span))),
         }
     }
 

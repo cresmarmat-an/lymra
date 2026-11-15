@@ -110,6 +110,8 @@ error_codes! {
     L0702 => "stack popped while something still uses it",
     L0703 => "value replaced while something still uses it",
     L0704 => "list changed while a newer list sits above it",
+    L0705 => "handle used with another pool",
+    L0706 => "pool of values without one fixed size",
 }
 
 impl ErrorCode {

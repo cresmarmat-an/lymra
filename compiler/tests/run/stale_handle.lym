@@ -1,0 +1,16 @@
+#[
+    A handle to a value that was removed stops the program when it is
+    used, even after a new value took its slot.
+]#
+
+type Creature
+    integer32 health
+
+function main()
+    variable pool[Creature] creatures = pool()
+    constant first = insert(variable creatures, Creature(health = 1))
+    print("{creatures[first].health}")
+    remove(variable creatures, first)
+    constant second = insert(variable creatures, Creature(health = 2))
+    print("{creatures[second].health}")
+    print("{creatures[first].health}")

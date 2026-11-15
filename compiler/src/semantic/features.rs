@@ -4,13 +4,7 @@ use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
 use crate::source::Span;
 
 /// Built-in functions the spec describes, with the phase that implements each.
-const FUTURE_FUNCTIONS: [(&str, u8); 5] = [
-    ("filter", 3),
-    ("sort", 3),
-    ("pool", 5),
-    ("insert", 5),
-    ("remove", 5),
-];
+const FUTURE_FUNCTIONS: [(&str, u8); 2] = [("filter", 3), ("sort", 3)];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Feature {
@@ -25,7 +19,6 @@ pub(super) enum Feature {
     RangeValues,
     CodeArguments,
     Modules,
-    Pools,
     /// A built-in function from the spec, with the phase that adds it.
     Function {
         name: &'static str,
@@ -40,14 +33,6 @@ impl Feature {
             .iter()
             .find(|(candidate, _)| *candidate == name)
             .map(|&(name, phase)| Feature::Function { name, phase })
-    }
-
-    /// The type name `name` belongs to a later phase, if it does.
-    pub fn future_type(name: &str) -> Option<Feature> {
-        match name {
-            "pool" | "handle" => Some(Feature::Pools),
-            _ => None,
-        }
     }
 
     fn message(self) -> String {
@@ -67,7 +52,6 @@ impl Feature {
             }
             Self::CodeArguments => "`with` blocks are",
             Self::Modules => "modules are",
-            Self::Pools => "pools are",
             Self::Function { name, .. } => return format!("`{name}` is not available yet"),
         };
         format!("{subject} not available yet")
@@ -84,7 +68,6 @@ impl Feature {
             | Self::RangeValues
             | Self::CodeArguments => 3,
             Self::Modules => 4,
-            Self::Pools => 5,
             Self::Function { phase, .. } => phase,
         }
     }
@@ -103,7 +86,6 @@ impl Feature {
             | Self::RangeValues
             | Self::CodeArguments
             | Self::Modules
-            | Self::Pools
             | Self::Function { .. } => {
                 "write this part another way for now; the roadmap in the README lists what each phase adds"
             }

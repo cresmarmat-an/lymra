@@ -370,7 +370,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             | Type::Custom(_)
             | Type::Choice(_)
             | Type::List(_)
-            | Type::View(_) => (
+            | Type::View(_)
+            | Type::Pool(_)
+            | Type::Handle(_) => (
                 format!(
                     "`-` works on numbers, but this is {}",
                     described(&operand.ty)
@@ -463,6 +465,12 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     }
                     Type::Array(_) | Type::List(_) | Type::View(_) => {
                         "arithmetic works on single numbers; work on the elements one by one"
+                    }
+                    Type::Pool(_) => {
+                        "arithmetic works on single numbers; work on the values it holds one by one"
+                    }
+                    Type::Handle(_) => {
+                        "a handle only names a slot; work on the value it names, read from its pool"
                     }
                     Type::Custom(_) => {
                         "arithmetic works on single numbers; work on the fields one by one"
@@ -595,6 +603,23 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     "compare their lengths, then the elements one by one in a loop",
                 )));
             }
+            Type::Pool(_) => {
+                return Err(self.report(errors::operator_type(
+                    format!("`{symbol}` compares single values, and these are pools"),
+                    span,
+                    "comparing pools".to_owned(),
+                    "compare the values they hold one by one, read through their handles",
+                )));
+            }
+            // Two handles are equal when they name the same slot with the same generation.
+            Type::Handle(_) if !operator.is_equality() => {
+                return Err(self.report(errors::operator_type(
+                    format!("`{symbol}` compares numbers, and a handle has no order"),
+                    span,
+                    "comparing handles".to_owned(),
+                    "compare handles with `==` and `!=`, which tell whether they name the same value",
+                )));
+            }
             Type::Custom(custom) => {
                 return Err(self.report(errors::operator_type(
                     format!(
@@ -633,7 +658,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     "tell the variants apart in a `match`, then compare their fields",
                 )));
             }
-            Type::Integer(_) | Type::Float(_) | Type::Boolean | Type::String => {}
+            Type::Integer(_) | Type::Float(_) | Type::Boolean | Type::String | Type::Handle(_) => {}
         }
         if let (Some(left_value), Some(right_value)) =
             (self.known_value(&left), self.known_value(&right))
@@ -788,6 +813,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             "pop" => return self.check_pop(call, span),
             "top" => return self.check_top(call, span),
             "push" => return self.check_push(call, span),
+            "pool" => return self.check_empty_pool(call, span, hint),
+            "insert" => return self.check_insert(call, span),
+            "remove" => return self.check_remove(call, span),
             "slice" => return self.check_slice(call, span),
             "bytes" => return self.check_bytes(call, span),
             "length" => return self.check_length(call, span),
@@ -803,14 +831,11 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             "boolean" | "string" => errors::no_conversion(name, callee),
             "integer" | "unsigned" => errors::sizeless_integer(name, callee),
             _ if is_sized_integer_name(name) => errors::unsupported_integer_size(name, callee),
-            _ => {
-                let later = Feature::future_function(name).or_else(|| Feature::future_type(name));
-                match (later, translate_type(name)) {
-                    (Some(feature), _) => feature.diagnostic(callee),
-                    (None, Some(translation)) => translation.diagnostic(name, callee),
-                    (None, None) => return Err(self.report_unknown_callee(name, callee)),
-                }
-            }
+            _ => match (Feature::future_function(name), translate_type(name)) {
+                (Some(feature), _) => feature.diagnostic(callee),
+                (None, Some(translation)) => translation.diagnostic(name, callee),
+                (None, None) => return Err(self.report_unknown_callee(name, callee)),
+            },
         };
         Err(self.report(diagnostic))
     }

@@ -19,12 +19,13 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use super::errors::{self, Change};
-use super::walk::{each_expr, statement_blocks, statement_calls, statement_pops};
+use super::errors::{self, Change, Collection};
+use super::walk::{
+    each_expr, statement_blocks, statement_calls, statement_inserts, statement_pops,
+};
 use crate::diagnostics::Diagnostic;
 use crate::ir::{
-    Argument, Block, Call, Expr, ExprKind, Function, FunctionId, LocalId, PlaceStep, Sequence,
-    Statement,
+    Argument, Block, Call, Expr, ExprKind, Function, FunctionId, LocalId, PlaceStep, Statement,
 };
 use crate::source::Span;
 
@@ -136,6 +137,9 @@ impl Edges<'_, '_> {
             for (stack, _) in statement_pops(statement) {
                 self.change(stack);
             }
+            for (pool, _) in statement_inserts(statement) {
+                self.change(pool);
+            }
             match statement {
                 Statement::Push { list, .. } => self.change(*list),
                 Statement::Assign { target, value }
@@ -241,6 +245,9 @@ impl Walk<'_, '_> {
                 for (stack, span) in statement_pops(statement) {
                     self.change(stack, Change::Pop, span);
                 }
+                for (pool, span) in statement_inserts(statement) {
+                    self.change(pool, Change::Push, span);
+                }
                 for body in statement_blocks(statement) {
                     self.block(body);
                 }
@@ -248,20 +255,21 @@ impl Walk<'_, '_> {
         }
     }
 
-    /// Checks the calls an expression makes and the stacks it pops.
+    /// Checks the calls an expression makes, the stacks it pops and the pools it inserts into.
     fn expr(&mut self, expr: &Expr) {
         let mut calls = Vec::new();
-        let mut pops = Vec::new();
+        let mut changes = Vec::new();
         each_expr(expr, &mut |inner| match &inner.kind {
             ExprKind::Call(call) => calls.push(call),
-            ExprKind::Pop(stack) => pops.push((*stack, inner.span)),
+            ExprKind::Pop(stack) => changes.push((*stack, Change::Pop, inner.span)),
+            ExprKind::Insert { pool, .. } => changes.push((*pool, Change::Push, inner.span)),
             _ => {}
         });
         for call in calls {
             self.call(call);
         }
-        for (stack, span) in pops {
-            self.change(stack, Change::Pop, span);
+        for (local, change, span) in changes {
+            self.change(local, change, span);
         }
     }
 
@@ -288,16 +296,12 @@ impl Walk<'_, '_> {
             .find(|&&binding| reaching.contains(&(self.function, binding)));
         if let Some(&binding) = newer {
             let binding = &function.locals[binding];
-            let kind = binding
-                .ty
-                .as_list()
-                .map_or(Sequence::List, |list| list.kind);
             self.diagnostics.push(errors::changed_below_newer(
                 function.locals[local].name,
                 change,
                 span,
                 (binding.name, binding.span),
-                kind,
+                Collection::of_type(&binding.ty),
             ));
         }
     }

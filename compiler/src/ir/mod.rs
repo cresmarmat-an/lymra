@@ -10,8 +10,8 @@
 mod types;
 
 pub use types::{
-    ArrayType, ChoiceType, CustomType, FieldType, FloatType, IntegerType, Layout, ListType,
-    Sequence, Type, Value, ViewType,
+    ArrayType, ChoiceType, CustomType, FieldType, FloatType, HandleTarget, HandleType, IntegerType,
+    Layout, ListType, PoolType, Sequence, Type, Value, ViewType,
 };
 
 use crate::ast::OptimizeMode;
@@ -122,6 +122,13 @@ pub enum Statement {
         /// The call, which a full data stack points at.
         span: Span,
     },
+    /// `remove(variable pool, handle)`: frees the slot the handle names. A stale handle stops the program.
+    Remove {
+        pool: LocalId,
+        handle: Expr,
+        /// The call, which a stale handle points at.
+        span: Span,
+    },
     /**
      * `match value`: the value is computed once, then the case for the
      * variant it holds runs, with the fields the case names bound to their
@@ -166,12 +173,23 @@ pub struct Place {
     pub span: Span,
 }
 
-/// One step into a value: an element of an array, or a field of a declared type.
+/// One step into a value: an element of an array, a field of a declared type, or the value in a pool's slot.
 #[derive(Clone, Debug)]
 pub enum PlaceStep {
     Index(PlaceIndex),
     /// The position of the field in its type.
     Field(usize),
+    Slot(PlaceSlot),
+}
+
+/// One `[handle]` of a place in a pool.
+#[derive(Clone, Debug)]
+pub struct PlaceSlot {
+    pub handle: Expr,
+    /// The type of the pool the handle selects from.
+    pub pool: Type,
+    /// The place up to and including this step, which a stale handle points at.
+    pub span: Span,
 }
 
 /// One `[index]` of a place.
@@ -241,9 +259,13 @@ impl TextForm {
             Type::Integer(integer) if integer.is_signed() => Some(Self::Signed),
             Type::Integer(_) => Some(Self::Unsigned),
             Type::Float(float) => Some(Self::Float(*float)),
-            Type::Array(_) | Type::Custom(_) | Type::Choice(_) | Type::List(_) | Type::View(_) => {
-                None
-            }
+            Type::Array(_)
+            | Type::Custom(_)
+            | Type::Choice(_)
+            | Type::List(_)
+            | Type::View(_)
+            | Type::Pool(_)
+            | Type::Handle(_) => None,
         }
     }
 }
@@ -312,7 +334,7 @@ pub enum ExprKind {
     },
     /// `array(value)`: every element of the array is `value`. The expression's type is the array type.
     Fill(Box<Expr>),
-    /// `list()`: a list with no elements yet. The expression's type is the list type.
+    /// `list()`, `stack()` or `pool()`: one with nothing in it yet. The expression's type says which.
     EmptyList,
     /// Every element of an array, a list or a view, seen through a view. Nothing is copied.
     View(Box<Expr>),
@@ -333,6 +355,16 @@ pub enum ExprKind {
     Pop(LocalId),
     /// `top(stack)`: the top element of a stack, left where it is. An empty stack stops the program.
     Top(Box<Expr>),
+    /// `insert(variable pool, value)`: the value is computed, then stored in a free slot, whose handle is the result.
+    Insert {
+        pool: LocalId,
+        value: Box<Expr>,
+    },
+    /// `pool[handle]`, the value in the slot the handle names. A stale handle stops the program.
+    Slot {
+        pool: Box<Expr>,
+        handle: Box<Expr>,
+    },
     /// `length(value)` of a text, or of an array that has to be computed because computing it has effects.
     Length(Box<Expr>),
     /// `Frog(name = "Kero", age = 3)`: a value of a declared type, its fields in the order they are written.
@@ -375,6 +407,7 @@ impl Expr {
                 object: operand, ..
             } => operand.mentions(local),
             ExprKind::Pop(stack) => *stack == local,
+            ExprKind::Insert { pool, value } => *pool == local || value.mentions(local),
             ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
                 fields.iter().any(|field| field.value.mentions(local))
             }
@@ -389,6 +422,10 @@ impl Expr {
                 array: left,
                 index: right,
                 ..
+            }
+            | ExprKind::Slot {
+                pool: left,
+                handle: right,
             } => left.mentions(local) || right.mentions(local),
             ExprKind::Call(call) => call.arguments.iter().any(|argument| match argument {
                 Argument::Reference { local: id, .. } => *id == local,
@@ -417,8 +454,16 @@ impl Expr {
             | ExprKind::Field {
                 object: operand, ..
             } => operand.has_effects(),
-            // A slice whose positions fall outside its items stops the program, and so does an empty stack.
-            ExprKind::Slice { .. } | ExprKind::Pop(_) | ExprKind::Top(_) => true,
+            /*
+             * A slice whose positions fall outside its items stops the
+             * program, and so do an empty stack, a stale handle and a pool
+             * that has no room left.
+             */
+            ExprKind::Slice { .. }
+            | ExprKind::Pop(_)
+            | ExprKind::Top(_)
+            | ExprKind::Insert { .. }
+            | ExprKind::Slot { .. } => true,
             ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
                 fields.iter().any(|field| field.value.has_effects())
             }

@@ -21,12 +21,16 @@
  * - L0703: a list is replaced, or passed with `variable` to a function that
  *   can replace it, while a view of it is still used, or while a `for` loop
  *   goes over it. A `push` keeps the elements where they are, so it is fine.
+ *   A pool is replaced while something that holds handles into it is still
+ *   used, or a `for` loop goes over handles into it: the handles would name
+ *   the slots of the new pool, which a generation check cannot tell apart.
  */
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use super::errors::{self, Freeing};
-use super::walk::{statement_blocks, statement_calls, statement_pops};
+use super::errors::{self, Freeing, Holder};
+use super::handles::PoolsOfLocals;
+use super::walk::{Blocks, each_expr, statement_blocks, statement_calls, statement_pops};
 use crate::diagnostics::Diagnostic;
 use crate::ir::{
     Argument, Block, Call, Expr, ExprKind, Function, LocalId, PlaceStep, PrintPart, Sequence,
@@ -60,8 +64,12 @@ struct Summary {
     pops: BTreeSet<usize>,
 }
 
-/// Every error L0701, L0702 and L0703 in the program, in source order.
-pub(super) fn check(functions: &[Function<'_>]) -> Vec<Diagnostic> {
+/**
+ * Every error L0701, L0702 and L0703 in the program, in source order.
+ * `pools` gives, for each function, the pools each local can hold handles
+ * into.
+ */
+pub(super) fn check(functions: &[Function<'_>], pools: &PoolsOfLocals) -> Vec<Diagnostic> {
     let mut summaries = vec![Summary::default(); functions.len()];
     loop {
         let next: Vec<Summary> = functions
@@ -75,7 +83,10 @@ pub(super) fn check(functions: &[Function<'_>]) -> Vec<Diagnostic> {
     }
     let mut diagnostics: Vec<Diagnostic> = functions
         .iter()
-        .flat_map(|function| Analysis::of(function, functions, &summaries).diagnostics())
+        .zip(pools)
+        .flat_map(|(function, pools)| {
+            Analysis::of(function, functions, &summaries).diagnostics(pools)
+        })
         .collect();
     diagnostics.sort_by_key(|diagnostic| diagnostic.primary.span.start);
     diagnostics
@@ -85,8 +96,15 @@ fn is_view(function: &Function<'_>, local: LocalId) -> bool {
     function.locals[local].ty.as_view().is_some()
 }
 
-fn is_list(function: &Function<'_>, local: LocalId) -> bool {
-    function.locals[local].ty.as_list().is_some()
+/// Whether replacing `local` frees what it holds: a list, a stack or a pool.
+fn is_growable(function: &Function<'_>, local: LocalId) -> bool {
+    function.locals[local].ty.is_growable()
+}
+
+/// Whether later statements reading `local` matter to these checks: a view, or a value that holds handles.
+fn is_tracked(function: &Function<'_>, local: LocalId) -> bool {
+    let ty = &function.locals[local].ty;
+    ty.as_view().is_some() || ty.holds_handle()
 }
 
 /// The roots of every view of one function.
@@ -263,7 +281,7 @@ impl<'a, 'src> Analysis<'a, 'src> {
                     summary.returns.extend(returned);
                 }
                 Statement::Assign { target, .. }
-                    if target.steps.is_empty() && is_list(self.function, target.local) =>
+                    if target.steps.is_empty() && is_growable(self.function, target.local) =>
                 {
                     summary
                         .replaces
@@ -291,9 +309,10 @@ impl<'a, 'src> Analysis<'a, 'src> {
         }
     }
 
-    fn diagnostics(&self) -> Vec<Diagnostic> {
+    fn diagnostics(&self, pools: &HashMap<LocalId, BTreeSet<LocalId>>) -> Vec<Diagnostic> {
         let mut checks = Checks {
             analysis: self,
+            pools,
             blocks: Blocks::of(self.function),
             diagnostics: Vec::new(),
             report: true,
@@ -320,69 +339,18 @@ fn passed_at(call: &Call, positions: &BTreeSet<usize>) -> Vec<(LocalId, Span)> {
         .collect()
 }
 
-/// Which block declares each local, and which block holds each block. The function's body is block 0.
-struct Blocks {
-    declared_in: HashMap<LocalId, usize>,
-    parents: Vec<Option<usize>>,
-}
-
-impl Blocks {
-    fn of(function: &Function<'_>) -> Self {
-        let mut blocks = Self {
-            declared_in: function
-                .parameters
-                .iter()
-                .map(|&local| (local, 0))
-                .collect(),
-            parents: vec![None],
-        };
-        blocks.add(&function.body, 0);
-        blocks
-    }
-
-    fn add(&mut self, block: &Block, id: usize) {
-        for statement in &block.statements {
-            if let Statement::Declare { local, .. } = statement {
-                self.declared_in.insert(*local, id);
-            }
-            // A loop's variable and a case's bindings belong to the block they run in, and end with it.
-            let declared: Vec<Vec<LocalId>> = match statement {
-                Statement::ForRange { variable, .. } | Statement::ForEach { variable, .. } => {
-                    vec![variable.iter().copied().collect()]
-                }
-                Statement::Match { cases, .. } => cases
-                    .iter()
-                    .map(|case| case.bindings.iter().map(|binding| binding.local).collect())
-                    .collect(),
-                _ => Vec::new(),
-            };
-            for (position, body) in statement_blocks(statement).into_iter().enumerate() {
-                let child = self.parents.len();
-                self.parents.push(Some(id));
-                for &local in declared.get(position).into_iter().flatten() {
-                    self.declared_in.insert(local, child);
-                }
-                self.add(body, child);
-            }
-        }
-    }
-
-    /// Whether `inner` is `outer` or lies inside it.
-    fn within(&self, mut inner: usize, outer: usize) -> bool {
-        loop {
-            if inner == outer {
-                return true;
-            }
-            match self.parents.get(inner).copied().flatten() {
-                Some(parent) => inner = parent,
-                None => return false,
-            }
-        }
-    }
-}
-
-/// The views some later statement reads.
+/// The views, and the values that hold handles, some later statement reads.
 type Live = BTreeSet<LocalId>;
+
+/// What a `for` loop around the current point goes over.
+struct Iterated {
+    /// The roots of the elements, if they belong to something else.
+    roots: Roots,
+    /// The pools its elements can hold handles into.
+    pools: BTreeSet<LocalId>,
+    /// Where the loop names it.
+    span: Span,
+}
 
 /// Where `break` and `continue` lead in the innermost loop: what is live after it, and at its head.
 #[derive(Clone)]
@@ -394,13 +362,15 @@ struct LoopEnds {
 /// The checks of one function.
 struct Checks<'a, 'b, 'src> {
     analysis: &'b Analysis<'a, 'src>,
+    /// The pools each local can hold handles into.
+    pools: &'b HashMap<LocalId, BTreeSet<LocalId>>,
     blocks: Blocks,
     diagnostics: Vec<Diagnostic>,
     /// False while a loop is worked out to a fixed point, so its body reports only once.
     report: bool,
     loops: Vec<LoopEnds>,
-    /// The roots of what the `for` loops around the current point go over, with where each names it.
-    iterated: Vec<(Roots, Span)>,
+    /// What the `for` loops around the current point go over, innermost last.
+    iterated: Vec<Iterated>,
 }
 
 impl Checks<'_, '_, '_> {
@@ -556,7 +526,7 @@ impl Checks<'_, '_, '_> {
                 live
             }
             Statement::Assign { target, .. } => {
-                if target.steps.is_empty() && is_list(self.function(), target.local) {
+                if target.steps.is_empty() && is_growable(self.function(), target.local) {
                     self.freed(target.local, Freeing::Assigned(target.span), &after);
                 }
                 let mut live = after;
@@ -599,7 +569,17 @@ impl Checks<'_, '_, '_> {
             }
             Statement::ForEach { array, body, .. } => {
                 let roots = self.analysis.roots_of(array);
-                self.iterated.push((roots, array.span));
+                let mut pools = BTreeSet::new();
+                each_expr(array, &mut |inner| {
+                    if let ExprKind::Local(local) = inner.kind {
+                        pools.extend(self.pools.get(&local).into_iter().flatten().copied());
+                    }
+                });
+                self.iterated.push(Iterated {
+                    roots,
+                    pools,
+                    span: array.span,
+                });
                 let mut head = self.repeat(body, &after, after.clone());
                 self.iterated.pop();
                 head.extend(read);
@@ -616,6 +596,7 @@ impl Checks<'_, '_, '_> {
             Statement::Discard(_)
             | Statement::Call(_)
             | Statement::Push { .. }
+            | Statement::Remove { .. }
             | Statement::Print(_)
             | Statement::Assert { .. } => {
                 let mut live = after;
@@ -668,13 +649,18 @@ impl Checks<'_, '_, '_> {
             .ty
             .as_list()
             .map_or(Sequence::List, |list| list.kind);
+        if self.function().locals[list].ty.as_pool().is_some() {
+            self.pool_freed(list, how, in_use);
+            return;
+        }
         let looped = self
             .iterated
             .iter()
             .rev()
-            .find(|(roots, _)| roots.contains(&root));
-        if let Some(&(_, loop_span)) = looped {
-            let diagnostic = errors::freed_while_iterated(self.name(list), kind, how, loop_span);
+            .find(|iterated| iterated.roots.contains(&root));
+        if let Some(iterated) = looped {
+            let diagnostic =
+                errors::freed_while_iterated(self.name(list), kind, how, iterated.span);
             self.diagnostics.push(diagnostic);
             return;
         }
@@ -691,6 +677,36 @@ impl Checks<'_, '_, '_> {
             self.diagnostics.push(diagnostic);
         }
     }
+
+    /// Reports `pool`, replaced as `how` says, if a `for` loop goes over handles into it or something in use holds one.
+    fn pool_freed(&mut self, pool: LocalId, how: Freeing<'_>, in_use: &Live) {
+        let looped = self
+            .iterated
+            .iter()
+            .rev()
+            .find(|iterated| iterated.pools.contains(&pool));
+        let holder = match looped {
+            Some(iterated) => Some(Holder::Loop(iterated.span)),
+            None => in_use
+                .iter()
+                .copied()
+                .find(|&local| {
+                    local != pool
+                        && self
+                            .pools
+                            .get(&local)
+                            .is_some_and(|pools| pools.contains(&pool))
+                })
+                .map(|local| {
+                    let declared = self.function().locals[local].span;
+                    Holder::Binding(self.name(local), declared)
+                }),
+        };
+        if let Some(holder) = holder {
+            let diagnostic = errors::pool_replaced_while_handled(self.name(pool), how, holder);
+            self.diagnostics.push(diagnostic);
+        }
+    }
 }
 
 /// The views a statement reads outside the blocks it holds.
@@ -700,6 +716,7 @@ fn statement_reads(function: &Function<'_>, statement: &Statement, read: &mut Li
         Statement::Declare { value, .. }
         | Statement::Discard(value)
         | Statement::Push { value, .. }
+        | Statement::Remove { handle: value, .. }
         | Statement::Return(Some(value))
         | Statement::Assert { condition: value }
         | Statement::While {
@@ -709,8 +726,10 @@ fn statement_reads(function: &Function<'_>, statement: &Statement, read: &mut Li
         | Statement::Match { value, .. } => values.push(value),
         Statement::Assign { target, value } => {
             for step in &target.steps {
-                if let PlaceStep::Index(index) = step {
-                    values.push(&index.value);
+                match step {
+                    PlaceStep::Index(index) => values.push(&index.value),
+                    PlaceStep::Slot(slot) => values.push(&slot.handle),
+                    PlaceStep::Field(_) => {}
                 }
             }
             values.push(value);
@@ -742,7 +761,7 @@ fn call_reads(function: &Function<'_>, call: &Call, read: &mut Live) {
         match argument {
             Argument::Value(value) => expr_reads(function, value, read),
             Argument::Reference { local, .. } => {
-                if is_view(function, *local) {
+                if is_tracked(function, *local) {
                     read.insert(*local);
                 }
             }
@@ -754,11 +773,16 @@ fn call_reads(function: &Function<'_>, call: &Call, read: &mut Live) {
 fn expr_reads(function: &Function<'_>, expr: &Expr, read: &mut Live) {
     match &expr.kind {
         ExprKind::Local(local) => {
-            if is_view(function, *local) {
+            if is_tracked(function, *local) {
                 read.insert(*local);
             }
         }
-        ExprKind::Literal(_) | ExprKind::Constant(_) | ExprKind::EmptyList | ExprKind::Pop(_) => {}
+        ExprKind::Literal(_) | ExprKind::Constant(_) | ExprKind::EmptyList => {}
+        ExprKind::Pop(stack) => {
+            if is_tracked(function, *stack) {
+                read.insert(*stack);
+            }
+        }
         ExprKind::Negate { operand, .. }
         | ExprKind::Not(operand)
         | ExprKind::Convert { operand, .. }
@@ -767,6 +791,7 @@ fn expr_reads(function: &Function<'_>, expr: &Expr, read: &mut Live) {
         | ExprKind::View(operand)
         | ExprKind::Bytes(operand)
         | ExprKind::Top(operand)
+        | ExprKind::Insert { value: operand, .. }
         | ExprKind::Field {
             object: operand, ..
         } => expr_reads(function, operand, read),
@@ -783,6 +808,10 @@ fn expr_reads(function: &Function<'_>, expr: &Expr, read: &mut Live) {
             array: left,
             index: right,
             ..
+        }
+        | ExprKind::Slot {
+            pool: left,
+            handle: right,
         } => {
             expr_reads(function, left, read);
             expr_reads(function, right, read);

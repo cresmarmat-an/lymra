@@ -101,7 +101,9 @@ impl<'src> Checker<'src, '_> {
             | Type::Float(_)
             | Type::Boolean
             | Type::Custom(_)
-            | Type::Choice(_) => {
+            | Type::Choice(_)
+            | Type::Pool(_)
+            | Type::Handle(_) => {
                 return Err(self.report(errors::not_sliceable(&items.ty, items.span)));
             }
         };

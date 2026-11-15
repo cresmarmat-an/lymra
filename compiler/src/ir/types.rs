@@ -154,6 +154,10 @@ pub enum Type {
     List(Arc<ListType>),
     /// `view[element]`, a read-only window into elements kept elsewhere (spec 4.4), shared like an array.
     View(Arc<ViewType>),
+    /// `pool[element]`, slots that values go into and leave in any order (spec 7.6), shared like an array.
+    Pool(Arc<PoolType>),
+    /// `handle[element]`, which names a slot of a `pool[element]`, shared like an array.
+    Handle(Arc<HandleType>),
 }
 
 /**
@@ -279,6 +283,30 @@ pub struct ViewType {
     pub element: Type,
 }
 
+/// The values of one fixed-size type that a pool keeps in slots (spec 7.6).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct PoolType {
+    pub element: Type,
+}
+
+/// A slot of a pool, named by the type of the values the pool holds.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct HandleType {
+    pub target: HandleTarget,
+}
+
+/**
+ * The type of the value a handle names. A declared type is named by its
+ * name, which is unique in a program, so a type can hold handles to values
+ * of its own type, as the nodes of a tree do: a handle holds a slot and a
+ * generation, never the value.
+ */
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum HandleTarget {
+    Declared(String),
+    Other(Type),
+}
+
 impl Type {
     pub fn array(element: Type, length: u64) -> Type {
         Type::Array(Arc::new(ArrayType { element, length }))
@@ -297,6 +325,27 @@ impl Type {
         Type::View(Arc::new(ViewType { element }))
     }
 
+    pub fn pool(element: Type) -> Type {
+        Type::Pool(Arc::new(PoolType { element }))
+    }
+
+    /// A handle to a value of `element`, the type of the values in its pool.
+    pub fn handle(element: Type) -> Type {
+        let target = match element {
+            Type::Custom(custom) => HandleTarget::Declared(custom.name.clone()),
+            Type::Choice(choice) => HandleTarget::Declared(choice.name.clone()),
+            other => HandleTarget::Other(other),
+        };
+        Type::Handle(Arc::new(HandleType { target }))
+    }
+
+    /// A handle to a value of the type the program declares as `name`.
+    pub fn handle_to_declared(name: &str) -> Type {
+        Type::Handle(Arc::new(HandleType {
+            target: HandleTarget::Declared(name.to_owned()),
+        }))
+    }
+
     pub const fn as_integer(&self) -> Option<IntegerType> {
         match self {
             Self::Integer(integer) => Some(*integer),
@@ -307,7 +356,9 @@ impl Type {
             | Self::Custom(_)
             | Self::Choice(_)
             | Self::List(_)
-            | Self::View(_) => None,
+            | Self::View(_)
+            | Self::Pool(_)
+            | Self::Handle(_) => None,
         }
     }
 
@@ -321,7 +372,9 @@ impl Type {
             | Self::Custom(_)
             | Self::Choice(_)
             | Self::List(_)
-            | Self::View(_) => None,
+            | Self::View(_)
+            | Self::Pool(_)
+            | Self::Handle(_) => None,
         }
     }
 
@@ -335,7 +388,9 @@ impl Type {
             | Self::Custom(_)
             | Self::Choice(_)
             | Self::List(_)
-            | Self::View(_) => None,
+            | Self::View(_)
+            | Self::Pool(_)
+            | Self::Handle(_) => None,
         }
     }
 
@@ -349,7 +404,9 @@ impl Type {
             | Self::Array(_)
             | Self::Custom(_)
             | Self::Choice(_)
-            | Self::View(_) => None,
+            | Self::View(_)
+            | Self::Pool(_)
+            | Self::Handle(_) => None,
         }
     }
 
@@ -363,31 +420,68 @@ impl Type {
             | Self::Array(_)
             | Self::Custom(_)
             | Self::Choice(_)
-            | Self::List(_) => None,
+            | Self::List(_)
+            | Self::Pool(_)
+            | Self::Handle(_) => None,
         }
     }
 
-    /// Whether values of the type hold other values: arrays, lists, and types declared with `type` or `choice`.
+    pub fn as_pool(&self) -> Option<&PoolType> {
+        match self {
+            Self::Pool(pool) => Some(pool),
+            Self::Integer(_)
+            | Self::Float(_)
+            | Self::Boolean
+            | Self::String
+            | Self::Array(_)
+            | Self::Custom(_)
+            | Self::Choice(_)
+            | Self::List(_)
+            | Self::View(_)
+            | Self::Handle(_) => None,
+        }
+    }
+
+    pub fn as_handle(&self) -> Option<&HandleType> {
+        match self {
+            Self::Handle(pool) => Some(pool),
+            Self::Integer(_)
+            | Self::Float(_)
+            | Self::Boolean
+            | Self::String
+            | Self::Array(_)
+            | Self::Custom(_)
+            | Self::Choice(_)
+            | Self::List(_)
+            | Self::View(_)
+            | Self::Pool(_) => None,
+        }
+    }
+
+    /// Whether values of the type hold other values: arrays, lists, pools, and types declared with `type` or `choice`.
     pub const fn is_compound(&self) -> bool {
         matches!(
             self,
-            Self::Array(_) | Self::Custom(_) | Self::Choice(_) | Self::List(_)
+            Self::Array(_) | Self::Custom(_) | Self::Choice(_) | Self::List(_) | Self::Pool(_)
         )
     }
 
     /// Whether a value of the type holds something that grows while it lives, so it needs a data stack (spec 4.3).
     pub fn is_growable(&self) -> bool {
         match self {
-            Self::List(_) => true,
+            Self::List(_) | Self::Pool(_) => true,
             Self::Array(array) => array.element.is_growable(),
             Self::Custom(custom) => custom.fields.iter().any(|field| field.ty.is_growable()),
             Self::Choice(choice) => choice
                 .variants
                 .iter()
                 .any(|variant| variant.fields.iter().any(|field| field.ty.is_growable())),
-            Self::Integer(_) | Self::Float(_) | Self::Boolean | Self::String | Self::View(_) => {
-                false
-            }
+            Self::Integer(_)
+            | Self::Float(_)
+            | Self::Boolean
+            | Self::String
+            | Self::View(_)
+            | Self::Handle(_) => false,
         }
     }
 
@@ -397,11 +491,48 @@ impl Type {
             Self::View(_) => true,
             Self::Array(array) => array.element.holds_view(),
             Self::List(list) => list.element.holds_view(),
+            Self::Pool(pool) => pool.element.holds_view(),
             Self::Custom(custom) => custom.fields.iter().any(|field| field.ty.holds_view()),
             Self::Choice(choice) => choice
                 .variants
                 .iter()
                 .any(|variant| variant.fields.iter().any(|field| field.ty.holds_view())),
+            Self::Integer(_) | Self::Float(_) | Self::Boolean | Self::String | Self::Handle(_) => {
+                false
+            }
+        }
+    }
+
+    /// Whether a value of the type holds text, whose length differs from one value to the next.
+    pub fn holds_text(&self) -> bool {
+        match self {
+            Self::String => true,
+            Self::Array(array) => array.element.holds_text(),
+            Self::List(list) => list.element.holds_text(),
+            Self::View(view) => view.element.holds_text(),
+            Self::Pool(pool) => pool.element.holds_text(),
+            Self::Custom(custom) => custom.fields.iter().any(|field| field.ty.holds_text()),
+            Self::Choice(choice) => choice
+                .variants
+                .iter()
+                .any(|variant| variant.fields.iter().any(|field| field.ty.holds_text())),
+            Self::Integer(_) | Self::Float(_) | Self::Boolean | Self::Handle(_) => false,
+        }
+    }
+
+    /// Whether a value of the type holds a handle, which only works with the pool it came from.
+    pub fn holds_handle(&self) -> bool {
+        match self {
+            Self::Handle(_) => true,
+            Self::Array(array) => array.element.holds_handle(),
+            Self::List(list) => list.element.holds_handle(),
+            Self::View(view) => view.element.holds_handle(),
+            Self::Pool(pool) => pool.element.holds_handle(),
+            Self::Custom(custom) => custom.fields.iter().any(|field| field.ty.holds_handle()),
+            Self::Choice(choice) => choice
+                .variants
+                .iter()
+                .any(|variant| variant.fields.iter().any(|field| field.ty.holds_handle())),
             Self::Integer(_) | Self::Float(_) | Self::Boolean | Self::String => false,
         }
     }
@@ -417,7 +548,9 @@ impl Type {
             | Self::String
             | Self::Array(_)
             | Self::Custom(_)
-            | Self::Choice(_) => None,
+            | Self::Choice(_)
+            | Self::Pool(_)
+            | Self::Handle(_) => None,
         }
     }
 
@@ -442,6 +575,10 @@ impl Type {
             Self::List(_) => Some(Layout { size: 24, align: 8 }),
             // Where its elements start, and how many there are.
             Self::View(_) => Some(Layout { size: 16, align: 8 }),
+            // Where its slots start, how many there are, the first free one, and the data stack they grow on.
+            Self::Pool(_) => Some(Layout { size: 32, align: 8 }),
+            // A slot and the generation it had when its value went in.
+            Self::Handle(_) => Some(Layout { size: 8, align: 4 }),
             Self::Array(array) => {
                 let element = array.element.layout()?;
                 Some(Layout {
@@ -488,6 +625,11 @@ impl fmt::Display for Type {
             Self::Choice(choice) => formatter.write_str(&choice.name),
             Self::List(list) => write!(formatter, "{}[{}]", list.kind.name(), list.element),
             Self::View(view) => write!(formatter, "view[{}]", view.element),
+            Self::Pool(pool) => write!(formatter, "pool[{}]", pool.element),
+            Self::Handle(handle) => match &handle.target {
+                HandleTarget::Declared(name) => write!(formatter, "handle[{name}]"),
+                HandleTarget::Other(element) => write!(formatter, "handle[{element}]"),
+            },
         }
     }
 }

@@ -33,7 +33,9 @@ impl Number {
             | Type::Custom(_)
             | Type::Choice(_)
             | Type::List(_)
-            | Type::View(_) => None,
+            | Type::View(_)
+            | Type::Pool(_)
+            | Type::Handle(_) => None,
         }
     }
 

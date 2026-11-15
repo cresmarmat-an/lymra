@@ -6,6 +6,7 @@ mod custom_types;
 mod cycles;
 mod floats;
 mod lists;
+mod pools;
 mod roots;
 mod views;
 
@@ -25,13 +26,21 @@ pub(super) use custom_types::{
 pub(super) use cycles::{Declared, Dependency, cycle};
 pub(super) use floats::{conversion_never_fits, float_remainder, float_too_large, float_too_small};
 pub(super) use lists::{
-    Change, changed_below_newer, empty_list_arguments, empty_list_into, empty_list_without_type,
-    malformed_list_type, negative_index, not_a_stack, pop_needs_variable, push_argument_count,
-    push_needs_variable, push_not_list, pushed_value_marked, stack_argument_count,
+    Change, Collection, changed_below_newer, empty_list_arguments, empty_list_into,
+    empty_list_without_type, malformed_list_type, negative_index, not_a_stack, pop_needs_variable,
+    push_argument_count, push_needs_variable, push_not_list, pushed_value_marked,
+    stack_argument_count,
+};
+pub(super) use pools::{
+    Origin, PoolChange, call_mixes_pools, handle_from_another_pool, handles_escape_call,
+    handles_outlive_pool, malformed_handle_type, not_a_pool, pool_argument_count,
+    pool_argument_marked, pool_element_not_fixed, pool_needs_variable, returned_handles_of_local,
+    slot_not_handle,
 };
 pub(super) use roots::{
-    Freeing, freed_while_iterated, freed_while_viewed, returned_view_of_local,
-    returned_view_of_temporary, view_escapes_call, view_of_temporary, view_outlives_root,
+    Freeing, Holder, freed_while_iterated, freed_while_viewed, pool_replaced_while_handled,
+    returned_view_of_local, returned_view_of_temporary, view_escapes_call, view_of_temporary,
+    view_outlives_root,
 };
 pub(super) use views::{
     bytes_argument_count, bytes_of_non_text, malformed_view_type, not_sliceable,
@@ -299,7 +308,9 @@ pub(super) fn condition_not_boolean(found: &Type, span: Span, source: &str) -> D
         | Type::Custom(_)
         | Type::Choice(_)
         | Type::List(_)
-        | Type::View(_) => Help::text("write a comparison or another `boolean` here"),
+        | Type::View(_)
+        | Type::Pool(_)
+        | Type::Handle(_) => Help::text("write a comparison or another `boolean` here"),
     };
     Diagnostic::new(
         ErrorCode::L0402,
@@ -326,6 +337,12 @@ pub(super) fn print_needs_text(found: &Type, span: Span, source: &str) -> Diagno
                 .map_or("field", |field| field.name.as_str())
         )),
         Type::Choice(_) => Help::text("print from a `match`, with a `case` for each variant"),
+        Type::Pool(_) => {
+            Help::text("print the values it holds one by one, read through their handles")
+        }
+        Type::Handle(_) => {
+            Help::text("print the value it names, read from its pool, as in `pool[handle]`")
+        }
         Type::Integer(_) | Type::Float(_) | Type::Boolean | Type::String => Help::replace(
             "turn the value into text with interpolation",
             span,

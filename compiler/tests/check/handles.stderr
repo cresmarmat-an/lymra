@@ -1,0 +1,126 @@
+error[L0705]: this handle can come from whichever pool the caller's `creature` holds handles into, so it cannot be used with `mine`
+  --> tests/check/handles.lym:23:17
+   |
+23 |     return mine[creature].health
+   |                 ^^^^^^^^ used with `mine` here
+   |
+help: use each handle with the pool whose `insert` gave it; one used with `mine` has to come from `mine`
+
+error[L0701]: `made` returns a handle into `creatures`, which is freed when it returns
+  --> tests/check/handles.lym:27:12
+   |
+27 |     return insert(variable creatures, Creature(health = 1))
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ a handle into `creatures`
+   |
+help: take the pool as a `variable` parameter instead of declaring `creatures`, so the caller keeps it
+
+error[L0701]: `kept` would keep handles into `creatures`, which is freed when `leak` returns
+  --> tests/check/handles.lym:31:25
+   |
+31 |     push(variable kept, insert(variable creatures, Creature(health = 1)))
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the caller keeps `kept` after the call
+   |
+help: take the pool as a `variable` parameter too, so the caller keeps the pool along with `kept`
+
+error[L0704]: `creatures` cannot grow here, where a newer pool may sit above it
+  --> tests/check/handles.lym:40:18
+   |
+37 |     variable pool[Creature] mine = pool()
+   |                             ---- `creatures` can be an earlier call's `mine`, and this `mine` sits above it
+...
+40 |     constant _ = insert(variable creatures, Creature(health = 2))
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ adds to `creatures`
+   |
+help: only the newest pool on a data stack can change; change `creatures` before `mine` is declared, or after the block that declares it ends
+
+error[L0705]: this handle can come from `wolves`, so it cannot be used with `sheep`
+  --> tests/check/handles.lym:47:19
+   |
+47 |     print("{sheep[wolf].health}")
+   |                   ^^^^ used with `sheep` here
+   |
+help: use each handle with the pool whose `insert` gave it; one used with `sheep` has to come from `sheep`
+
+error[L0705]: this handle can come from `sheep`, so it cannot be used with `wolves`
+  --> tests/check/handles.lym:48:29
+   |
+48 |     remove(variable wolves, lamb)
+   |                             ^^^^ used with `wolves` here
+   |
+help: use each handle with the pool whose `insert` gave it; one used with `wolves` has to come from `wolves`
+
+error[L0705]: this handle can come from `wolves`, so it cannot be used with `sheep`
+  --> tests/check/handles.lym:49:11
+   |
+49 |     sheep[wolf].health = 3
+   |           ^^^^ used with `sheep` here
+   |
+help: use each handle with the pool whose `insert` gave it; one used with `sheep` has to come from `sheep`
+
+error[L0705]: `heal` uses the handles it gets here with `sheep`, but they can come from `wolves`
+  --> tests/check/handles.lym:50:26
+   |
+50 |     heal(variable sheep, wolf)
+   |                          ^^^^ `heal` uses these with `sheep`
+   |
+help: pass handles that come from `sheep`, or pass the pool they come from
+
+error[L0705]: `heal_all` uses the handles it gets here with `sheep`, but they can come from `wolves`
+  --> tests/check/handles.lym:53:30
+   |
+53 |     heal_all(variable sheep, pack)
+   |                              ^^^^ `heal_all` uses these with `sheep`
+   |
+help: pass handles that come from `sheep`, or pass the pool they come from
+
+error[L0701]: `outer` would keep handles into `inner` after `inner` is freed
+  --> tests/check/handles.lym:62:30
+   |
+61 |         variable pool[Creature] inner = pool()
+   |                                 ----- `inner` is freed at the end of its block
+62 |         push(variable outer, insert(variable inner, Creature(health = 1)))
+   |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `outer` gets a handle into `inner` here
+   |
+help: use `outer` only inside the block of `inner`, or declare `inner` where `outer` is
+
+error[L0703]: `creatures` cannot be replaced while `living`, which holds handles into it, is still used
+  --> tests/check/handles.lym:66:5
+   |
+64 |     variable list[handle[Creature]] living = list()
+   |                                     ------ `living` holds handles into `creatures`
+...
+66 |     creatures = pool()
+   |     ^^^^^^^^^ this frees every value in it, and its handles would name the slots of the new pool
+   |
+help: replace `creatures` after the last use of its handles, or take out the values you are done with using `remove`
+
+error[L0703]: `creatures` cannot be passed with `variable` while a `for` loop goes over handles into it
+  --> tests/check/handles.lym:69:15
+   |
+68 |     for creature in living
+   |                     ------ the loop goes over these handles
+69 |         reset(variable creatures)
+   |               ^^^^^^^^^^^^^^^^^^ `reset` can replace the whole pool
+   |
+help: replace `creatures` after the last use of its handles, or take out the values you are done with using `remove`
+
+error[L0703]: `creatures` cannot be replaced while `first`, which holds handles into it, is still used
+  --> tests/check/handles.lym:72:5
+   |
+71 |     constant first = living[0]
+   |              ----- `first` holds handles into `creatures`
+72 |     creatures = pool()
+   |     ^^^^^^^^^ this frees every value in it, and its handles would name the slots of the new pool
+   |
+help: replace `creatures` after the last use of its handles, or take out the values you are done with using `remove`
+
+error[L0705]: this handle can come from `wolves`, so it cannot be used with `sheep`
+  --> tests/check/handles.lym:75:19
+   |
+75 |     print("{sheep[pair[0]].health}")
+   |                   ^^^^^^^ used with `sheep` here
+   |
+help: use each handle with the pool whose `insert` gave it; one used with `sheep` has to come from `sheep`
+
+found 14 errors in tests/check/handles.lym
+run `lymra explain L0705` to read why a rule exists and how to fix it

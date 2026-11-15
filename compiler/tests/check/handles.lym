@@ -1,0 +1,75 @@
+#[
+    Errors L0705, L0701 and L0703 about handles. A handle works only with
+    the pool it came from, which the compiler follows through bindings,
+    lists and calls, a function that takes a pool and a handle requiring
+    that they match at every call. Handles can't be kept after their pool
+    is freed, and a pool can't be replaced while handles into it are still
+    used. A pool grows like a list, so error L0704 applies to it as well.
+]#
+
+type Creature
+    integer32 health
+
+function heal(variable pool[Creature] creatures, handle[Creature] creature)
+    creatures[creature].health = creatures[creature].health + 1
+
+function heal_all(variable pool[Creature] creatures, list[handle[Creature]] all)
+    for creature in all
+        heal(variable creatures, creature)
+
+function own_pool(handle[Creature] creature) returns integer32
+    variable pool[Creature] mine = pool()
+    constant _ = insert(variable mine, Creature(health = 1))
+    return mine[creature].health
+
+function made() returns handle[Creature]
+    variable pool[Creature] creatures = pool()
+    return insert(variable creatures, Creature(health = 1))
+
+function leak(variable list[handle[Creature]] kept)
+    variable pool[Creature] creatures = pool()
+    push(variable kept, insert(variable creatures, Creature(health = 1)))
+
+function reset(variable pool[Creature] creatures)
+    creatures = pool()
+
+function grow(variable pool[Creature] creatures, integer64 depth)
+    variable pool[Creature] mine = pool()
+    if depth > 0
+        grow(variable mine, depth - 1)
+    constant _ = insert(variable creatures, Creature(health = 2))
+
+function main()
+    variable pool[Creature] wolves = pool()
+    variable pool[Creature] sheep = pool()
+    constant wolf = insert(variable wolves, Creature(health = 5))
+    constant lamb = insert(variable sheep, Creature(health = 2))
+    print("{sheep[wolf].health}")
+    remove(variable wolves, lamb)
+    sheep[wolf].health = 3
+    heal(variable sheep, wolf)
+    variable list[handle[Creature]] pack = list()
+    push(variable pack, wolf)
+    heal_all(variable sheep, pack)
+    heal_all(variable wolves, pack)
+    print("{own_pool(wolf)} {made() == made()}")
+    leak(variable pack)
+    grow(variable wolves, 2)
+
+    variable list[handle[Creature]] outer = list()
+    if length(outer) == 0
+        variable pool[Creature] inner = pool()
+        push(variable outer, insert(variable inner, Creature(health = 1)))
+    variable pool[Creature] creatures = pool()
+    variable list[handle[Creature]] living = list()
+    push(variable living, insert(variable creatures, Creature(health = 3)))
+    creatures = pool()
+    print("{length(living)}")
+    for creature in living
+        reset(variable creatures)
+        print("{creatures[creature].health}")
+    constant first = living[0]
+    creatures = pool()
+    print("{creatures[first].health}")
+    constant array[handle[Creature], 2] pair = array(wolf)
+    print("{sheep[pair[0]].health}")

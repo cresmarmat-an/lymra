@@ -1,0 +1,94 @@
+error[L0706]: a pool holds values of one fixed size, but a `string` holds text, which can have any length
+  --> tests/check/pools.lym:12:19
+   |
+12 |     variable pool[string] texts = pool()
+   |                   ^^^^^^ not a value of one fixed size
+   |
+help: keep the text in a list, and store its position in the pool's values
+
+error[L0706]: a pool holds values of one fixed size, but a `Named` holds text, which can have any length
+  --> tests/check/pools.lym:13:19
+   |
+13 |     variable pool[Named] named = pool()
+   |                   ^^^^^ not a value of one fixed size
+   |
+help: keep the text in a list, and store its position in the pool's values
+
+error[L0706]: a pool holds values of one fixed size, but a `list[integer64]` grows while it lives
+  --> tests/check/pools.lym:14:19
+   |
+14 |     variable pool[list[integer64]] nested = pool()
+   |                   ^^^^^^^^^^^^^^^ not a value of one fixed size
+   |
+help: keep it in a binding of its own, and give the pool's values what they need to find it
+
+error[L0504]: `insert` changes the pool it is given, so the pool needs `variable`
+  --> tests/check/pools.lym:16:32
+   |
+16 |     constant unmarked = insert(numbers, 5)
+   |                                ^^^^^^^ passed without `variable`
+   |
+help: mark the pool `variable`
+   |
+16 |     constant unmarked = insert(variable numbers, 5)
+
+error[L0501]: `insert` takes 2 arguments, but 1 was given
+  --> tests/check/pools.lym:17:30
+   |
+17 |     constant missing = insert(variable numbers)
+   |                              ^^^^^^^^^^^^^^^^^^ `insert` stores one value in one pool
+   |
+help: write `insert(variable creatures, value)`
+
+error[L0402]: `insert` works on a pool, but this is a `list[integer64]`
+  --> tests/check/pools.lym:19:39
+   |
+19 |     constant pushed = insert(variable items, 3)
+   |                                       ^^^^^ not a pool
+   |
+help: add to a list with `push`; `insert` stores a value in a pool and gives back its handle
+
+error[L0402]: a `pool[integer64]` takes a `handle[integer64]`, but this is an `integer64`
+  --> tests/check/pools.lym:20:21
+   |
+20 |     print("{numbers[0]}")
+   |                     ^ not a handle to its values
+   |
+help: a pool keeps its values in no order, so it has no positions; use the handle `insert` gave when the value went in
+
+error[L0412]: `pool()` needs to know which pool to build
+  --> tests/check/pools.lym:21:24
+   |
+21 |     constant untyped = pool()
+   |                        ^^^^^^ its value type comes from the type of the place it goes
+   |
+help: write the type where the pool goes, as in `variable pool[integer64] values = pool()`
+
+error[L0402]: expected an `integer64`, found a `boolean`
+  --> tests/check/pools.lym:22:65
+   |
+22 |     constant handle[integer64] wrong = insert(variable numbers, true)
+   |                                                                 ^^^^ this is a `boolean`
+   |
+help: Lymra never converts a value to another type by itself; use a value of the expected type
+
+error[L0504]: `remove` only reads the handle it is given, so it takes no `variable`
+  --> tests/check/pools.lym:23:30
+   |
+23 |     remove(variable numbers, variable wrong)
+   |                              ^^^^^^^^^ not needed here
+   |
+help: remove `variable`
+   |
+23 |     remove(variable numbers, wrong)
+
+error[L0405]: `<` compares numbers, and a handle has no order
+  --> tests/check/pools.lym:24:13
+   |
+24 |     print("{wrong < wrong}")
+   |             ^^^^^^^^^^^^^ comparing handles
+   |
+help: compare handles with `==` and `!=`, which tell whether they name the same value
+
+found 11 errors in tests/check/pools.lym
+run `lymra explain L0706` to read why a rule exists and how to fix it

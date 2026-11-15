@@ -95,6 +95,10 @@ impl<'src> Checker<'src, '_> {
         span: Span,
     ) -> CheckResult<ir::Expr> {
         let array = self.check_expr_with_hint(object, None);
+        // A pool is reached through a handle, not an index.
+        if matches!(&array, Ok(checked) if checked.ty.as_pool().is_some()) {
+            return self.check_slot(array?, index, span);
+        }
         let index = self.check_index_value(index);
         let (array, index) = (array?, index?);
         let (element, length) = self.elements_of(&array.ty, array.span)?;
@@ -211,7 +215,9 @@ impl<'src> Checker<'src, '_> {
             | Type::Float(_)
             | Type::Boolean
             | Type::Custom(_)
-            | Type::Choice(_) => {
+            | Type::Choice(_)
+            | Type::Pool(_)
+            | Type::Handle(_) => {
                 return Err(self.report(errors::no_length(&operand.ty, operand.span)));
             }
         };

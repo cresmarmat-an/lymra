@@ -163,12 +163,15 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         if name.text == "view" {
             return self.resolve_view_type(arguments, ty.span);
         }
+        if name.text == "pool" {
+            return self.resolve_pool_type(arguments, ty.span);
+        }
+        if name.text == "handle" {
+            return self.resolve_handle_type(arguments, ty.span);
+        }
         if let Some(Global::Type(id)) = self.globals.get(name.text).copied() {
             self.no_arguments(name.text, arguments, ty.span)?;
             return self.declared_type(id, name.span);
-        }
-        if let Some(feature) = Feature::future_type(name.text) {
-            return Err(self.report(feature.diagnostic(ty.span)));
         }
         let resolved = match name.text {
             "boolean" => Some(Type::Boolean),
@@ -194,7 +197,8 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     .iter()
                     .map(|integer| integer.name())
                     .chain([
-                        "float32", "float64", "boolean", "string", "array", "list", "stack", "view",
+                        "float32", "float64", "boolean", "string", "array", "list", "stack",
+                        "view", "pool", "handle",
                     ])
                     .chain(declared);
                 let suggestion = similarity::closest_match(name.text, known);
@@ -311,6 +315,7 @@ fn runtime_part(expr: &ir::Expr) -> Span {
         | ir::ExprKind::View(operand)
         | ir::ExprKind::Bytes(operand)
         | ir::ExprKind::Index { array: operand, .. }
+        | ir::ExprKind::Slot { pool: operand, .. }
         | ir::ExprKind::Field {
             object: operand, ..
         } => runtime_part(operand),
@@ -336,6 +341,7 @@ fn runtime_part(expr: &ir::Expr) -> Span {
         | ir::ExprKind::Slice { .. }
         | ir::ExprKind::Pop(_)
         | ir::ExprKind::Top(_)
+        | ir::ExprKind::Insert { .. }
         | ir::ExprKind::Construct(_)
         | ir::ExprKind::Variant { .. } => expr.span,
     }

@@ -19,9 +19,11 @@ mod evaluation_order;
 mod expressions;
 mod features;
 mod floats;
+mod handles;
 mod items;
 mod lists;
 mod places;
+mod pools;
 mod roots;
 mod scope;
 mod statements;
@@ -45,13 +47,15 @@ use scope::{FunctionScope, LocalKind};
 type CheckResult<T> = Result<T, ErrorReported>;
 
 /// The built-in functions the compiler implements.
-const BUILT_IN_FUNCTIONS: [&str; 11] = [
+const BUILT_IN_FUNCTIONS: [&str; 13] = [
     "print",
     "range",
     "length",
     "push",
     "pop",
     "top",
+    "insert",
+    "remove",
     "slice",
     "bytes",
     "wrapping_add",
@@ -59,9 +63,9 @@ const BUILT_IN_FUNCTIONS: [&str; 11] = [
     "wrapping_multiply",
 ];
 
-/// Built-in types that are not integers. Calling `array`, `list` or `stack` builds one.
-const OTHER_TYPE_NAMES: [&str; 8] = [
-    "boolean", "string", "array", "list", "stack", "view", "float32", "float64",
+/// Built-in types that are not integers. Calling `array`, `list`, `stack` or `pool` builds one.
+const OTHER_TYPE_NAMES: [&str; 10] = [
+    "boolean", "string", "array", "list", "stack", "view", "pool", "handle", "float32", "float64",
 ];
 
 /// What a name the language itself defines stands for. No declaration can take such a name.
@@ -537,9 +541,11 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         };
         match (functions, constants) {
             (Ok(functions), Ok(constants)) => {
-                // Where lists and views can travel is known only once every function is checked.
+                // Where lists, views and handles can travel is known only once every function is checked.
                 let mut unsafe_memory = data_stacks::check(&functions);
-                unsafe_memory.extend(roots::check(&functions));
+                let (handle_errors, pools) = handles::check(&functions);
+                unsafe_memory.extend(handle_errors);
+                unsafe_memory.extend(roots::check(&functions, &pools));
                 if !unsafe_memory.is_empty() {
                     unsafe_memory.sort_by_key(|diagnostic| diagnostic.primary.span.start);
                     return Err(unsafe_memory);

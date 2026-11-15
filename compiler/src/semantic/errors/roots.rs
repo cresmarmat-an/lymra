@@ -120,6 +120,51 @@ pub(in crate::semantic) fn freed_while_viewed(
     .with_secondary(Label::new(declared, format!("`{view}` shows `{list}`")))
 }
 
+/// What still uses the handles into a pool where it is replaced.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::semantic) enum Holder<'a> {
+    /// A `for` loop going over handles into it, named at the span.
+    Loop(Span),
+    /// A binding that holds handles into it, declared at the span.
+    Binding(&'a str, Span),
+}
+
+/// L0703: `pool` replaced, as `how` says, while `holder` still uses handles into it.
+pub(in crate::semantic) fn pool_replaced_while_handled(
+    pool: &str,
+    how: Freeing<'_>,
+    holder: Holder<'_>,
+) -> Diagnostic {
+    let user = match holder {
+        Holder::Loop(_) => "a `for` loop goes over handles into it".to_owned(),
+        Holder::Binding(name, _) => format!("`{name}`, which holds handles into it, is still used"),
+    };
+    let label = match how {
+        Freeing::Assigned(_) | Freeing::Popped(_) => {
+            "this frees every value in it, and its handles would name the slots of the new pool"
+                .to_owned()
+        }
+        Freeing::PassedToReplace(_, function) | Freeing::PassedToPop(_, function) => {
+            format!("`{function}` can replace the whole pool")
+        }
+    };
+    let secondary = match holder {
+        Holder::Loop(span) => Label::new(span, "the loop goes over these handles"),
+        Holder::Binding(name, declared) => {
+            Label::new(declared, format!("`{name}` holds handles into `{pool}`"))
+        }
+    };
+    Diagnostic::new(
+        how.code(),
+        format!("`{pool}` cannot be {} while {user}", how.verb()),
+        Label::new(how.span(), label),
+        Help::text(format!(
+            "replace `{pool}` after the last use of its handles, or take out the values you are done with using `remove`"
+        )),
+    )
+    .with_secondary(secondary)
+}
+
 /// A view binding given a view of a value its statement frees.
 pub(in crate::semantic) fn view_of_temporary(view: &str, span: Span) -> Diagnostic {
     Diagnostic::new(

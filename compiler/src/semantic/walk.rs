@@ -4,15 +4,20 @@
  * blocks a statement holds.
  */
 
-use crate::ir::{Argument, Block, Call, Expr, ExprKind, LocalId, PlaceStep, PrintPart, Statement};
+use std::collections::HashMap;
+
+use crate::ir::{
+    Argument, Block, Call, Expr, ExprKind, Function, LocalId, PlaceStep, PrintPart, Statement,
+};
 use crate::source::Span;
 
 /// The expressions a statement computes outside the blocks it holds; for a call statement, the values it passes.
-fn statement_exprs(statement: &Statement) -> Vec<&Expr> {
+pub(super) fn statement_exprs(statement: &Statement) -> Vec<&Expr> {
     match statement {
         Statement::Declare { value, .. }
         | Statement::Discard(value)
         | Statement::Push { value, .. }
+        | Statement::Remove { handle: value, .. }
         | Statement::Return(Some(value))
         | Statement::Assert { condition: value }
         | Statement::While {
@@ -25,6 +30,7 @@ fn statement_exprs(statement: &Statement) -> Vec<&Expr> {
             .iter()
             .filter_map(|step| match step {
                 PlaceStep::Index(index) => Some(&index.value),
+                PlaceStep::Slot(slot) => Some(&slot.handle),
                 PlaceStep::Field(_) => None,
             })
             .chain([value])
@@ -73,6 +79,7 @@ pub(super) fn each_expr<'a>(expr: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
         | ExprKind::View(operand)
         | ExprKind::Bytes(operand)
         | ExprKind::Top(operand)
+        | ExprKind::Insert { value: operand, .. }
         | ExprKind::Field {
             object: operand, ..
         } => each_expr(operand, visit),
@@ -94,6 +101,10 @@ pub(super) fn each_expr<'a>(expr: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
             array: left,
             index: right,
             ..
+        }
+        | ExprKind::Slot {
+            pool: left,
+            handle: right,
         } => {
             each_expr(left, visit);
             each_expr(right, visit);
@@ -133,6 +144,19 @@ pub(super) fn statement_pops(statement: &Statement) -> Vec<(LocalId, Span)> {
     pops
 }
 
+/// Every pool a statement inserts into outside the blocks it holds, with where.
+pub(super) fn statement_inserts(statement: &Statement) -> Vec<(LocalId, Span)> {
+    let mut inserts = Vec::new();
+    for expr in statement_exprs(statement) {
+        each_expr(expr, &mut |inner| {
+            if let ExprKind::Insert { pool, .. } = inner.kind {
+                inserts.push((pool, inner.span));
+            }
+        });
+    }
+    inserts
+}
+
 /// The blocks a statement holds, in order.
 pub(super) fn statement_blocks(statement: &Statement) -> Vec<&Block> {
     match statement {
@@ -149,5 +173,66 @@ pub(super) fn statement_blocks(statement: &Statement) -> Vec<&Block> {
         | Statement::ForEach { body, .. } => vec![body],
         Statement::Match { cases, .. } => cases.iter().map(|case| &case.body).collect(),
         _ => Vec::new(),
+    }
+}
+
+/// Which block declares each local, and which block holds each block. The function's body is block 0.
+pub(super) struct Blocks {
+    pub declared_in: HashMap<LocalId, usize>,
+    parents: Vec<Option<usize>>,
+}
+
+impl Blocks {
+    pub fn of(function: &Function<'_>) -> Self {
+        let mut blocks = Self {
+            declared_in: function
+                .parameters
+                .iter()
+                .map(|&local| (local, 0))
+                .collect(),
+            parents: vec![None],
+        };
+        blocks.add(&function.body, 0);
+        blocks
+    }
+
+    fn add(&mut self, block: &Block, id: usize) {
+        for statement in &block.statements {
+            if let Statement::Declare { local, .. } = statement {
+                self.declared_in.insert(*local, id);
+            }
+            // A loop's variable and a case's bindings belong to the block they run in, and end with it.
+            let declared: Vec<Vec<LocalId>> = match statement {
+                Statement::ForRange { variable, .. } | Statement::ForEach { variable, .. } => {
+                    vec![variable.iter().copied().collect()]
+                }
+                Statement::Match { cases, .. } => cases
+                    .iter()
+                    .map(|case| case.bindings.iter().map(|binding| binding.local).collect())
+                    .collect(),
+                _ => Vec::new(),
+            };
+            for (position, body) in statement_blocks(statement).into_iter().enumerate() {
+                let child = self.parents.len();
+                self.parents.push(Some(id));
+                for &local in declared.get(position).into_iter().flatten() {
+                    self.declared_in.insert(local, child);
+                }
+                self.add(body, child);
+            }
+        }
+    }
+
+    /// Whether `inner` is `outer` or lies inside it.
+    pub fn within(&self, mut inner: usize, outer: usize) -> bool {
+        loop {
+            if inner == outer {
+                return true;
+            }
+            match self.parents.get(inner).copied().flatten() {
+                Some(parent) => inner = parent,
+                None => return false,
+            }
+        }
     }
 }

@@ -13,8 +13,8 @@
 use super::types::{fill_function, list_function};
 use super::{Generator, INDENT, Release, Writer, c_syntax, data_stack, local_access};
 use crate::ir::{
-    Argument, ArithmeticOperator, Call, Expr, ExprKind, Extent, FieldValue, FloatType, Function,
-    IntegerType, LogicOperator, Sequence, Type, Value,
+    Argument, ArithmeticOperator, Call, ComparisonOperator, Expr, ExprKind, Extent, FieldValue,
+    FloatType, Function, IntegerType, LogicOperator, Sequence, Type, Value,
 };
 use crate::source::Span;
 
@@ -46,7 +46,9 @@ pub(super) fn indexed_noun(ty: &Type) -> &'static str {
         | Type::Float(_)
         | Type::Boolean
         | Type::Custom(_)
-        | Type::Choice(_) => "an array",
+        | Type::Choice(_)
+        | Type::Pool(_)
+        | Type::Handle(_) => "an array",
     }
 }
 
@@ -187,7 +189,9 @@ impl Generator<'_, '_> {
                     | Type::Custom(_)
                     | Type::Choice(_)
                     | Type::List(_)
-                    | Type::View(_) => format!("((int64_t)({code}).length)"),
+                    | Type::View(_)
+                    | Type::Pool(_)
+                    | Type::Handle(_) => format!("((int64_t)({code}).length)"),
                 }
             }
             ExprKind::View(items) => self.whole_view(function, items, &expr.ty, writer),
@@ -210,6 +214,20 @@ impl Generator<'_, '_> {
                 let site = self.site(expr.span);
                 let stack_type = self.types.name(&stack.ty);
                 format!("{}(&({stored}), {site})", list_function(&stack_type, "top"))
+            }
+            ExprKind::Insert { pool, value } => {
+                let value = self.expr(function, value, writer);
+                let site = self.site(expr.span);
+                let pool_type = self.types.name(&function.locals[*pool].ty);
+                format!(
+                    "{}({}, {value}, {site})",
+                    list_function(&pool_type, "insert"),
+                    super::local_address(function, *pool)
+                )
+            }
+            ExprKind::Slot { pool, handle } => {
+                let slot = self.slot(function, pool, handle, expr.span, writer);
+                format!("{slot}->value")
             }
             ExprKind::Slice { items, start, end } => {
                 self.slice(function, items, start, end, expr, writer)
@@ -414,7 +432,7 @@ impl Generator<'_, '_> {
                 let source = self.expr(function, value, writer);
                 let site = self.site(value.span);
                 format!(
-                    "{}({stack}, ({source}).elements, ({source}).length, {site})",
+                    "{}({stack}, {source}, {site})",
                     list_function(&list, "place")
                 )
             }
@@ -573,6 +591,15 @@ impl Generator<'_, '_> {
         let symbol = operator.symbol();
         match operands {
             Type::String => format!("lymra_compare_text({left}, {right}) {symbol} 0"),
+            // The checker lets only `==` and `!=` compare handles.
+            Type::Handle(_) => {
+                let same = format!("lymra_same_handle({left}, {right})");
+                if matches!(operator, ComparisonOperator::Equal) {
+                    same
+                } else {
+                    format!("(!{same})")
+                }
+            }
             // Only a choice whose variants hold no fields is compared, by its tag alone.
             Type::Choice(_) => format!(
                 "({left}).{tag} {symbol} ({right}).{tag}",
@@ -584,10 +611,49 @@ impl Generator<'_, '_> {
             | Type::Array(_)
             | Type::Custom(_)
             | Type::List(_)
-            | Type::View(_) => {
+            | Type::View(_)
+            | Type::Pool(_) => {
                 format!("{left} {symbol} {right}")
             }
         }
+    }
+
+    /**
+     * The C for a pointer to the slot of `pool` that `handle` names, whose
+     * place in the source is `span`. Finding it stops the program when the
+     * handle is stale.
+     */
+    pub(super) fn slot(
+        &mut self,
+        function: &Function<'_>,
+        pool: &Expr,
+        handle: &Expr,
+        span: Span,
+        writer: &mut Writer,
+    ) -> String {
+        let (pool_code, handle) = self.pair(function, pool, handle, writer);
+        let stored = if is_addressable(pool) {
+            pool_code
+        } else {
+            self.temporary(&pool.ty, &pool_code, writer)
+        };
+        self.pool_slot(&pool.ty, &stored, &handle, span)
+    }
+
+    /// The C that finds the slot `handle` names in the pool `stored`, of type `ty`, which C can take the address of.
+    pub(super) fn pool_slot(
+        &mut self,
+        ty: &Type,
+        stored: &str,
+        handle: &str,
+        span: Span,
+    ) -> String {
+        let site = self.site(span);
+        let pool_type = self.types.name(ty);
+        format!(
+            "{}(&({stored}), {handle}, {site})",
+            list_function(&pool_type, "find")
+        )
     }
 
     /// Computes `code`, of type `ty`, into a new constant and returns the constant's name.

@@ -126,6 +126,16 @@ impl Generator<'_, '_> {
                     local_address(function, *list)
                 ));
             }
+            Statement::Remove { pool, handle, span } => {
+                let handle = self.expr(function, handle, writer);
+                let site = self.site(*span);
+                let pool_type = self.types.name(&function.locals[*pool].ty);
+                writer.line(&format!(
+                    "{}({}, {handle}, {site});",
+                    list_function(&pool_type, "remove"),
+                    local_address(function, *pool)
+                ));
+            }
             Statement::Print(parts) => self.print(function, parts, writer),
             Statement::If {
                 branches,
@@ -276,7 +286,7 @@ impl Generator<'_, '_> {
         let site = self.site(value.span);
         let moved = self.helper("moved");
         writer.line(&format!(
-            "const {ty} {moved} = {}({DESTINATION}, {result}.elements, {result}.length, {site});",
+            "const {ty} {moved} = {}({DESTINATION}, {result}, {site});",
             list_function(&ty, "place")
         ));
         for release in &open {
@@ -323,22 +333,39 @@ impl Generator<'_, '_> {
         value: &Expr,
         writer: &mut Writer,
     ) {
-        // A field has no effects; an index has its check and those of its value.
+        // A field has no effects; an index has its check and those of its value, and a slot always has its check.
         let effects: Vec<bool> = target
             .steps
             .iter()
             .map(|step| match step {
                 PlaceStep::Index(index) => index.checked || index.value.has_effects(),
+                PlaceStep::Slot(_) => true,
                 PlaceStep::Field(_) => false,
             })
             .chain([value.has_effects()])
             .collect();
         let mut place = local_access(function, target.local);
         for (position, step) in target.steps.iter().enumerate() {
+            let later_effect = effects[position + 1..].iter().any(|&effect| effect);
             let index = match step {
                 PlaceStep::Index(index) => index,
                 PlaceStep::Field(field) => {
                     place = format!("{place}.{}", c_syntax::field_name(*field));
+                    continue;
+                }
+                PlaceStep::Slot(slot) => {
+                    let handle = self.expr(function, &slot.handle, writer);
+                    let found = self.pool_slot(&slot.pool, &place, &handle, slot.span);
+                    // Found first, so a stale handle stops the program before anything after it runs.
+                    let found = if later_effect {
+                        let name = self.helper("slot");
+                        let slot_type = format!("{}_slot", self.types.name(&slot.pool));
+                        writer.line(&format!("{slot_type} *const {name} = {found};"));
+                        name
+                    } else {
+                        found
+                    };
+                    place = format!("{found}->value");
                     continue;
                 }
             };
@@ -349,7 +376,6 @@ impl Generator<'_, '_> {
                 indexed: indexed_noun(&index.indexed),
             };
             let code = self.position(function, &index.value, bounds, &place, writer);
-            let later_effect = effects[position + 1..].iter().any(|&effect| effect);
             let code = if effects[position] && later_effect {
                 let name = self.helper("position");
                 writer.line(&format!("const size_t {name} = {code};"));

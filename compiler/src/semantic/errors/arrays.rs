@@ -204,6 +204,13 @@ pub(in crate::semantic) fn compound_in_text(found: &Type, span: Span, source: &s
                 "put its elements in one by one, as in `{{{source}[0]}}`, or print them in a loop"
             )
         }
+        Type::Pool(_) => format!(
+            "put in the values it holds one by one, read through their handles, as in `{{{source}[handle]}}`"
+        ),
+        Type::Handle(_) => {
+            "a handle only names a slot; put in the value it names, read from its pool, as in `{pool[handle]}`"
+                .to_owned()
+        }
     };
     Diagnostic::new(
         ErrorCode::L0402,
@@ -232,7 +239,13 @@ pub(in crate::semantic) fn not_iterable(found: &Type, span: Span, source: &str) 
         | Type::Custom(_)
         | Type::Choice(_)
         | Type::List(_)
-        | Type::View(_) => Help::text("loop over `range(start, end)`, an array, a list or a view"),
+        | Type::View(_)
+        | Type::Handle(_) => {
+            Help::text("loop over `range(start, end)`, an array, a list or a view")
+        }
+        Type::Pool(_) => Help::text(
+            "a pool keeps its values in no order; keep their handles in a list, and loop over the list",
+        ),
     };
     Diagnostic::new(
         ErrorCode::L0405,

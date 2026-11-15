@@ -501,7 +501,9 @@ impl<'function> Analyzer<'function> {
                 | Type::Custom(_)
                 | Type::Choice(_)
                 | Type::List(_)
-                | Type::View(_) => Interval {
+                | Type::View(_)
+                | Type::Pool(_)
+                | Type::Handle(_) => Interval {
                     low: 0,
                     high: whole_type.high,
                 },
@@ -519,6 +521,8 @@ impl<'function> Analyzer<'function> {
             | ExprKind::Bytes(_)
             | ExprKind::Pop(_)
             | ExprKind::Top(_)
+            | ExprKind::Insert { .. }
+            | ExprKind::Slot { .. }
             | ExprKind::EmptyList
             | ExprKind::Construct(_)
             | ExprKind::Variant { .. }
@@ -591,6 +595,7 @@ impl<'function> Analyzer<'function> {
             | ExprKind::View(operand)
             | ExprKind::Bytes(operand)
             | ExprKind::Top(operand)
+            | ExprKind::Insert { value: operand, .. }
             | ExprKind::Field {
                 object: operand, ..
             } => {
@@ -624,6 +629,10 @@ impl<'function> Analyzer<'function> {
                 array: left,
                 index: right,
                 ..
+            }
+            | ExprKind::Slot {
+                pool: left,
+                handle: right,
             } => {
                 self.remove_checks(left, bounds);
                 self.remove_checks(right, bounds);
@@ -742,9 +751,12 @@ impl<'function> Analyzer<'function> {
                 self.evaluate(value, bounds, changes, mode);
                 assign(target.local, range, step, bounds, changes);
             }
-            // A part of an array or of a declared type changes, which no bounds the analysis holds describe.
+            // A part of an array, of a declared type or of a pool changes, which no bounds the analysis holds describe.
             Statement::Assign { target, value } => {
                 for (position, step) in target.steps.iter_mut().enumerate() {
+                    if let PlaceStep::Slot(slot) = step {
+                        self.evaluate(&mut slot.handle, bounds, changes, mode);
+                    }
                     if let PlaceStep::Index(index) = step {
                         if mode == Mode::Remove {
                             // The part of the place before this index is what it indexes.
@@ -764,7 +776,9 @@ impl<'function> Analyzer<'function> {
                 }
                 self.evaluate(value, bounds, changes, mode);
             }
-            Statement::Discard(value) | Statement::Push { value, .. } => {
+            Statement::Discard(value)
+            | Statement::Push { value, .. }
+            | Statement::Remove { handle: value, .. } => {
                 self.evaluate(value, bounds, changes, mode);
             }
             Statement::Call(call) => {

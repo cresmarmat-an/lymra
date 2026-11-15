@@ -182,8 +182,10 @@ fn collect_statement(
                 changed.insert(target.local);
             }
             for step in &target.steps {
-                if let PlaceStep::Index(index) = step {
-                    collect_references(&index.value, changed);
+                match step {
+                    PlaceStep::Index(index) => collect_references(&index.value, changed),
+                    PlaceStep::Slot(slot) => collect_references(&slot.handle, changed),
+                    PlaceStep::Field(_) => {}
                 }
             }
             collect_references(value, changed);
@@ -194,6 +196,10 @@ fn collect_statement(
         | Statement::Return(Some(value))
         | Statement::Push { value, .. } => {
             collect_references(value, changed);
+        }
+        Statement::Remove { pool, handle, .. } => {
+            changed.insert(*pool);
+            collect_references(handle, changed);
         }
         Statement::Call(call) => collect_call_references(&call.arguments, changed),
         Statement::Print(parts) => {
@@ -262,13 +268,17 @@ fn collect_call_references(arguments: &[Argument], changed: &mut HashSet<LocalId
     }
 }
 
-/// Collects the locals an expression passes with `variable`, which the called function may change, and the stacks it pops.
+/// Collects the locals an expression passes with `variable`, which the called function may change, the stacks it pops and the pools it inserts into.
 pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
     match &expr.kind {
         ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) | ExprKind::EmptyList => {
         }
         ExprKind::Pop(stack) => {
             changed.insert(*stack);
+        }
+        ExprKind::Insert { pool, value } => {
+            changed.insert(*pool);
+            collect_references(value, changed);
         }
         ExprKind::Negate { operand, .. }
         | ExprKind::Not(operand)
@@ -301,6 +311,10 @@ pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
             array: left,
             index: right,
             ..
+        }
+        | ExprKind::Slot {
+            pool: left,
+            handle: right,
         } => {
             collect_references(left, changed);
             collect_references(right, changed);
@@ -325,6 +339,7 @@ pub(super) fn collect_calls<'expr>(expr: &'expr Expr, calls: &mut Vec<&'expr Cal
         | ExprKind::View(operand)
         | ExprKind::Bytes(operand)
         | ExprKind::Top(operand)
+        | ExprKind::Insert { value: operand, .. }
         | ExprKind::Field {
             object: operand, ..
         } => collect_calls(operand, calls),
@@ -346,6 +361,10 @@ pub(super) fn collect_calls<'expr>(expr: &'expr Expr, calls: &mut Vec<&'expr Cal
             array: left,
             index: right,
             ..
+        }
+        | ExprKind::Slot {
+            pool: left,
+            handle: right,
         } => {
             collect_calls(left, calls);
             collect_calls(right, calls);

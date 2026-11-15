@@ -82,6 +82,17 @@ impl<'src> Checker<'src, '_> {
                         let source = self.text(*object);
                         return Err(self.report(errors::view_element_changed(source, *object)));
                     }
+                    if let Some(pool) = ty.as_pool() {
+                        let element = pool.element.clone();
+                        let handle = self.check_handle(index, &ty)?;
+                        checked.push(ir::PlaceStep::Slot(ir::PlaceSlot {
+                            handle,
+                            pool: ty,
+                            span: *span,
+                        }));
+                        ty = element;
+                        continue;
+                    }
                     let value = self.check_index_value(index)?;
                     let (element, length) = self.elements_of(&ty, *object)?;
                     checked.push(ir::PlaceStep::Index(ir::PlaceIndex {
