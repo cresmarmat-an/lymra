@@ -1,0 +1,184 @@
+error[L0309]: lists inside other values are not available yet
+ --> tests/check/lists.lym:2:5
+  |
+2 |     list[integer64] apples
+  |     ^^^^^^^^^^^^^^^ the compiler adds this in roadmap phase 3
+  |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0409]: a list type names the type of its elements
+ --> tests/check/lists.lym:4:16
+  |
+4 | function sizes(list _, list[integer64, 3] _, array[list[integer64], 2] _, list[list[integer64]] _)
+  |                ^^^^ expected `list[element type]`
+  |
+help: write the type of the elements, as in `list[integer64]`; a list grows, so it has no length in its type
+
+error[L0409]: a list type names the type of its elements
+ --> tests/check/lists.lym:4:24
+  |
+4 | function sizes(list _, list[integer64, 3] _, array[list[integer64], 2] _, list[list[integer64]] _)
+  |                        ^^^^^^^^^^^^^^^^^^ expected `list[element type]`
+  |
+help: write the type of the elements, as in `list[integer64]`; a list grows, so it has no length in its type
+
+error[L0309]: lists inside other values are not available yet
+ --> tests/check/lists.lym:4:52
+  |
+4 | function sizes(list _, list[integer64, 3] _, array[list[integer64], 2] _, list[list[integer64]] _)
+  |                                                    ^^^^^^^^^^^^^^^ the compiler adds this in roadmap phase 3
+  |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0309]: lists inside other values are not available yet
+ --> tests/check/lists.lym:4:80
+  |
+4 | function sizes(list _, list[integer64, 3] _, array[list[integer64], 2] _, list[list[integer64]] _)
+  |                                                                                ^^^^^^^^^^^^^^^ the compiler adds this in roadmap phase 3
+  |
+help: write this part another way for now; the roadmap in the README lists what each phase adds
+
+error[L0412]: `list()` needs to know which list to build
+ --> tests/check/lists.lym:9:24
+  |
+9 |     variable unknown = list()
+  |                        ^^^^^^ its element type comes from the type of the place it goes
+  |
+help: write the type where the list goes, as in `variable list[integer64] values = list()`
+
+error[L0402]: expected an `integer64`, found a list
+  --> tests/check/lists.lym:10:32
+   |
+10 |     constant integer64 count = list()
+   |                                ^^^^^^ `list()` builds a list
+   |
+help: use a value of the expected type here; `list()` only goes where a list does
+
+error[L0501]: `list` takes no arguments, but 1 was given
+  --> tests/check/lists.lym:11:41
+   |
+11 |     constant list[integer64] made = list(3)
+   |                                         ^^^ `list()` builds a list with no elements
+   |
+help: write `list()`, then add the elements with `push`
+
+error[L0504]: `push` changes the list it is given, so the list needs `variable`
+  --> tests/check/lists.lym:12:10
+   |
+12 |     push(values, 1)
+   |          ^^^^^^ passed without `variable`
+   |
+help: mark the list `variable`
+   |
+12 |     push(variable values, 1)
+
+error[L0504]: `push` only reads the value it adds, so the value takes no `variable`
+  --> tests/check/lists.lym:13:27
+   |
+13 |     push(variable values, variable count)
+   |                           ^^^^^^^^^ not needed here
+   |
+help: remove `variable`
+   |
+13 |     push(variable values, count)
+
+error[L0402]: `push` adds to a list, but this is an `integer64`
+  --> tests/check/lists.lym:15:19
+   |
+15 |     push(variable total, 1)
+   |                   ^^^^^ not a list
+   |
+help: pass a `list` binding, marked `variable`, as in `push(variable values, 7)`
+
+error[L0402]: expected an `integer64`, found a `string`
+  --> tests/check/lists.lym:16:27
+   |
+16 |     push(variable values, "seven")
+   |                           ^^^^^^^ this is a `string`
+   |
+help: Lymra never converts a value to another type by itself; use a value of the expected type
+
+error[L0501]: `push` takes 2 arguments, but 1 was given
+  --> tests/check/lists.lym:17:9
+   |
+17 |     push(variable values)
+   |         ^^^^^^^^^^^^^^^^^ `push` adds one value to the end of one list
+   |
+help: write `push(variable values, 7)`
+
+error[L0208]: `made` is a constant, so it cannot change
+  --> tests/check/lists.lym:18:19
+   |
+11 |     constant list[integer64] made = list(3)
+   |                              ---- declared as a constant here
+...
+18 |     push(variable made, 1)
+   |                   ^^^^ changed here
+   |
+help: declare it with `variable` if it has to change
+   |
+11 |     variable list[integer64] made = list(3)
+
+error[L0411]: index -1 is negative, and indexes count up from 0
+  --> tests/check/lists.lym:19:20
+   |
+19 |     print("{values[-1]}")
+   |                    ^^ the program would stop here every time it ran this line
+   |
+help: the first element is at index 0
+
+error[L0402]: a `list[integer64]` cannot be put into text
+  --> tests/check/lists.lym:20:13
+   |
+20 |     print("{values}")
+   |             ^^^^^^ text holds numbers, `boolean` values and text
+   |
+help: put its elements in one by one, as in `{values[0]}`, or print them in a loop
+
+error[L0405]: `==` compares single values, and these are lists
+  --> tests/check/lists.lym:21:8
+   |
+21 |     if values == made
+   |        ^^^^^^^^^^^^^^ comparing lists
+   |
+help: compare their lengths, then the elements one by one in a loop
+
+error[L0405]: `+` works on numbers, but this is a `list[integer64]`
+  --> tests/check/lists.lym:23:20
+   |
+23 |     print("{length(values + made)}")
+   |                    ^^^^^^ not a number
+   |
+help: arithmetic works on single numbers; work on the elements one by one
+
+error[L0405]: `+` works on numbers, but this is a `list[integer64]`
+  --> tests/check/lists.lym:23:29
+   |
+23 |     print("{length(values + made)}")
+   |                             ^^^^ not a number
+   |
+help: arithmetic works on single numbers; work on the elements one by one
+
+error[L0703]: `values` cannot be replaced while a `for` loop goes over it
+  --> tests/check/lists.lym:25:9
+   |
+24 |     for value in values
+   |                  ------ the loop goes over it here
+25 |         values = list()
+   |         ^^^^^^ this replaces the whole list
+   |
+help: change its elements or `push` to it inside the loop, and replace it after the loop ends
+
+error[L0703]: `values` cannot be passed with `variable` while a `for` loop goes over it
+  --> tests/check/lists.lym:26:15
+   |
+24 |     for value in values
+   |                  ------ the loop goes over it here
+...
+26 |         clear(variable values)
+   |               ^^^^^^^^^^^^^^^ the function could replace the whole list
+   |
+help: pass it without `variable`, or call the function after the loop; `push` and changing elements are fine inside it
+
+found 21 errors in tests/check/lists.lym
+run `lymra explain L0309` to read why a rule exists and how to fix it

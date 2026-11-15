@@ -27,9 +27,12 @@ impl Number {
         match ty {
             Type::Integer(integer) => Some(Number::Integer(*integer)),
             Type::Float(float) => Some(Number::Float(*float)),
-            Type::Boolean | Type::String | Type::Array(_) | Type::Custom(_) | Type::Choice(_) => {
-                None
-            }
+            Type::Boolean
+            | Type::String
+            | Type::Array(_)
+            | Type::Custom(_)
+            | Type::Choice(_)
+            | Type::List(_) => None,
         }
     }
 

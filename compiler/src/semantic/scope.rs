@@ -159,6 +159,7 @@ impl<'src> FunctionScope<'src> {
                     ty: local.ty?,
                     mutable: local.kind.is_mutable(),
                     by_reference: local.kind == LocalKind::VariableParameter,
+                    span: local.name.span,
                 })
             })
             .collect()

@@ -74,7 +74,7 @@ pub(in crate::semantic) fn too_large_for_stack(
         Label::new(span, "too large for the call stack"),
         Help::text(format!(
             "a value on the call stack takes at most {MAX_VALUE_SIZE} bytes (1 MiB); \
-             use fewer or smaller elements, or keep the data in a `list`, which phase 3 adds"
+             use fewer or smaller elements, or keep the data in a `list`, which grows on a data stack"
         )),
     )
 }
@@ -149,12 +149,12 @@ pub(in crate::semantic) fn length_argument_count(found: usize, call: Span) -> Di
 pub(in crate::semantic) fn not_indexable(found: &Type, span: Span) -> Diagnostic {
     operator_type(
         format!(
-            "only arrays can be indexed, and this is {}",
+            "only arrays and lists can be indexed, and this is {}",
             described(found)
         ),
         span,
-        "not an array".to_owned(),
-        "index an array, as in `values[0]`",
+        "not an array or a list".to_owned(),
+        "index an array or a list, as in `values[0]`",
     )
 }
 
@@ -170,12 +170,12 @@ pub(in crate::semantic) fn index_not_integer(found: &Type, span: Span) -> Diagno
 pub(in crate::semantic) fn no_length(found: &Type, span: Span) -> Diagnostic {
     operator_type(
         format!(
-            "`length` counts the elements of an array or the bytes of a text, but this is {}",
+            "`length` counts the elements of an array or a list, or the bytes of a text, but this is {}",
             described(found)
         ),
         span,
         "has no length".to_owned(),
-        "pass an array or a `string`",
+        "pass an array, a list or a `string`",
     )
 }
 
@@ -193,7 +193,12 @@ pub(in crate::semantic) fn compound_in_text(found: &Type, span: Span, source: &s
                 .map_or("field", |field| field.name.as_str())
         ),
         Type::Choice(_) => "print it from a `match`, with a `case` for each variant".to_owned(),
-        Type::Integer(_) | Type::Float(_) | Type::Boolean | Type::String | Type::Array(_) => {
+        Type::Integer(_)
+        | Type::Float(_)
+        | Type::Boolean
+        | Type::String
+        | Type::Array(_)
+        | Type::List(_) => {
             format!(
                 "put its elements in one by one, as in `{{{source}[0]}}`, or print them in a loop"
             )
@@ -220,7 +225,8 @@ pub(in crate::semantic) fn not_iterable(found: &Type, span: Span, source: &str) 
         | Type::String
         | Type::Array(_)
         | Type::Custom(_)
-        | Type::Choice(_) => Help::text("loop over `range(start, end)` or over an array"),
+        | Type::Choice(_)
+        | Type::List(_) => Help::text("loop over `range(start, end)`, an array or a list"),
     };
     Diagnostic::new(
         ErrorCode::L0405,

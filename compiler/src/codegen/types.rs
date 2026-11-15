@@ -3,23 +3,30 @@
  * a struct of its own, so they are values in C as they are in Lymra:
  * assigned, passed and returned whole. A struct is defined the first time a
  * type is named, after the structs of the values it holds.
+ *
+ * A list type becomes a struct that says where its elements start on their
+ * data stack, how many there are, and which stack they grow on, with the
+ * functions that build, grow and replace such a list.
  */
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::{INDENT, c_syntax};
-use crate::ir::{ArrayType, ChoiceType, CustomType, FloatType, Type};
+use crate::ir::{ArrayType, ChoiceType, CustomType, FloatType, ListType, Type};
 
 #[derive(Default)]
 pub(super) struct CTypes {
     arrays: HashMap<Arc<ArrayType>, String>,
+    lists: HashMap<Arc<ListType>, String>,
     /// The declared types and choices defined so far, by name, which is unique in a program.
     customs: HashMap<String, String>,
     /// The structs, and the fill functions of arrays, in the order C needs them.
     definitions: Vec<String>,
     /// Whether a float type has been named, so the program uses floats.
     pub uses_floats: bool,
+    /// Whether a list type has been named, so the program needs the runtime's data stacks.
+    pub uses_lists: bool,
 }
 
 impl CTypes {
@@ -39,6 +46,7 @@ impl CTypes {
             Type::Array(array) => self.array_name(array),
             Type::Custom(custom) => self.custom_name(custom),
             Type::Choice(choice) => self.choice_name(choice),
+            Type::List(list) => self.list_name(list),
         }
     }
 
@@ -135,10 +143,79 @@ impl CTypes {
         name
     }
 
+    fn list_name(&mut self, list: &Arc<ListType>) -> String {
+        if let Some(name) = self.lists.get(list) {
+            return name.clone();
+        }
+        let element = self.name(&list.element);
+        let name = format!("list_{}", self.lists.len());
+        self.definitions
+            .push(list_definition(&name, &element, &list.element));
+        self.lists.insert(Arc::clone(list), name.clone());
+        self.uses_lists = true;
+        name
+    }
+
     /// Every struct named so far, each after the ones it holds.
     pub fn definitions(&self) -> &[String] {
         &self.definitions
     }
+}
+
+/// The function that does `operation` (`start`, `push`, `place` or `replace`) on lists of the C type `name`.
+pub(super) fn list_function(name: &str, operation: &str) -> String {
+    format!("{name}_{operation}")
+}
+
+/**
+ * The struct for a list type and the functions that work on it. `start`
+ * begins an empty list at the top of a stack; `push` adds to the end of a
+ * list, which has to be the newest value on its stack; `place` copies
+ * elements to the top of a stack, from anywhere, the same stack included;
+ * `replace` moves a list built right above another one down into its place.
+ */
+fn list_definition(name: &str, element: &str, element_type: &Type) -> String {
+    format!(
+        "/* list[{element_type}] */
+typedef struct {{
+    {element} *elements;
+    int64_t length;
+    lymra_data_stack *stack;
+}} {name};
+
+LYMRA_UNUSED static {name} {name}_start(lymra_data_stack *stack) {{
+    {name} list;
+    list.elements = ({element} *)(void *)lymra_data_stack_align(stack, _Alignof({element}));
+    list.length = 0;
+    list.stack = stack;
+    return list;
+}}
+
+LYMRA_UNUSED static void {name}_push({name} *list, const {element} value, const char *site) {{
+    char *end = (char *)(list->elements + list->length);
+    {element} *slot = ({element} *)(void *)lymra_data_stack_extend(list->stack, end, sizeof value, site);
+    *slot = value;
+    list->length += 1;
+}}
+
+LYMRA_UNUSED static {name} {name}_place(lymra_data_stack *stack, const {element} *elements, int64_t length,
+                                          const char *site) {{
+    {name} list;
+    size_t bytes = (size_t)length * sizeof *elements;
+    list.elements = ({element} *)(void *)lymra_data_stack_place(stack, elements, bytes, _Alignof({element}), site);
+    list.length = length;
+    list.stack = stack;
+    return list;
+}}
+
+LYMRA_UNUSED static void {name}_replace({name} *list, const {name} value) {{
+    if (value.length != 0) {{
+        memmove(list->elements, value.elements, (size_t)value.length * sizeof *value.elements);
+    }}
+    list->length = value.length;
+    lymra_data_stack_release(list->stack, (char *)(list->elements + value.length));
+}}"
+    )
 }
 
 /// The function that builds an array of type `name` with every element set to one value.

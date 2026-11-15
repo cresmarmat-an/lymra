@@ -1,0 +1,14 @@
+#[
+    An index below 0 into a list stops the program, and the error says which
+    index and how long the list is when the program reaches it.
+]#
+
+function before(list[integer64] values, integer64 position) returns integer64
+    return values[position - 1]
+
+function main()
+    variable list[integer64] values = list()
+    push(variable values, 4)
+    push(variable values, 8)
+    print("{before(values, 2)}")
+    print("{before(values, 0)}")

@@ -4,12 +4,10 @@ use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
 use crate::source::Span;
 
 /// Built-in functions the spec describes, with the phase that implements each.
-const FUTURE_FUNCTIONS: [(&str, u8); 12] = [
+const FUTURE_FUNCTIONS: [(&str, u8); 10] = [
     ("bytes", 3),
     ("slice", 3),
-    ("list", 3),
     ("stack", 3),
-    ("push", 3),
     ("pop", 3),
     ("top", 3),
     ("filter", 3),
@@ -25,6 +23,8 @@ pub(super) enum Feature {
     NamedArguments,
     TextBuilding,
     Lists,
+    /// A list inside another value: an array, a declared type, a choice or a list.
+    NestedGrowable,
     ForEach,
     RangeValues,
     CodeArguments,
@@ -49,7 +49,7 @@ impl Feature {
     /// The type name `name` belongs to a later phase, if it does.
     pub fn future_type(name: &str) -> Option<Feature> {
         match name {
-            "list" | "stack" | "view" => Some(Feature::Lists),
+            "stack" | "view" => Some(Feature::Lists),
             "pool" | "handle" => Some(Feature::Pools),
             _ => None,
         }
@@ -62,7 +62,8 @@ impl Feature {
             Self::TextBuilding => {
                 return "text with interpolation can only be given to `print` for now".to_owned();
             }
-            Self::Lists => "`list`, `stack` and `view` are",
+            Self::Lists => "`stack` and `view` are",
+            Self::NestedGrowable => "lists inside other values are",
             Self::ForEach => {
                 return "`for` can only loop over `range` and arrays for now".to_owned();
             }
@@ -83,6 +84,7 @@ impl Feature {
             Self::TextBuilding
             | Self::Packed
             | Self::Lists
+            | Self::NestedGrowable
             | Self::ForEach
             | Self::RangeValues
             | Self::CodeArguments => 3,
@@ -114,9 +116,9 @@ mod tests {
     #[test]
     fn future_functions_carry_their_phase() {
         assert_eq!(
-            Feature::future_function("push"),
+            Feature::future_function("pop"),
             Some(Feature::Function {
-                name: "push",
+                name: "pop",
                 phase: 3
             })
         );

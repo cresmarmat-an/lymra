@@ -33,6 +33,12 @@ struct Passed<'src> {
 struct Uses<'src> {
     reads: Vec<(&'src str, Span)>,
     passed: Vec<Passed<'src>>,
+    /**
+     * The lists given to `push`. It computes its value before it changes the
+     * list, so reading the list in the value is clear; passing it with
+     * `variable` again is not.
+     */
+    pushed: Vec<Passed<'src>>,
 }
 
 impl<'src> Visitor<'src> for Uses<'src> {
@@ -52,14 +58,21 @@ impl<'src> Visitor<'src> for Uses<'src> {
                 None
             }
         };
-        for argument in &call.arguments {
+        for (position, argument) in call.arguments.iter().enumerate() {
             match &argument.kind {
                 ArgumentKind::Mutable(place) => match &place.kind {
-                    ast::ExprKind::Name(name) => self.passed.push(Passed {
-                        name,
-                        function,
-                        span: argument.span,
-                    }),
+                    ast::ExprKind::Name(name) => {
+                        let passed = Passed {
+                            name,
+                            function,
+                            span: argument.span,
+                        };
+                        if function == Some("push") && position == 0 {
+                            self.pushed.push(passed);
+                        } else {
+                            self.passed.push(passed);
+                        }
+                    }
                     _ => self.visit_expr(place),
                 },
                 ArgumentKind::Positional(value) | ArgumentKind::Named { value, .. } => {
@@ -90,6 +103,7 @@ pub(super) fn find_conflict<'src>(parts: &[&ast::Expr<'src>]) -> Option<Conflict
         let passed_again = uses
             .passed
             .iter()
+            .chain(&uses.pushed)
             .filter(|other| other.name == passed.name && other.span != passed.span)
             .map(|other| other.span);
         let used = reads.chain(passed_again).min_by_key(|span| span.start)?;

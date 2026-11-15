@@ -1,6 +1,6 @@
 //! The targets of assignments: a binding, or an element or a field inside one, as in `grid[row].cells[column]`.
 
-use super::{CheckResult, Checker, errors};
+use super::{CheckResult, Checker};
 use crate::ast;
 use crate::ir::{self, Type};
 use crate::source::Span;
@@ -87,16 +87,14 @@ impl<'src> Checker<'src, '_> {
                     span,
                 } => {
                     let value = self.check_index_value(index)?;
-                    let Type::Array(array) = ty else {
-                        return Err(self.report(errors::not_indexable(&ty, *object)));
-                    };
+                    let (element, length) = self.elements_of(&ty, *object)?;
                     checked.push(ir::PlaceStep::Index(ir::PlaceIndex {
-                        checked: self.needs_bounds_check(&value, array.length)?,
+                        checked: self.needs_bounds_check(&value, length)?,
                         value,
-                        length: array.length,
+                        length,
                         span: *span,
                     }));
-                    ty = array.element.clone();
+                    ty = element;
                 }
                 PlaceStep::Field { field, object } => {
                     let (position, field_type) = self.field_of(&ty, *field, *object)?;

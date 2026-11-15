@@ -1,0 +1,15 @@
+exit status 0
+--- standard output
+digits: 4 values, read as digits 2026
+returned: 10 values, read as digits 9081726354
+depth 0 holds 1
+depth 1 holds 2
+depth 2 holds 2
+changed first: 1 values, read as digits 2
+changed each turn: 3 values, read as digits 12
+one list: 4 values, read as digits 1230
+freed before at 0: 1 and 2
+freed before at 1: 1 and 2
+freed before at 2: 1 and 2
+freed before: 1 values, read as digits 2
+--- standard error

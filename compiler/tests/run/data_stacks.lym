@@ -1,0 +1,79 @@
+#[
+    Recursion with lists. The copies of one binding at different depths
+    share a data stack, each above the one before, and each call frees its
+    own before it returns. Every function here changes a list it was handed
+    only while no newer list sits above it, so the compiler accepts them.
+]#
+
+function digits_of(variable list[integer64] digits, integer64 value)
+    if value >= 10
+        digits_of(variable digits, value / 10)
+    push(variable digits, value % 10)
+
+function digits_returned(integer64 value) returns list[integer64]
+    variable list[integer64] digits = list()
+    if value >= 10
+        digits = digits_returned(value / 10)
+    push(variable digits, value % 10)
+    return digits
+
+function changed_first(variable list[integer64] values, integer64 depth)
+    push(variable values, depth)
+    variable list[integer64] mine = list()
+    if depth > 0
+        changed_first(variable mine, depth - 1)
+    push(variable mine, 100)
+    print("depth {depth} holds {length(mine)}")
+
+function changed_each_turn(variable list[integer64] values, integer64 depth)
+    for turn in range(0, depth)
+        push(variable values, turn)
+        variable list[integer64] mine = list()
+        changed_each_turn(variable mine, turn)
+
+function one_list(variable list[integer64] values, integer64 depth)
+    variable list[integer64] kept = list()
+    push(variable kept, depth * 10)
+    if depth > 0
+        one_list(variable values, depth - 1)
+    push(variable values, kept[0])
+
+function freed_before(variable list[integer64] values, integer64 depth)
+    variable list[integer64] mine = list()
+    if depth > 0
+        freed_before(variable mine, depth - 1)
+    mine = grown(variable values)
+    push(variable mine, 1)
+    print("freed before at {depth}: {length(values)} and {length(mine)}")
+
+function grown(variable list[integer64] values) returns list[integer64]
+    push(variable values, 2)
+    return values
+
+function show(string name, list[integer64] values)
+    variable integer64 sum = 0
+    for value in values
+        sum = sum * 10 + value
+    print("{name}: {length(values)} values, read as digits {sum}")
+
+function main()
+    variable list[integer64] digits = list()
+    digits_of(variable digits, 2026)
+    show("digits", digits)
+    show("returned", digits_returned(9081726354))
+
+    variable list[integer64] values = list()
+    changed_first(variable values, 2)
+    show("changed first", values)
+
+    values = list()
+    changed_each_turn(variable values, 3)
+    show("changed each turn", values)
+
+    values = list()
+    one_list(variable values, 3)
+    show("one list", values)
+
+    values = list()
+    freed_before(variable values, 2)
+    show("freed before", values)

@@ -13,12 +13,14 @@ mod arrays;
 mod choices;
 mod custom_types;
 mod cycles;
+mod data_stacks;
 mod errors;
 mod evaluation_order;
 mod expressions;
 mod features;
 mod floats;
 mod items;
+mod lists;
 mod places;
 mod scope;
 mod statements;
@@ -39,21 +41,19 @@ use scope::{FunctionScope, LocalKind};
 
 type CheckResult<T> = Result<T, ErrorReported>;
 
-/// The built-in functions of phase 1.
-const BUILT_IN_FUNCTIONS: [&str; 6] = [
+/// The built-in functions the compiler implements.
+const BUILT_IN_FUNCTIONS: [&str; 7] = [
     "print",
     "range",
     "length",
+    "push",
     "wrapping_add",
     "wrapping_subtract",
     "wrapping_multiply",
 ];
 
-/**
- * Built-in types that are not integers. Floating-point types arrive later in
- * phase 2, but their names are taken already. Calling `array` builds one.
- */
-const OTHER_TYPE_NAMES: [&str; 5] = ["boolean", "string", "array", "float32", "float64"];
+/// Built-in types that are not integers. Calling `array` or `list` builds one.
+const OTHER_TYPE_NAMES: [&str; 6] = ["boolean", "string", "array", "list", "float32", "float64"];
 
 /// What a name the language itself defines stands for. No declaration can take such a name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -223,6 +223,8 @@ struct Checker<'src, 'ast> {
     prove_bounds: bool,
     /// The function whose body is being checked. `None` while top-level constants are computed.
     scope: Option<FunctionScope<'src>>,
+    /// The list bindings the `for` loops around the current point go over, each with where its loop names it.
+    iterated: Vec<(ir::LocalId, Span)>,
 }
 
 impl<'src, 'ast> Checker<'src, 'ast> {
@@ -239,6 +241,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             optimize: None,
             prove_bounds: false,
             scope: None,
+            iterated: Vec::new(),
         }
     }
 
@@ -527,13 +530,20 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             _ => None,
         };
         match (functions, constants) {
-            (Ok(functions), Ok(constants)) => Ok(Program {
-                constants,
-                functions,
-                main,
-                optimize: self.optimize,
-                prove_bounds: self.prove_bounds,
-            }),
+            (Ok(functions), Ok(constants)) => {
+                // Where lists can travel is known only once every function is checked.
+                let unordered = data_stacks::check(&functions);
+                if !unordered.is_empty() {
+                    return Err(unordered);
+                }
+                Ok(Program {
+                    constants,
+                    functions,
+                    main,
+                    optimize: self.optimize,
+                    prove_bounds: self.prove_bounds,
+                })
+            }
             // Every failure is reported where it happens, so this cannot occur without an error above.
             _ => Err(self.diagnostics),
         }

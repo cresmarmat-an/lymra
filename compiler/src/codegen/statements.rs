@@ -1,9 +1,20 @@
-//! C for statements. An expression may need statements of its own first; they go right before the statement that uses it.
+/*!
+ * C for statements. An expression may need statements of its own first; they
+ * go right before the statement that uses it.
+ *
+ * Each C block frees the lists it built when control leaves it: at its end,
+ * and at every `return`, `break` and `continue` that leaves it early. A list a
+ * statement computes without a binding is freed once the statement is done.
+ */
 
 use super::expressions::{Bounds, is_addressable};
-use super::{Generator, INDENT, Writer, c_syntax, local_access};
+use super::types::list_function;
+use super::{
+    DESTINATION, Generator, INDENT, Release, Scope, Writer, c_syntax, data_stack, local_access,
+    local_address,
+};
 use crate::ir::{
-    Block, Branch, Case, Expr, FloatType, Function, LocalId, Place, PlaceStep, PrintPart,
+    Block, Branch, Case, Expr, Extent, FloatType, Function, LocalId, Place, PlaceStep, PrintPart,
     Statement, TextForm,
 };
 
@@ -14,8 +25,31 @@ impl Generator<'_, '_> {
         block: &Block,
         writer: &mut Writer,
     ) {
+        self.scoped_block(function, block, false, writer);
+    }
+
+    /// A block that frees the lists it builds when control reaches its end. A loop's body is the block `break` and `continue` leave.
+    fn scoped_block(
+        &mut self,
+        function: &Function<'_>,
+        block: &Block,
+        loop_body: bool,
+        writer: &mut Writer,
+    ) {
+        self.scopes.push(Scope {
+            releases: Vec::new(),
+            loop_body,
+        });
         for statement in &block.statements {
             self.statement(function, statement, writer);
+        }
+        let scope = self.scopes.pop().unwrap_or_default();
+        let leaves = matches!(
+            block.statements.last(),
+            Some(Statement::Return(_) | Statement::Break | Statement::Continue)
+        );
+        if !leaves {
+            Self::release(writer, &scope.releases);
         }
     }
 
@@ -25,26 +59,72 @@ impl Generator<'_, '_> {
         writer.depth -= 1;
     }
 
+    /// The body of a loop, one level in.
+    fn loop_body(&mut self, function: &Function<'_>, body: &Block, writer: &mut Writer) {
+        writer.depth += 1;
+        self.scoped_block(function, body, true, writer);
+        writer.depth -= 1;
+    }
+
+    /// Opens a C block that a statement keeps lists in across its own blocks, such as a loop over a list a call returns.
+    fn open_wrapper(&mut self, writer: &mut Writer) {
+        writer.line("{");
+        writer.depth += 1;
+        self.scopes.push(Scope::default());
+    }
+
+    /// Moves the lists the statement has computed so far into the wrapper, which frees them when it closes.
+    fn keep_in_wrapper(&mut self) {
+        let built: Vec<Release> = self.pending.drain(..).collect();
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.releases.extend(built);
+        }
+    }
+
+    fn close_wrapper(&mut self, writer: &mut Writer) {
+        let scope = self.scopes.pop().unwrap_or_default();
+        Self::release(writer, &scope.releases);
+        writer.depth -= 1;
+        writer.line("}");
+    }
+
     fn statement(&mut self, function: &Function<'_>, statement: &Statement, writer: &mut Writer) {
+        self.statement_kind(function, statement, writer);
+        let built: Vec<Release> = self.pending.drain(..).collect();
+        Self::release(writer, &built);
+    }
+
+    fn statement_kind(
+        &mut self,
+        function: &Function<'_>,
+        statement: &Statement,
+        writer: &mut Writer,
+    ) {
         match statement {
-            Statement::Declare { local, value } => {
-                let declared = &function.locals[*local];
-                let constness = if declared.mutable { "" } else { "const " };
-                let value = self.expr(function, value, writer);
-                writer.line(&format!(
-                    "{constness}{} {} = {value};",
-                    self.types.name(&declared.ty),
-                    c_syntax::local_name(declared.name)
-                ));
-            }
+            Statement::Declare { local, value } => self.declare(function, *local, value, writer),
             Statement::Discard(value) => {
                 let value = self.expr(function, value, writer);
                 writer.line(&format!("(void)({value});"));
             }
+            Statement::Assign { target, value }
+                if target.steps.is_empty() && value.ty.is_growable() =>
+            {
+                self.replace_list(function, target.local, value, writer);
+            }
             Statement::Assign { target, value } => self.assign(function, target, value, writer),
             Statement::Call(call) => {
-                let call = self.call(function, call, writer);
+                let call = self.call(function, call, None, writer);
                 writer.line(&format!("{call};"));
+            }
+            Statement::Push { list, value, span } => {
+                let code = self.expr(function, value, writer);
+                let site = self.site(*span);
+                let list_type = self.types.name(&function.locals[*list].ty);
+                writer.line(&format!(
+                    "{}({}, {code}, {site});",
+                    list_function(&list_type, "push"),
+                    local_address(function, *list)
+                ));
             }
             Statement::Print(parts) => self.print(function, parts, writer),
             Statement::If {
@@ -67,16 +147,18 @@ impl Generator<'_, '_> {
                 body,
             } => self.for_each(function, *variable, array, *length, body, writer),
             Statement::Match { value, cases } => self.match_cases(function, value, cases, writer),
-            Statement::Return(Some(value)) => {
-                let value = self.expr(function, value, writer);
-                writer.line(&format!("return {value};"));
+            Statement::Return(value) => self.return_statement(function, value.as_ref(), writer),
+            Statement::Break => {
+                Self::release(writer, &self.loop_lists());
+                writer.line("break;");
             }
-            Statement::Return(None) => writer.line("return;"),
-            Statement::Break => writer.line("break;"),
-            Statement::Continue => writer.line("continue;"),
+            Statement::Continue => {
+                Self::release(writer, &self.loop_lists());
+                writer.line("continue;");
+            }
             Statement::Assert { condition } => {
                 let site = self.site(condition.span);
-                let condition = self.condition(function, condition, writer);
+                let condition = self.condition_now(function, condition, writer);
                 writer.line(&format!("if (!({condition})) {{"));
                 writer.line(&format!(
                     "{INDENT}lymra_trap(LYMRA_ASSERTION_FAILED, {site});"
@@ -84,6 +166,146 @@ impl Generator<'_, '_> {
                 writer.line("}");
             }
         }
+    }
+
+    /// A declaration. A list binding gets a data stack of its own, which the block frees when control leaves it.
+    fn declare(
+        &mut self,
+        function: &Function<'_>,
+        local: LocalId,
+        value: &Expr,
+        writer: &mut Writer,
+    ) {
+        let declared = &function.locals[local];
+        let constness = if declared.mutable { "" } else { "const " };
+        let ty = self.types.name(&declared.ty);
+        let name = c_syntax::local_name(declared.name);
+        if !declared.ty.is_growable() {
+            let value = self.expr(function, value, writer);
+            writer.line(&format!("{constness}{ty} {name} = {value};"));
+            return;
+        }
+        let stack = self.new_data_stack();
+        let code = self.build_list(function, value, &data_stack(stack), writer);
+        writer.line(&format!("{constness}{ty} {name} = {code};"));
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.releases.push(Release { stack, list: name });
+        }
+    }
+
+    /**
+     * `items = value` for a list. Only the newest value on a data stack can be
+     * replaced, so the runtime checks that first. A value that reads the old
+     * list is built right above it and then moved down into its place; any
+     * other replaces it after it is freed, with no copy (spec 7.9).
+     */
+    fn replace_list(
+        &mut self,
+        function: &Function<'_>,
+        target: LocalId,
+        value: &Expr,
+        writer: &mut Writer,
+    ) {
+        let list = local_access(function, target);
+        let site = self.site(value.span);
+        writer.line(&format!(
+            "lymra_data_stack_require_top(({list}).stack, (const char *)(({list}).elements + ({list}).length), {site});"
+        ));
+        let stack = format!("({list}).stack");
+        if value.mentions(target) {
+            let code = self.build_list(function, value, &stack, writer);
+            let built = self.temporary(&value.ty, &code, writer);
+            let list_type = self.types.name(&value.ty);
+            writer.line(&format!(
+                "{}(&({list}), {built});",
+                list_function(&list_type, "replace")
+            ));
+        } else {
+            writer.line(&format!(
+                "lymra_data_stack_release({stack}, (char *)({list}).elements);"
+            ));
+            let code = self.build_list(function, value, &stack, writer);
+            writer.line(&format!("{list} = {code};"));
+        }
+    }
+
+    /**
+     * A `return`. Every list the function has open is freed first. A returned
+     * list is then moved to the top of the stack the caller named: freeing
+     * leaves the bytes in place, and the move copies them like `memmove`, so
+     * it works even where the result lay on that same stack.
+     */
+    fn return_statement(
+        &mut self,
+        function: &Function<'_>,
+        value: Option<&Expr>,
+        writer: &mut Writer,
+    ) {
+        let Some(value) = value else {
+            Self::release(writer, &self.open_lists());
+            writer.line("return;");
+            return;
+        };
+        let code = self.expr(function, value, writer);
+        let open = self.open_lists();
+        if !value.ty.is_growable() {
+            if open.is_empty() {
+                writer.line(&format!("return {code};"));
+            } else {
+                let result = self.temporary(&value.ty, &code, writer);
+                Self::release(writer, &open);
+                writer.line(&format!("return {result};"));
+            }
+            self.pending.clear();
+            return;
+        }
+        let ty = self.types.name(&value.ty);
+        let result = self.helper("result");
+        writer.line(&format!("const {ty} {result} = {code};"));
+        // Dropped first and settled after the move, so AddressSanitizer lets the move read what was freed.
+        for release in open.iter().rev() {
+            writer.line(&format!(
+                "lymra_data_stack_drop({}, {});",
+                data_stack(release.stack),
+                release.start()
+            ));
+        }
+        let site = self.site(value.span);
+        let moved = self.helper("moved");
+        writer.line(&format!(
+            "const {ty} {moved} = {}({DESTINATION}, {result}.elements, {result}.length, {site});",
+            list_function(&ty, "place")
+        ));
+        for release in &open {
+            writer.line(&format!(
+                "lymra_data_stack_settle({});",
+                data_stack(release.stack)
+            ));
+        }
+        self.pending.clear();
+        writer.line(&format!("return {moved};"));
+    }
+
+    /**
+     * A condition of an `if`, a `while` or an `assert`. Lists computed for it
+     * are freed as soon as it is known, which it then holds as a `bool`.
+     */
+    fn condition_now(
+        &mut self,
+        function: &Function<'_>,
+        condition: &Expr,
+        writer: &mut Writer,
+    ) -> String {
+        let earlier = self.pending.len();
+        let code = self.condition(function, condition, writer);
+        if self.pending.len() == earlier {
+            return code;
+        }
+        let test = self.helper("test");
+        writer.line(&format!("const bool {test} = {code};"));
+        let built: Vec<Release> = self.pending.drain(earlier..).collect();
+        Self::release(writer, &built);
+        test
     }
 
     /**
@@ -122,7 +344,7 @@ impl Generator<'_, '_> {
                 checked: index.checked,
                 span: index.span,
             };
-            let code = self.position(function, &index.value, bounds, writer);
+            let code = self.position(function, &index.value, bounds, &place, writer);
             let later_effect = effects[position + 1..].iter().any(|&effect| effect);
             let code = if effects[position] && later_effect {
                 let name = self.helper("position");
@@ -162,11 +384,11 @@ impl Generator<'_, '_> {
         let mut opened = 0;
         for (index, branch) in branches.iter().enumerate() {
             if index == 0 {
-                let condition = self.condition(function, &branch.condition, writer);
+                let condition = self.condition_now(function, &branch.condition, writer);
                 writer.line(&format!("if ({condition}) {{"));
             } else {
                 let mut setup = Writer::at(writer.depth + 1);
-                let condition = self.condition(function, &branch.condition, &mut setup);
+                let condition = self.condition_now(function, &branch.condition, &mut setup);
                 if setup.is_empty() {
                     writer.line(&format!("}} else if ({condition}) {{"));
                 } else {
@@ -199,7 +421,7 @@ impl Generator<'_, '_> {
         writer: &mut Writer,
     ) {
         let mut setup = Writer::at(writer.depth + 1);
-        let condition = self.condition(function, condition, &mut setup);
+        let condition = self.condition_now(function, condition, &mut setup);
         if setup.is_empty() {
             writer.line(&format!("while ({condition}) {{"));
         } else {
@@ -209,7 +431,7 @@ impl Generator<'_, '_> {
             writer.line(&format!("{INDENT}{INDENT}break;"));
             writer.line(&format!("{INDENT}}}"));
         }
-        self.nested_block(function, body, writer);
+        self.loop_body(function, body, writer);
         writer.line("}");
     }
 
@@ -230,53 +452,63 @@ impl Generator<'_, '_> {
         let ty = self.types.name(&start.ty);
         let counter = self.helper("range_next");
         let limit = self.helper("range_end");
-        writer.line("{");
-        writer.depth += 1;
+        self.open_wrapper(writer);
         let start = self.expr(function, start, writer);
         writer.line(&format!("{ty} {counter} = {start};"));
         let end = self.expr(function, end, writer);
         writer.line(&format!("const {ty} {limit} = {end};"));
+        self.keep_in_wrapper();
         writer.line(&format!("for (; {counter} < {limit}; ++{counter}) {{"));
         writer.depth += 1;
         if let Some(variable) = variable {
             let name = c_syntax::local_name(function.locals[variable].name);
             writer.line(&format!("const {ty} {name} = {counter};"));
         }
-        self.block_contents(function, body, writer);
         writer.depth -= 1;
+        self.loop_body(function, body, writer);
         writer.line("}");
-        writer.depth -= 1;
-        writer.line("}");
+        self.close_wrapper(writer);
     }
 
     /**
-     * `for variable in array`. The array is computed once, and a pointer
-     * keeps where it is; each element is read when its turn comes.
+     * `for variable in items`. The array or list is computed once, and a
+     * pointer keeps where it is; each element is read when its turn comes. A
+     * list's length is read once, before the first turn, so the body can add
+     * to the list without lengthening the loop.
      */
     fn for_each(
         &mut self,
         function: &Function<'_>,
         variable: Option<LocalId>,
         array: &Expr,
-        length: u64,
+        length: Extent,
         body: &Block,
         writer: &mut Writer,
     ) {
         let array_name = self.types.name(&array.ty);
         let items = self.helper("items");
         let position = self.helper("position");
-        writer.line("{");
-        writer.depth += 1;
+        self.open_wrapper(writer);
         let code = self.expr(function, array, writer);
         let address = if is_addressable(array) {
             format!("&({code})")
         } else {
             format!("&{}", self.temporary(&array.ty, &code, writer))
         };
+        self.keep_in_wrapper();
         writer.line(&format!("const {array_name} *{items} = {address};"));
-        writer.line(&format!(
-            "for (size_t {position} = 0; {position} < {length}u; ++{position}) {{"
-        ));
+        match length {
+            Extent::Fixed(length) => writer.line(&format!(
+                "for (size_t {position} = 0; {position} < {length}u; ++{position}) {{"
+            )),
+            Extent::Dynamic => {
+                let count = self.helper("count");
+                writer.line(&format!("const size_t {count} = (size_t){items}->length;"));
+                writer.line(&format!(
+                    "for (size_t {position} = 0; {position} < {count}; ++{position}) {{"
+                ));
+            }
+        }
         writer.depth += 1;
         if let Some(variable) = variable {
             let local = &function.locals[variable];
@@ -286,11 +518,10 @@ impl Generator<'_, '_> {
                 "const {element} {name} = {items}->elements[{position}];"
             ));
         }
-        self.block_contents(function, body, writer);
         writer.depth -= 1;
+        self.loop_body(function, body, writer);
         writer.line("}");
-        writer.depth -= 1;
-        writer.line("}");
+        self.close_wrapper(writer);
     }
 
     /**
@@ -310,8 +541,7 @@ impl Generator<'_, '_> {
     ) {
         let choice = self.types.name(&value.ty);
         let matched = self.helper("matched");
-        writer.line("{");
-        writer.depth += 1;
+        self.open_wrapper(writer);
         let code = self.expr(function, value, writer);
         // With one case and nothing to bind, the value is only computed.
         let reads_value = cases.len() > 1 || cases.iter().any(|case| !case.bindings.is_empty());
@@ -325,6 +555,7 @@ impl Generator<'_, '_> {
         } else if value.has_effects() {
             writer.line(&format!("(void)({code});"));
         }
+        self.keep_in_wrapper();
         for (position, case) in cases.iter().enumerate() {
             let test = format!("{matched}->{} == {}", c_syntax::TAG, case.variant);
             let line = match (position, position + 1 == cases.len()) {
@@ -352,8 +583,7 @@ impl Generator<'_, '_> {
         if !cases.is_empty() {
             writer.line("}");
         }
-        writer.depth -= 1;
-        writer.line("}");
+        self.close_wrapper(writer);
     }
 
     /**

@@ -1,0 +1,134 @@
+#[
+    Lists are values that grow. A copy is independent, a `variable`
+    parameter reaches the caller's list, a list a function returns lands
+    where its caller wants it, and replacing a list frees the old one,
+    including when the new one is built from it. A `for` loop goes over the
+    elements a list held when the loop started.
+]#
+
+type Point
+    integer32 x
+    integer32 y
+
+function squares(integer64 count) returns list[integer64]
+    variable list[integer64] result = list()
+    for number in range(0, count)
+        push(variable result, number * number)
+    return result
+
+function total(list[integer64] values) returns integer64
+    variable integer64 sum = 0
+    for value in values
+        sum = sum + value
+    return sum
+
+function doubled(list[integer64] values) returns list[integer64]
+    variable list[integer64] result = list()
+    for value in values
+        push(variable result, value * 2)
+    return result
+
+function appended(list[integer64] values, integer64 extra) returns list[integer64]
+    variable copy = values
+    push(variable copy, extra)
+    return copy
+
+function fill(variable list[integer64] values, integer64 count)
+    for number in range(0, count)
+        push(variable values, number + 100)
+
+function reset(variable list[integer64] values)
+    values = list()
+
+function countdown(integer64 from) returns list[integer64]
+    variable list[integer64] values = list()
+    if from > 0
+        values = countdown(from - 1)
+    push(variable values, from)
+    return values
+
+function chained(integer64 depth) returns list[integer64]
+    if depth == 0
+        return squares(2)
+    return appended(chained(depth - 1), depth * 10)
+
+function first_above(list[integer64] values, integer64 limit) returns integer64
+    for value in values
+        variable list[integer64] seen = list()
+        push(variable seen, value)
+        if value > limit
+            return seen[0]
+    return -1
+
+function main()
+    variable list[integer64] numbers = squares(5)
+    print("squares {length(numbers)}: {numbers[0]} {numbers[1]} {numbers[4]}, total {total(numbers)}")
+
+    variable copy = numbers
+    copy[0] = 7
+    push(variable copy, 99)
+    print("copy {copy[0]} has {length(copy)}, numbers {numbers[0]} has {length(numbers)}")
+
+    numbers = doubled(numbers)
+    print("doubled in place: {numbers[1]} {numbers[4]}, total {total(numbers)}")
+
+    numbers = appended(numbers, 5)
+    print("appended: {length(numbers)} ending in {numbers[5]}")
+
+    fill(variable numbers, 3)
+    print("filled through a parameter: {length(numbers)} ending in {numbers[8]}")
+
+    reset(variable numbers)
+    print("reset: {length(numbers)}")
+
+    numbers = list()
+    push(variable numbers, 3)
+    print("replaced with an empty list: {length(numbers)} holding {numbers[0]}")
+
+    constant down = countdown(4)
+    print("countdown {length(down)}: {down[0]} {down[2]} {down[4]}")
+
+    constant again = chained(3)
+    print("chained {again[0]} {again[1]} {again[2]} {again[3]} {again[4]}")
+
+    print("temporaries: {total(squares(4))} {squares(6)[5]} {length(doubled(squares(3)))}")
+    if length(squares(3)) == 3
+        print("a list in a condition")
+
+    variable list[integer64] growing = list()
+    push(variable growing, 1)
+    push(variable growing, 2)
+    for value in growing
+        push(variable growing, value * 10)
+    print("a loop goes over what was there: {length(growing)} {growing[2]} {growing[3]}")
+
+    variable integer64 turns = 0
+    while length(squares(turns)) < 6
+        constant list[integer64] scratch = squares(turns)
+        turns = turns + 1
+        if length(scratch) == 2
+            continue
+        if length(scratch) == 4
+            break
+    print("turns {turns}, first above 10: {first_above(squares(6), 10)}")
+
+    variable list[Point] points = list()
+    push(variable points, Point(x = 1, y = 2))
+    push(variable points, Point(x = 3, y = 4))
+    points[1].y = 40
+    print("points {length(points)}: {points[0].x} {points[1].y}")
+
+    variable list[array[integer32, 3]] rows = list()
+    push(variable rows, array(5))
+    rows[0][2] = 6
+    print("rows {rows[0][0]} {rows[0][2]}")
+
+    variable list[string] words = list()
+    push(variable words, "hi")
+    push(variable words, "héllo")
+    print("{words[0]} {words[1]} has {length(words[1])} bytes")
+
+    variable list[integer64] large = list()
+    for number in range(0, 2000000)
+        push(variable large, number)
+    print("large {length(large)}, last {large[1999999]}, total {total(large)}")

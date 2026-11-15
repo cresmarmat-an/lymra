@@ -1,0 +1,20 @@
+exit status 0
+--- standard output
+squares 5: 0 1 16, total 30
+copy 7 has 6, numbers 0 has 5
+doubled in place: 2 32, total 60
+appended: 6 ending in 5
+filled through a parameter: 9 ending in 102
+reset: 0
+replaced with an empty list: 1 holding 3
+countdown 5: 0 2 4
+chained 0 1 10 20 30
+temporaries: 14 25 3
+a list in a condition
+a loop goes over what was there: 4 10 20
+turns 5, first above 10: 16
+points 2: 1 40
+rows 5 6
+hi héllo has 6 bytes
+large 2000000, last 1999999, total 1999999000000
+--- standard error

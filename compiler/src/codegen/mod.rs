@@ -10,6 +10,12 @@
  * runtime function that traps on overflow and on division by zero, as spec
  * section 4.2 requires in every build mode, and so does every index it could
  * not prove in range. Comparisons and logic cannot fail, so they stay plain C.
+ *
+ * Every list gets a data stack of its own: one for each list binding, and one
+ * for each list a statement computes without a binding. A C block frees the
+ * lists it built when control leaves it, by any way, and a function that
+ * returns a list frees its own before it moves the result to the top of the
+ * stack its caller names.
  */
 
 mod c_syntax;
@@ -41,6 +47,9 @@ pub fn generate(program: &Program<'_>, source: &SourceFile) -> String {
         frame: 0,
         largest_frame: 0,
         writes_floats: false,
+        data_stacks: 0,
+        scopes: Vec::new(),
+        pending: Vec::new(),
     };
     let functions: Vec<String> = program
         .functions
@@ -65,6 +74,15 @@ pub fn generate(program: &Program<'_>, source: &SourceFile) -> String {
     ));
     if generator.writes_floats || generator.types.uses_floats {
         output.push_str("#define LYMRA_USES_FLOATS 1\n\n");
+    }
+    // The runtime declares the data stacks along with the type a list's struct names, so a program that names a list type has one at least.
+    let data_stacks = if generator.types.uses_lists {
+        generator.data_stacks.max(1)
+    } else {
+        generator.data_stacks
+    };
+    if data_stacks > 0 {
+        output.push_str(&format!("#define LYMRA_DATA_STACKS {data_stacks}\n\n"));
     }
     output.push_str(RUNTIME);
     if generator.writes_floats {
@@ -149,10 +167,46 @@ struct Generator<'program, 'src> {
     largest_frame: u64,
     /// Whether the program writes a float as text, which needs the runtime's float printer.
     writes_floats: bool,
+    /// The data stacks handed out so far, numbered from 0.
+    data_stacks: usize,
+    /// The C blocks open in the function being generated, innermost last.
+    scopes: Vec<Scope>,
+    /// The lists the statement being generated computed without a binding, which it frees once it is done.
+    pending: Vec<Release>,
+}
+
+/**
+ * A list to free, and its data stack. Freeing it moves the top of the stack
+ * down to where the list starts. Nothing of the same call lies above it
+ * then, and a list from an earlier call that grew while this one was being
+ * built lies below it, so that one keeps its elements.
+ */
+#[derive(Clone, Debug)]
+struct Release {
+    stack: usize,
+    /// The C name of the list.
+    list: String,
+}
+
+impl Release {
+    /// Where the list starts, which becomes the top of its stack.
+    fn start(&self) -> String {
+        format!("(char *){}.elements", self.list)
+    }
+}
+
+/// An open C block and the lists it frees when control leaves it.
+#[derive(Debug, Default)]
+struct Scope {
+    releases: Vec<Release>,
+    /// Whether the block is a loop's body, which `break` and `continue` leave.
+    loop_body: bool,
 }
 
 impl Generator<'_, '_> {
     fn function(&mut self, function: &Function<'_>) -> String {
+        self.scopes.clear();
+        self.pending.clear();
         self.frame = (0..function.locals.len())
             .filter(|&id| !is_pointer(function, id))
             .map(|id| compound_bytes(&function.locals[id].ty))
@@ -177,33 +231,43 @@ impl Generator<'_, '_> {
      * The C declaration of a function, without a body or a semicolon. A
      * `variable` parameter is a pointer to the caller's binding, and an array
      * parameter a pointer to a value the call cannot change, so no call
-     * copies an array.
+     * copies an array. A function that returns a list first takes the data
+     * stack where its caller wants the list.
      */
     fn signature(&mut self, function: &Function<'_>) -> String {
         let return_type = match &function.return_type {
             Some(ty) => self.types.name(ty),
             None => "void".to_owned(),
         };
-        let parameters: Vec<String> = function
-            .parameters
-            .iter()
-            .enumerate()
-            .map(|(position, &id)| {
-                let local = &function.locals[id];
-                let name = if local.name == "_" {
-                    format!("unused_parameter_{position}")
-                } else {
-                    c_syntax::local_name(local.name)
-                };
-                let ty = self.types.name(&local.ty);
-                if local.by_reference {
-                    format!("{ty} *{name}")
-                } else if is_pointer(function, id) {
-                    format!("const {ty} *{name}")
-                } else {
-                    format!("const {ty} {name}")
-                }
-            })
+        let destination = function
+            .return_type
+            .as_ref()
+            .filter(|ty| ty.is_growable())
+            .map(|_| format!("lymra_data_stack *{DESTINATION}"));
+        let parameters: Vec<String> = destination
+            .into_iter()
+            .chain(
+                function
+                    .parameters
+                    .iter()
+                    .enumerate()
+                    .map(|(position, &id)| {
+                        let local = &function.locals[id];
+                        let name = if local.name == "_" {
+                            format!("unused_parameter_{position}")
+                        } else {
+                            c_syntax::local_name(local.name)
+                        };
+                        let ty = self.types.name(&local.ty);
+                        if local.by_reference {
+                            format!("{ty} *{name}")
+                        } else if is_pointer(function, id) {
+                            format!("const {ty} *{name}")
+                        } else {
+                            format!("const {ty} {name}")
+                        }
+                    }),
+            )
             .collect();
         let parameters = if parameters.is_empty() {
             "void".to_owned()
@@ -214,6 +278,48 @@ impl Generator<'_, '_> {
             "LYMRA_UNUSED static {return_type} {}({parameters})",
             c_syntax::function_name(function.name)
         )
+    }
+
+    /// Hands out a data stack of its own to a list.
+    fn new_data_stack(&mut self) -> usize {
+        let stack = self.data_stacks;
+        self.data_stacks += 1;
+        stack
+    }
+
+    /// Frees the lists of `releases`, which come oldest first, the newest first.
+    fn release(writer: &mut Writer, releases: &[Release]) {
+        for release in releases.iter().rev() {
+            writer.line(&format!(
+                "lymra_data_stack_release({}, {});",
+                data_stack(release.stack),
+                release.start()
+            ));
+        }
+    }
+
+    /// The lists open where control is now, oldest first: each open block's, then the statement's own.
+    fn open_lists(&self) -> Vec<Release> {
+        self.scopes
+            .iter()
+            .flat_map(|scope| scope.releases.iter())
+            .chain(&self.pending)
+            .cloned()
+            .collect()
+    }
+
+    /// The lists `break` or `continue` frees, oldest first: those of the innermost loop's body and the blocks inside it.
+    fn loop_lists(&self) -> Vec<Release> {
+        let body = self
+            .scopes
+            .iter()
+            .rposition(|scope| scope.loop_body)
+            .unwrap_or(0);
+        self.scopes[body..]
+            .iter()
+            .flat_map(|scope| scope.releases.iter())
+            .cloned()
+            .collect()
     }
 
     fn constants(&mut self) -> Vec<String> {
@@ -252,6 +358,14 @@ impl Generator<'_, '_> {
     }
 }
 
+/// The name of the parameter that says on which data stack a function builds the list it returns.
+const DESTINATION: &str = "lymra_destination";
+
+/// The C for the address of data stack number `stack`.
+fn data_stack(stack: usize) -> String {
+    format!("&lymra_data_stacks[{stack}]")
+}
+
 /// The bytes a value of `ty` takes in a frame if it holds other values. Other values are too small to count.
 fn compound_bytes(ty: &Type) -> u64 {
     if ty.is_compound() {
@@ -269,6 +383,16 @@ fn compound_bytes(ty: &Type) -> u64 {
 fn is_pointer(function: &Function<'_>, id: LocalId) -> bool {
     let local = &function.locals[id];
     local.by_reference || (local.ty.is_compound() && function.parameters.contains(&id))
+}
+
+/// The address of a local: its pointer when it has one.
+fn local_address(function: &Function<'_>, id: LocalId) -> String {
+    let name = c_syntax::local_name(function.locals[id].name);
+    if is_pointer(function, id) {
+        name
+    } else {
+        format!("&{name}")
+    }
 }
 
 /// How a local is read or assigned: through its pointer when it has one.

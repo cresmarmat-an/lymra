@@ -1,18 +1,19 @@
 /*!
  * Arrays: their types, indexing, `array(value)`, `length`, and the elements
- * an assignment can change.
+ * an assignment can change. Lists are indexed and measured the same way.
  *
- * An index known while compiling is checked while compiling (`L0411`); any
- * other index is checked when the program runs, unless the optimizer proves
- * it in range.
+ * An index known while compiling is checked while compiling against an
+ * array's length (`L0411`), and against 0 for a list; any other index is
+ * checked when the program runs, unless the optimizer proves it in range.
  */
 
 use super::errors;
 use super::expressions::CheckedCall;
+use super::features::Feature;
 use super::{CheckResult, Checker, Global};
 use crate::ast::{self, TypeArgument};
 use crate::diagnostics::ErrorReported;
-use crate::ir::{self, IntegerType, Type, Value};
+use crate::ir::{self, Extent, IntegerType, Type, Value};
 use crate::source::Span;
 
 /// The most bytes one value on the call stack may take, an array or a value of a declared type. The stack holds a few MiB in all.
@@ -33,7 +34,15 @@ impl<'src> Checker<'src, '_> {
             TypeArgument::Size { value, span } => (Ok(*value), *span),
             TypeArgument::Type(named) => (self.length_constant(named), named.span),
         };
-        let (element, length) = (element?, length?);
+        let (element_type, length) = (element?, length?);
+        if element_type.is_growable() {
+            let element_span = match &arguments[0] {
+                TypeArgument::Type(element) => element.span,
+                TypeArgument::Size { span, .. } => *span,
+            };
+            return Err(self.report(Feature::NestedGrowable.diagnostic(element_span)));
+        }
+        let element = element_type;
         if length == 0 {
             return Err(self.report(errors::empty_array(length_span)));
         }
@@ -71,7 +80,7 @@ impl<'src> Checker<'src, '_> {
         }
     }
 
-    /// Checks `array[index]`.
+    /// Checks `items[index]`, on an array or a list.
     pub(super) fn check_index(
         &mut self,
         object: &ast::Expr<'src>,
@@ -81,10 +90,7 @@ impl<'src> Checker<'src, '_> {
         let array = self.check_expr_with_hint(object, None);
         let index = self.check_index_value(index);
         let (array, index) = (array?, index?);
-        let Type::Array(array_type) = &array.ty else {
-            return Err(self.report(errors::not_indexable(&array.ty, array.span)));
-        };
-        let (element, length) = (array_type.element.clone(), array_type.length);
+        let (element, length) = self.elements_of(&array.ty, array.span)?;
         let checked = self.needs_bounds_check(&index, length)?;
         Ok(ir::Expr {
             kind: ir::ExprKind::Index {
@@ -98,6 +104,15 @@ impl<'src> Checker<'src, '_> {
         })
     }
 
+    /// The element type and the length of a value that can be indexed: an array or a list.
+    pub(super) fn elements_of(&mut self, ty: &Type, span: Span) -> CheckResult<(Type, Extent)> {
+        match ty {
+            Type::Array(array) => Ok((array.element.clone(), Extent::Fixed(array.length))),
+            Type::List(list) => Ok((list.element.clone(), Extent::Dynamic)),
+            other => Err(self.report(errors::not_indexable(other, span))),
+        }
+    }
+
     /// Checks an index, which can have any integer type. A literal is an `integer64`.
     pub(super) fn check_index_value(&mut self, index: &ast::Expr<'src>) -> CheckResult<ir::Expr> {
         let index = self.check_expr_with_hint(index, None)?;
@@ -107,19 +122,28 @@ impl<'src> Checker<'src, '_> {
         Ok(index)
     }
 
-    /// Whether `index` has to be checked when the program runs. One known now is checked now.
+    /**
+     * Whether `index` has to be checked when the program runs. One known now
+     * is checked now: against an array's length, and against 0 for a list,
+     * whose length only the running program knows.
+     */
     pub(super) fn needs_bounds_check(
         &mut self,
         index: &ir::Expr,
-        length: u64,
+        length: Extent,
     ) -> CheckResult<bool> {
         let Some(Value::Integer { value, .. }) = self.known_value(index) else {
             return Ok(true);
         };
-        if (0..i128::from(length)).contains(&value) {
-            Ok(false)
-        } else {
-            Err(self.report(errors::index_out_of_range(value, length, index.span)))
+        match length {
+            Extent::Fixed(length) if (0..i128::from(length)).contains(&value) => Ok(false),
+            Extent::Fixed(length) => {
+                Err(self.report(errors::index_out_of_range(value, length, index.span)))
+            }
+            Extent::Dynamic if value < 0 => {
+                Err(self.report(errors::negative_index(value, index.span)))
+            }
+            Extent::Dynamic => Ok(true),
         }
     }
 
@@ -174,7 +198,7 @@ impl<'src> Checker<'src, '_> {
         let operand = self.check_expr_with_hint(value, None)?;
         let known = match &operand.ty {
             Type::Array(array) => (!operand.has_effects()).then_some(array.length),
-            Type::String => None,
+            Type::String | Type::List(_) => None,
             Type::Integer(_)
             | Type::Float(_)
             | Type::Boolean

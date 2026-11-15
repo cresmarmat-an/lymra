@@ -1,0 +1,30 @@
+type Basket
+    list[integer64] apples
+
+function sizes(list _, list[integer64, 3] _, array[list[integer64], 2] _, list[list[integer64]] _)
+    return
+
+function main()
+    variable list[integer64] values = list()
+    variable unknown = list()
+    constant integer64 count = list()
+    constant list[integer64] made = list(3)
+    push(values, 1)
+    push(variable values, variable count)
+    variable integer64 total = 0
+    push(variable total, 1)
+    push(variable values, "seven")
+    push(variable values)
+    push(variable made, 1)
+    print("{values[-1]}")
+    print("{values}")
+    if values == made
+        print("same")
+    print("{length(values + made)}")
+    for value in values
+        values = list()
+        clear(variable values)
+        print("{value}")
+
+function clear(variable list[integer64] values)
+    values = list()

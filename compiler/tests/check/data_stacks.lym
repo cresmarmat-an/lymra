@@ -1,0 +1,77 @@
+#[
+    Error L0704. Each call of a function that calls itself puts its own
+    copy of a list binding above the copy of the call before it, so it can
+    change an older copy that reaches it only before its own copy exists.
+]#
+
+function digits_of(variable list[integer64] digits, integer64 value)
+    variable list[integer64] higher = list()
+    if value >= 10
+        digits_of(variable higher, value / 10)
+    for digit in higher
+        push(variable digits, digit)
+
+function replaced(variable list[integer64] values, integer64 depth)
+    variable list[integer64] mine = list()
+    if depth > 0
+        replaced(variable mine, depth - 1)
+        values = list()
+
+function forwarded(variable list[integer64] values, integer64 depth)
+    variable list[integer64] mine = list()
+    if depth > 0
+        forwarded(variable mine, depth - 1)
+        add_one(variable values)
+
+function add_one(variable list[integer64] values)
+    push(variable values, 1)
+
+function ping(variable list[integer64] values, integer64 depth)
+    variable list[integer64] mine = list()
+    if depth > 0
+        pong(variable mine, depth - 1)
+    push(variable values, depth)
+
+function pong(variable list[integer64] values, integer64 depth)
+    ping(variable values, depth)
+
+function changed_first(variable list[integer64] values, integer64 depth)
+    push(variable values, depth)
+    variable list[integer64] mine = list()
+    if depth > 0
+        changed_first(variable mine, depth - 1)
+
+function changed_each_turn(variable list[integer64] values, integer64 depth)
+    for turn in range(0, depth)
+        push(variable values, turn)
+        variable list[integer64] mine = list()
+        changed_each_turn(variable mine, turn)
+
+function one_list(variable list[integer64] values, integer64 depth)
+    variable list[integer64] kept = list()
+    push(variable kept, depth)
+    if depth > 0
+        one_list(variable values, depth - 1)
+    push(variable values, kept[0])
+
+function freed_before(variable list[integer64] values, integer64 depth)
+    variable list[integer64] mine = list()
+    if depth > 0
+        freed_before(variable mine, depth - 1)
+    mine = grown(variable values)
+    push(variable mine, 1)
+
+function grown(variable list[integer64] values) returns list[integer64]
+    push(variable values, 2)
+    return values
+
+function main()
+    variable list[integer64] values = list()
+    digits_of(variable values, 2026)
+    replaced(variable values, 2)
+    forwarded(variable values, 2)
+    ping(variable values, 2)
+    changed_first(variable values, 2)
+    changed_each_turn(variable values, 2)
+    one_list(variable values, 2)
+    freed_before(variable values, 2)

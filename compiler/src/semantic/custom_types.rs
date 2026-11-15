@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use super::expressions::CheckedCall;
+use super::features::Feature;
 use super::{CheckResult, Checker, DeclaredType, Definition, TypeId, TypeState, errors};
 use crate::ast::{self, ArgumentKind};
 use crate::diagnostics::ErrorReported;
@@ -82,6 +83,10 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 continue;
             }
             match self.resolve_type(&field.ty) {
+                Ok(ty) if ty.is_growable() => {
+                    self.report(Feature::NestedGrowable.diagnostic(field.ty.span));
+                    failed = true;
+                }
                 Ok(ty) => resolved.push(FieldType {
                     name: field.name.text.to_owned(),
                     ty,

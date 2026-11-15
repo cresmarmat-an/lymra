@@ -25,22 +25,22 @@ impl Random {
         Self(seed | 1)
     }
 
-    fn next(&mut self) -> u64 {
+    pub fn next(&mut self) -> u64 {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;
         self.0 ^= self.0 << 17;
         self.0
     }
 
-    fn below(&mut self, bound: usize) -> usize {
+    pub fn below(&mut self, bound: usize) -> usize {
         (self.next() % bound as u64) as usize
     }
 
-    fn chance(&mut self, percent: usize) -> bool {
+    pub fn chance(&mut self, percent: usize) -> bool {
         self.below(100) < percent
     }
 
-    fn pick<'items, T>(&mut self, items: &'items [T]) -> &'items T {
+    pub fn pick<'items, T>(&mut self, items: &'items [T]) -> &'items T {
         &items[self.below(items.len())]
     }
 }

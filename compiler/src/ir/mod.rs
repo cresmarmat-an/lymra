@@ -10,7 +10,8 @@
 mod types;
 
 pub use types::{
-    ArrayType, ChoiceType, CustomType, FieldType, FloatType, IntegerType, Layout, Type, Value,
+    ArrayType, ChoiceType, CustomType, FieldType, FloatType, IntegerType, Layout, ListType, Type,
+    Value,
 };
 
 use crate::ast::OptimizeMode;
@@ -60,6 +61,8 @@ pub struct Local<'src> {
     pub mutable: bool,
     /// True for a `variable` parameter, which reaches the caller's binding.
     pub by_reference: bool,
+    /// The name where the local is declared.
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -100,16 +103,24 @@ pub enum Statement {
         body: Block,
     },
     /**
-     * `for variable in array`. The array is computed once; each element is
-     * read when its turn comes, so a change the body makes to a later
-     * element is seen.
+     * `for variable in items`, over an array or a list. The value is computed
+     * once; each element is read when its turn comes, so a change the body
+     * makes to a later element is seen. A list is walked over the elements
+     * it holds when the loop starts, so the body may add to it.
      */
     ForEach {
         variable: Option<LocalId>,
         array: Expr,
-        /// How many elements the array has, so how many times the body runs.
-        length: u64,
+        /// How many elements the value has, so how many times the body runs.
+        length: Extent,
         body: Block,
+    },
+    /// `push(variable list, value)`: the value is computed, then added to the end of the list.
+    Push {
+        list: LocalId,
+        value: Expr,
+        /// The call, which a full data stack points at.
+        span: Span,
     },
     /**
      * `match value`: the value is computed once, then the case for the
@@ -151,6 +162,8 @@ pub struct Place {
     pub local: LocalId,
     /// The steps from the local inward: `grid[row].cells[column]` has three.
     pub steps: Vec<PlaceStep>,
+    /// The place as written.
+    pub span: Span,
 }
 
 /// One step into a value: an element of an array, or a field of a declared type.
@@ -165,12 +178,21 @@ pub enum PlaceStep {
 #[derive(Clone, Debug)]
 pub struct PlaceIndex {
     pub value: Expr,
-    /// The length of the array the index selects from.
-    pub length: u64,
+    /// The length of the array or list the index selects from.
+    pub length: Extent,
     /// Whether the index can fall outside its array and has to be checked when the program runs.
     pub checked: bool,
     /// The place up to and including this index, which a failed check points at.
     pub span: Span,
+}
+
+/// How many elements a value that can be indexed has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Extent {
+    /// An array's length, part of its type.
+    Fixed(u64),
+    /// A list's length, which only the running program knows.
+    Dynamic,
 }
 
 #[derive(Clone, Debug)]
@@ -209,7 +231,7 @@ impl TextForm {
             Type::Integer(integer) if integer.is_signed() => Some(Self::Signed),
             Type::Integer(_) => Some(Self::Unsigned),
             Type::Float(float) => Some(Self::Float(*float)),
-            Type::Array(_) | Type::Custom(_) | Type::Choice(_) => None,
+            Type::Array(_) | Type::Custom(_) | Type::Choice(_) | Type::List(_) => None,
         }
     }
 }
@@ -267,17 +289,19 @@ pub enum ExprKind {
         left: Box<Expr>,
         right: Box<Expr>,
     },
-    /// `array[index]`, an element of an array.
+    /// `items[index]`, an element of an array or a list.
     Index {
         array: Box<Expr>,
         index: Box<Expr>,
-        /// The length of the array, which the index has to stay below.
-        length: u64,
+        /// The length of the array or list, which the index has to stay below.
+        length: Extent,
         /// Whether the index can fall outside the array and has to be checked when the program runs.
         checked: bool,
     },
     /// `array(value)`: every element of the array is `value`. The expression's type is the array type.
     Fill(Box<Expr>),
+    /// `list()`: a list with no elements yet. The expression's type is the list type.
+    EmptyList,
     /// `length(value)` of a text, or of an array that has to be computed because computing it has effects.
     Length(Box<Expr>),
     /// `Frog(name = "Kero", age = 3)`: a value of a declared type, its fields in the order they are written.
@@ -307,7 +331,7 @@ impl Expr {
     pub fn mentions(&self, local: LocalId) -> bool {
         match &self.kind {
             ExprKind::Local(id) => *id == local,
-            ExprKind::Literal(_) | ExprKind::Constant(_) => false,
+            ExprKind::Literal(_) | ExprKind::Constant(_) | ExprKind::EmptyList => false,
             ExprKind::Negate { operand, .. }
             | ExprKind::Not(operand)
             | ExprKind::Convert { operand, .. }
@@ -329,7 +353,7 @@ impl Expr {
                 ..
             } => left.mentions(local) || right.mentions(local),
             ExprKind::Call(call) => call.arguments.iter().any(|argument| match argument {
-                Argument::Reference(id) => *id == local,
+                Argument::Reference { local: id, .. } => *id == local,
                 Argument::Value(value) => value.mentions(local),
             }),
         }
@@ -342,7 +366,10 @@ impl Expr {
      */
     pub fn has_effects(&self) -> bool {
         match &self.kind {
-            ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) => false,
+            ExprKind::Literal(_)
+            | ExprKind::Local(_)
+            | ExprKind::Constant(_)
+            | ExprKind::EmptyList => false,
             ExprKind::Call(_) => true,
             ExprKind::Not(operand)
             | ExprKind::Fill(operand)
@@ -385,7 +412,11 @@ pub struct Call {
 pub enum Argument {
     Value(Expr),
     /// A binding passed with `variable`, which the called function may change.
-    Reference(LocalId),
+    Reference {
+        local: LocalId,
+        /// The argument as written, `variable` included.
+        span: Span,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -52,7 +52,8 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             | Type::Boolean
             | Type::String
             | Type::Array(_)
-            | Type::Custom(_) => Err(ErrorReported),
+            | Type::Custom(_)
+            | Type::List(_) => Err(ErrorReported),
         }
     }
 

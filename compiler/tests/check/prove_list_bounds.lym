@@ -1,0 +1,71 @@
+#!prove bounds
+
+#[
+    Indexes into lists, which `#!prove bounds` accepts when a loop or a test
+    ties the index to the list's length, as long as neither changes.
+]#
+
+function doubled_in_place(variable list[integer64] values)
+    for index in range(0, length(values))
+        values[index] = values[index] * 2
+
+function walked(list[integer64] values) returns integer64
+    variable integer64 sum = 0
+    variable integer64 index = 0
+    while index < length(values)
+        sum = sum + values[index]
+        index = index + 1
+    return sum
+
+function neighbors(list[integer64] values) returns integer64
+    variable integer64 count = 0
+    for index in range(0, length(values) - 1)
+        if values[index + 1] > values[index]
+            count = count + 1
+    for index in range(1, length(values))
+        if values[index - 1] > values[index]
+            count = count + 1
+    return count
+
+function tested(list[integer64] values, integer64 at) returns integer64
+    if at >= 0 and at + 1 < length(values)
+        return values[at] + values[at + 1]
+    assert at >= 0 and at <= length(values) - 1
+    return values[at]
+
+function pushed_meanwhile(variable list[integer64] values)
+    for index in range(0, length(values))
+        push(variable values, values[index])
+
+function replaced(variable list[integer64] values) returns integer64
+    variable integer64 sum = 0
+    for index in range(0, length(values))
+        values = list()
+        sum = sum + values[index]
+    return sum
+
+function moved(list[integer64] values, integer64 at) returns integer64
+    variable integer64 position = at
+    if position < length(values)
+        position = position + 1
+        return values[position]
+    return 0
+
+function other_list(list[integer64] first, list[integer64] second) returns integer64
+    for index in range(0, length(first))
+        return second[index]
+    return 0
+
+function one_past(list[integer64] values) returns integer64
+    for index in range(0, length(values))
+        return values[index + 1]
+    return 0
+
+function main()
+    variable list[integer64] numbers = list()
+    push(variable numbers, 1)
+    doubled_in_place(variable numbers)
+    pushed_meanwhile(variable numbers)
+    print("{walked(numbers)} {neighbors(numbers)} {tested(numbers, 0)}")
+    print("{moved(numbers, 0)} {other_list(numbers, numbers)} {one_past(numbers)}")
+    print("{replaced(variable numbers)}")

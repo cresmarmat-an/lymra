@@ -359,7 +359,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 "`-` works on numbers, but this is a `boolean`".to_owned(),
                 "to flip a `boolean`, use `not`".to_owned(),
             ),
-            Type::String | Type::Array(_) | Type::Custom(_) | Type::Choice(_) => (
+            Type::String | Type::Array(_) | Type::Custom(_) | Type::Choice(_) | Type::List(_) => (
                 format!(
                     "`-` works on numbers, but this is {}",
                     described(&operand.ty)
@@ -450,7 +450,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     Type::String => {
                         "to put text together, interpolate it: `print(\"{first}{second}\")`"
                     }
-                    Type::Array(_) => {
+                    Type::Array(_) | Type::List(_) => {
                         "arithmetic works on single numbers; work on the elements one by one"
                     }
                     Type::Custom(_) => {
@@ -566,6 +566,14 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     span,
                     "comparing arrays".to_owned(),
                     "compare the elements one by one in a loop",
+                )));
+            }
+            Type::List(_) => {
+                return Err(self.report(errors::operator_type(
+                    format!("`{symbol}` compares single values, and these are lists"),
+                    span,
+                    "comparing lists".to_owned(),
+                    "compare their lengths, then the elements one by one in a loop",
                 )));
             }
             Type::Custom(custom) => {
@@ -756,6 +764,8 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         match name {
             "print" => return self.check_print(call, span),
             "array" => return self.check_fill(call, span, hint),
+            "list" => return self.check_empty_list(call, span, hint),
+            "push" => return self.check_push(call, span),
             "length" => return self.check_length(call, span),
             _ => {}
         }
@@ -991,9 +1001,16 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 let mark = Span::new(argument.span.start, place.span.start);
                 Err(self.report(errors::needless_variable_mark(parameter.name.text, mark)))
             }
-            (ArgumentKind::Mutable(place), true) => self
-                .check_reference(place, parameter.ty.as_ref())
-                .map(ir::Argument::Reference),
+            (ArgumentKind::Mutable(place), true) => {
+                let id = self.check_reference(place, parameter.ty.as_ref())?;
+                if let ast::ExprKind::Name(name) = &place.kind {
+                    self.check_not_iterated(id, name, argument.span, true)?;
+                }
+                Ok(ir::Argument::Reference {
+                    local: id,
+                    span: argument.span,
+                })
+            }
         }
     }
 
@@ -1003,6 +1020,21 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         place: &ast::Expr<'src>,
         expected: Result<&Type, &ErrorReported>,
     ) -> CheckResult<ir::LocalId> {
+        let (id, ty) = self.check_reference_place(place)?;
+        match expected {
+            Ok(expected) if *expected != ty => {
+                Err(self.report(errors::type_mismatch(expected, &ty, place.span)))
+            }
+            Ok(_) => Ok(id),
+            Err(ErrorReported) => Err(ErrorReported),
+        }
+    }
+
+    /// The binding a `variable` argument names, which is changed, and its type.
+    pub(super) fn check_reference_place(
+        &mut self,
+        place: &ast::Expr<'src>,
+    ) -> CheckResult<(ir::LocalId, Type)> {
         let ast::ExprKind::Name(name) = &place.kind else {
             return Err(self.report_unchangeable_place(place));
         };
@@ -1021,13 +1053,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }
         local.written = true;
         let ty = local.ty.clone()?;
-        match expected {
-            Ok(expected) if *expected != ty => {
-                Err(self.report(errors::type_mismatch(expected, &ty, place.span)))
-            }
-            Ok(_) => Ok(id),
-            Err(ErrorReported) => Err(ErrorReported),
-        }
+        Ok((id, ty))
     }
 
     /**

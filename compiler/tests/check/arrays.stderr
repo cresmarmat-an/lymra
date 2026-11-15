@@ -46,7 +46,7 @@ error[L0410]: an `array[integer64, 1000000]` takes 8000000 bytes, more than a va
 9 |     variable array[integer64, 1000000] huge = array(0)
   |              ^^^^^^^^^^^^^^^^^^^^^^^^^ too large for the call stack
   |
-help: a value on the call stack takes at most 1048576 bytes (1 MiB); use fewer or smaller elements, or keep the data in a `list`, which phase 3 adds
+help: a value on the call stack takes at most 1048576 bytes (1 MiB); use fewer or smaller elements, or keep the data in a `list`, which grows on a data stack
 
 error[L0411]: index 3 is out of range for an array of length 3
   --> tests/check/arrays.lym:11:12
@@ -72,13 +72,13 @@ error[L0412]: `array(value)` needs to know which array to build
    |
 help: write the type where the array goes, as in `variable array[integer64, 10] values = array(0)`
 
-error[L0405]: only arrays can be indexed, and this is an `integer64`
+error[L0405]: only arrays and lists can be indexed, and this is an `integer64`
   --> tests/check/arrays.lym:15:13
    |
 15 |     print("{number[0]}")
-   |             ^^^^^^ not an array
+   |             ^^^^^^ not an array or a list
    |
-help: index an array, as in `values[0]`
+help: index an array or a list, as in `values[0]`
 
 error[L0402]: an index is an integer, but this is a `boolean`
   --> tests/check/arrays.lym:16:20
@@ -122,13 +122,13 @@ error[L0309]: `for` can only loop over `range` and arrays for now
    |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-error[L0405]: `length` counts the elements of an array or the bytes of a text, but this is an `integer64`
+error[L0405]: `length` counts the elements of an array or a list, or the bytes of a text, but this is an `integer64`
   --> tests/check/arrays.lym:23:20
    |
 23 |     print("{length(number)}")
    |                    ^^^^^^ has no length
    |
-help: pass an array or a `string`
+help: pass an array, a list or a `string`
 
 error[L0501]: `length` takes 1 argument, but 2 were given
   --> tests/check/arrays.lym:24:19

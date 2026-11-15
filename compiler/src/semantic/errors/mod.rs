@@ -5,6 +5,7 @@ mod choices;
 mod custom_types;
 mod cycles;
 mod floats;
+mod lists;
 
 pub(super) use arrays::{
     compound_in_text, empty_array, fill_argument_count, fill_into, fill_without_type,
@@ -21,6 +22,11 @@ pub(super) use custom_types::{
 };
 pub(super) use cycles::{Declared, Dependency, cycle};
 pub(super) use floats::{conversion_never_fits, float_remainder, float_too_large, float_too_small};
+pub(super) use lists::{
+    Change, changed_below_newer, empty_list_arguments, empty_list_into, empty_list_without_type,
+    malformed_list_type, negative_index, push_argument_count, push_needs_variable, push_not_list,
+    pushed_value_marked, replaced_while_iterated,
+};
 
 use super::BuiltIn;
 use super::evaluation_order::Conflict;
@@ -276,9 +282,12 @@ pub(super) fn condition_not_boolean(found: &Type, span: Span, source: &str) -> D
         Type::Float(_) => {
             Help::replace("compare it with a number", span, format!("{source} != 0.0"))
         }
-        Type::Boolean | Type::String | Type::Array(_) | Type::Custom(_) | Type::Choice(_) => {
-            Help::text("write a comparison or another `boolean` here")
-        }
+        Type::Boolean
+        | Type::String
+        | Type::Array(_)
+        | Type::Custom(_)
+        | Type::Choice(_)
+        | Type::List(_) => Help::text("write a comparison or another `boolean` here"),
     };
     Diagnostic::new(
         ErrorCode::L0402,
@@ -294,7 +303,7 @@ pub(super) fn condition_not_boolean(found: &Type, span: Span, source: &str) -> D
 /// `source` is the argument as written, used to suggest interpolation.
 pub(super) fn print_needs_text(found: &Type, span: Span, source: &str) -> Diagnostic {
     let help = match found {
-        Type::Array(_) => Help::text("print its elements one by one, in a loop"),
+        Type::Array(_) | Type::List(_) => Help::text("print its elements one by one, in a loop"),
         Type::Custom(custom) => Help::text(format!(
             "print its fields, as in `print(\"{{{source}.{}}}\")`",
             custom

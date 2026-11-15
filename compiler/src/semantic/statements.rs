@@ -13,7 +13,7 @@ use super::scope::{FunctionScope, LocalKind};
 use super::{CheckResult, Checker, DISCARD, errors, evaluation_order};
 use crate::ast::{self, ArgumentKind, Mutability};
 use crate::diagnostics::{ErrorReported, Help};
-use crate::ir::{self, IntegerType, LocalId, Type};
+use crate::ir::{self, Extent, IntegerType, LocalId, Type};
 use crate::lexer::Keyword;
 use crate::similarity;
 use crate::source::Span;
@@ -25,11 +25,11 @@ enum Iteration {
         end: ir::Expr,
         ty: IntegerType,
     },
-    /// The elements of the array that `array` computes.
+    /// The elements of the array or list that `array` computes.
     Elements {
         array: ir::Expr,
         element: Type,
-        length: u64,
+        length: Extent,
     },
 }
 
@@ -232,15 +232,23 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             return Err(self.report(error));
         }
         local.written = true;
-        let place = local
-            .ty
-            .clone()
-            .and_then(|ty| self.check_place_steps(ty, &steps));
+        let local_type = local.ty.clone();
+        if steps.is_empty() {
+            if let Err(error) = self.check_not_iterated(id, name, root.span, false) {
+                self.check_for_errors(value);
+                return Err(error);
+            }
+        }
+        let place = local_type.and_then(|ty| self.check_place_steps(ty, &steps));
         match place {
             Ok((steps, ty)) => {
                 let value = self.check_expr(value, Some(&ty))?;
                 Ok(ir::Statement::Assign {
-                    target: ir::Place { local: id, steps },
+                    target: ir::Place {
+                        local: id,
+                        steps,
+                        span: target.span,
+                    },
                     value,
                 })
             }
@@ -371,6 +379,17 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         body: &ast::Block<'src>,
     ) -> Checked {
         let iteration = self.check_iterable(iterable);
+        // A list the loop goes over by name cannot be replaced inside it, which would free what the loop reads.
+        let iterated = match &iteration {
+            Ok(Iteration::Elements { array, .. }) => match array.kind {
+                ir::ExprKind::Local(local) if array.ty.as_list().is_some() => Some(local),
+                _ => None,
+            },
+            Ok(Iteration::Range { .. }) | Err(_) => None,
+        };
+        if let Some(local) = iterated {
+            self.iterated.push((local, iterable.span));
+        }
         if let Some(scope) = self.scope.as_mut() {
             scope.open_block();
         }
@@ -386,6 +405,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 .map(Some)
         };
         let (body, _) = self.check_loop_body(body);
+        if iterated.is_some() {
+            self.iterated.pop();
+        }
         let closed = self
             .scope
             .as_mut()
@@ -419,7 +441,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }
     }
 
-    /// Checks what a `for` loop goes over: `range(start, end)`, or the elements of an array.
+    /// Checks what a `for` loop goes over: `range(start, end)`, or the elements of an array or a list.
     fn check_iterable(&mut self, iterable: &ast::Expr<'src>) -> CheckResult<Iteration> {
         if let ast::ExprKind::Call(call) = &iterable.kind {
             if matches!(call.callee.kind, ast::ExprKind::Name("range")) {
@@ -430,7 +452,12 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         match &checked.ty {
             Type::Array(array) => Ok(Iteration::Elements {
                 element: array.element.clone(),
-                length: array.length,
+                length: Extent::Fixed(array.length),
+                array: checked,
+            }),
+            Type::List(list) => Ok(Iteration::Elements {
+                element: list.element.clone(),
+                length: Extent::Dynamic,
                 array: checked,
             }),
             Type::String => Err(self.report(Feature::ForEach.diagnostic(iterable.span))),

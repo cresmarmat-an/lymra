@@ -125,21 +125,49 @@ pub(super) fn trip_count(start: Interval, end: Interval) -> i128 {
 
 /// The locals a block changes and that live outside it: assigned, or passed with `variable`.
 pub(super) fn changed_outside(block: &Block) -> HashSet<LocalId> {
+    collect_changed(block, Assigned::AnyPart)
+}
+
+/**
+ * The lists that live outside a block and can get shorter in it: replaced
+ * whole, or passed with `variable` to a function that could replace them.
+ * A `push` or a changed element leaves a list at least as long as it was.
+ */
+pub(super) fn shortened_outside(block: &Block) -> HashSet<LocalId> {
+    collect_changed(block, Assigned::Whole)
+}
+
+/// Which assignments count as changing their local.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Assigned {
+    /// An assignment to the local or to any part of it.
+    AnyPart,
+    /// Only an assignment of a whole new value.
+    Whole,
+}
+
+fn collect_changed(block: &Block, assigned: Assigned) -> HashSet<LocalId> {
     let mut changed = HashSet::new();
     let mut declared = HashSet::new();
-    collect_block(block, &mut changed, &mut declared);
+    collect_block(block, assigned, &mut changed, &mut declared);
     changed.retain(|local| !declared.contains(local));
     changed
 }
 
-fn collect_block(block: &Block, changed: &mut HashSet<LocalId>, declared: &mut HashSet<LocalId>) {
+fn collect_block(
+    block: &Block,
+    assigned: Assigned,
+    changed: &mut HashSet<LocalId>,
+    declared: &mut HashSet<LocalId>,
+) {
     for statement in &block.statements {
-        collect_statement(statement, changed, declared);
+        collect_statement(statement, assigned, changed, declared);
     }
 }
 
 fn collect_statement(
     statement: &Statement,
+    assigned: Assigned,
     changed: &mut HashSet<LocalId>,
     declared: &mut HashSet<LocalId>,
 ) {
@@ -149,7 +177,9 @@ fn collect_statement(
             collect_references(value, changed);
         }
         Statement::Assign { target, value } => {
-            changed.insert(target.local);
+            if assigned == Assigned::AnyPart || target.steps.is_empty() {
+                changed.insert(target.local);
+            }
             for step in &target.steps {
                 if let PlaceStep::Index(index) = step {
                     collect_references(&index.value, changed);
@@ -157,9 +187,11 @@ fn collect_statement(
             }
             collect_references(value, changed);
         }
+        // `push` lengthens a list, which changes no integer the analysis follows.
         Statement::Discard(value)
         | Statement::Assert { condition: value }
-        | Statement::Return(Some(value)) => {
+        | Statement::Return(Some(value))
+        | Statement::Push { value, .. } => {
             collect_references(value, changed);
         }
         Statement::Call(call) => collect_call_references(&call.arguments, changed),
@@ -176,15 +208,15 @@ fn collect_statement(
         } => {
             for branch in branches {
                 collect_references(&branch.condition, changed);
-                collect_block(&branch.body, changed, declared);
+                collect_block(&branch.body, assigned, changed, declared);
             }
             if let Some(otherwise) = otherwise {
-                collect_block(otherwise, changed, declared);
+                collect_block(otherwise, assigned, changed, declared);
             }
         }
         Statement::While { condition, body } => {
             collect_references(condition, changed);
-            collect_block(body, changed, declared);
+            collect_block(body, assigned, changed, declared);
         }
         Statement::ForRange {
             variable,
@@ -195,7 +227,7 @@ fn collect_statement(
             declared.extend(variable);
             collect_references(start, changed);
             collect_references(end, changed);
-            collect_block(body, changed, declared);
+            collect_block(body, assigned, changed, declared);
         }
         Statement::ForEach {
             variable,
@@ -205,13 +237,13 @@ fn collect_statement(
         } => {
             declared.extend(variable);
             collect_references(array, changed);
-            collect_block(body, changed, declared);
+            collect_block(body, assigned, changed, declared);
         }
         Statement::Match { value, cases } => {
             collect_references(value, changed);
             for case in cases {
                 declared.extend(case.bindings.iter().map(|binding| binding.local));
-                collect_block(&case.body, changed, declared);
+                collect_block(&case.body, assigned, changed, declared);
             }
         }
         Statement::Return(None) | Statement::Break | Statement::Continue => {}
@@ -221,7 +253,7 @@ fn collect_statement(
 fn collect_call_references(arguments: &[Argument], changed: &mut HashSet<LocalId>) {
     for argument in arguments {
         match argument {
-            Argument::Reference(local) => {
+            Argument::Reference { local, .. } => {
                 changed.insert(*local);
             }
             Argument::Value(value) => collect_references(value, changed),
@@ -232,7 +264,8 @@ fn collect_call_references(arguments: &[Argument], changed: &mut HashSet<LocalId
 /// Collects the locals an expression passes with `variable`, which the called function may change.
 pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
     match &expr.kind {
-        ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) => {}
+        ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) | ExprKind::EmptyList => {
+        }
         ExprKind::Negate { operand, .. }
         | ExprKind::Not(operand)
         | ExprKind::Convert { operand, .. }
@@ -267,7 +300,8 @@ pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
 /// Collects every call inside an expression, its arguments' calls included.
 pub(super) fn collect_calls<'expr>(expr: &'expr Expr, calls: &mut Vec<&'expr Call>) {
     match &expr.kind {
-        ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) => {}
+        ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) | ExprKind::EmptyList => {
+        }
         ExprKind::Negate { operand, .. }
         | ExprKind::Not(operand)
         | ExprKind::Convert { operand, .. }

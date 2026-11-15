@@ -1,0 +1,34 @@
+error[L0104]: this index is not proven to stay inside its list
+  --> tests/check/prove_list_bounds.lym:44:28
+   |
+44 |         sum = sum + values[index]
+   |                            ^^^^^ this can be from 0 to 9223372036854775806; a list's length is only known when the program runs
+   |
+help: `#!prove bounds` needs every index proven: check it before this line, with an `if` or with `assert index < length(values)`, or loop over `range(0, length(values))`
+
+error[L0104]: this index is not proven to stay inside its list
+  --> tests/check/prove_list_bounds.lym:51:23
+   |
+51 |         return values[position]
+   |                       ^^^^^^^^ this can be from 1 to 1; a list's length is only known when the program runs
+   |
+help: `#!prove bounds` needs every index proven: check it before this line, with an `if` or with `assert position < length(values)`, or loop over `range(0, length(values))`
+
+error[L0104]: this index is not proven to stay inside its list
+  --> tests/check/prove_list_bounds.lym:56:23
+   |
+56 |         return second[index]
+   |                       ^^^^^ this can be from 0 to 9223372036854775806; a list's length is only known when the program runs
+   |
+help: `#!prove bounds` needs every index proven: check it before this line, with an `if` or with `assert index < length(second)`, or loop over `range(0, length(second))`
+
+error[L0104]: this index is not proven to stay inside its list
+  --> tests/check/prove_list_bounds.lym:61:23
+   |
+61 |         return values[index + 1]
+   |                       ^^^^^^^^^ this can be at least 1; a list's length is only known when the program runs
+   |
+help: `#!prove bounds` needs every index proven: check it before this line, with an `if` or with `assert index + 1 < length(values)`, or loop over `range(0, length(values))`
+
+found 4 errors in tests/check/prove_list_bounds.lym
+run `lymra explain L0104` to read why a rule exists and how to fix it

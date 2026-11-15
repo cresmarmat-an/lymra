@@ -150,6 +150,8 @@ pub enum Type {
     Custom(Arc<CustomType>),
     /// A type the program declares with `choice`, shared like an array.
     Choice(Arc<ChoiceType>),
+    /// `list[element]`, which grows while it lives (spec 4.4), shared like an array.
+    List(Arc<ListType>),
 }
 
 /**
@@ -240,9 +242,19 @@ pub struct ArrayType {
     pub length: u64,
 }
 
+/// Elements of one type that a program adds one at a time, in place, on a data stack (spec 7.2).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ListType {
+    pub element: Type,
+}
+
 impl Type {
     pub fn array(element: Type, length: u64) -> Type {
         Type::Array(Arc::new(ArrayType { element, length }))
+    }
+
+    pub fn list(element: Type) -> Type {
+        Type::List(Arc::new(ListType { element }))
     }
 
     pub const fn as_integer(&self) -> Option<IntegerType> {
@@ -253,7 +265,8 @@ impl Type {
             | Self::String
             | Self::Array(_)
             | Self::Custom(_)
-            | Self::Choice(_) => None,
+            | Self::Choice(_)
+            | Self::List(_) => None,
         }
     }
 
@@ -265,7 +278,8 @@ impl Type {
             | Self::String
             | Self::Array(_)
             | Self::Custom(_)
-            | Self::Choice(_) => None,
+            | Self::Choice(_)
+            | Self::List(_) => None,
         }
     }
 
@@ -277,13 +291,44 @@ impl Type {
             | Self::Boolean
             | Self::String
             | Self::Custom(_)
+            | Self::Choice(_)
+            | Self::List(_) => None,
+        }
+    }
+
+    pub fn as_list(&self) -> Option<&ListType> {
+        match self {
+            Self::List(list) => Some(list),
+            Self::Integer(_)
+            | Self::Float(_)
+            | Self::Boolean
+            | Self::String
+            | Self::Array(_)
+            | Self::Custom(_)
             | Self::Choice(_) => None,
         }
     }
 
-    /// Whether values of the type hold other values: arrays, and types declared with `type` or `choice`.
+    /// Whether values of the type hold other values: arrays, lists, and types declared with `type` or `choice`.
     pub const fn is_compound(&self) -> bool {
-        matches!(self, Self::Array(_) | Self::Custom(_) | Self::Choice(_))
+        matches!(
+            self,
+            Self::Array(_) | Self::Custom(_) | Self::Choice(_) | Self::List(_)
+        )
+    }
+
+    /// Whether a value of the type holds something that grows while it lives, so it needs a data stack (spec 4.3).
+    pub fn is_growable(&self) -> bool {
+        match self {
+            Self::List(_) => true,
+            Self::Array(array) => array.element.is_growable(),
+            Self::Custom(custom) => custom.fields.iter().any(|field| field.ty.is_growable()),
+            Self::Choice(choice) => choice
+                .variants
+                .iter()
+                .any(|variant| variant.fields.iter().any(|field| field.ty.is_growable())),
+            Self::Integer(_) | Self::Float(_) | Self::Boolean | Self::String => false,
+        }
     }
 
     /**
@@ -303,6 +348,8 @@ impl Type {
             Self::Boolean => Some(Layout { size: 1, align: 1 }),
             // A text value is a pointer and a length.
             Self::String => Some(Layout { size: 16, align: 8 }),
+            // Where its elements start, how many there are, and the data stack they grow on.
+            Self::List(_) => Some(Layout { size: 24, align: 8 }),
             Self::Array(array) => {
                 let element = array.element.layout()?;
                 Some(Layout {
@@ -347,6 +394,7 @@ impl fmt::Display for Type {
             Self::Array(array) => write!(formatter, "array[{}, {}]", array.element, array.length),
             Self::Custom(custom) => formatter.write_str(&custom.name),
             Self::Choice(choice) => formatter.write_str(&choice.name),
+            Self::List(list) => write!(formatter, "list[{}]", list.element),
         }
     }
 }
@@ -487,6 +535,20 @@ mod tests {
         assert_eq!(Type::array(board.clone(), u64::MAX).size(), None);
         assert_eq!(board.as_array().map(|array| &array.element), Some(&row));
         assert_ne!(row, Type::array(Type::Integer(IntegerType::Integer32), 15));
+    }
+
+    #[test]
+    fn lists_grow_and_are_named_as_written() {
+        let numbers = Type::list(Type::Integer(IntegerType::Integer32));
+        assert_eq!(numbers.to_string(), "list[integer32]");
+        assert!(numbers.is_growable());
+        assert!(numbers.is_compound());
+        assert!(Type::array(numbers.clone(), 2).is_growable());
+        assert!(!Type::array(Type::Boolean, 2).is_growable());
+        assert_eq!(
+            numbers.as_list().map(|list| &list.element),
+            Some(&Type::Integer(IntegerType::Integer32))
+        );
     }
 
     #[test]

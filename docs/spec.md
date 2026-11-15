@@ -2,7 +2,7 @@
 
 Status: draft. Every rule here can change until a compiler implements it and a test proves it.
 
-The compiler in `compiler/` implements the syntax of this whole document. Its test suite parses every code sample here, so the spec and the parser cannot drift apart. It also checks and compiles the core of the language: integers, booleans, text values, functions, `if`, `while`, `for` over `range`, and `print`. The rest arrives in the phases of the roadmap in the README, and until then the compiler rejects it with `L0309`, naming the phase.
+The compiler in `compiler/` implements the syntax of this whole document. Its test suite parses every code sample here, so the spec and the parser cannot drift apart. It also checks and compiles the core of the language: integers, floats, booleans, text values, functions, arrays, custom types, choices and `match`, lists of fixed-size values, `if`, `while`, `for`, and `print`. The rest arrives in the phases of the roadmap in the README, and until then the compiler rejects it with `L0309`, naming the phase.
 
 ## 1. Goals
 
@@ -12,6 +12,7 @@ Each goal has to be checkable. If a goal can't be measured, it's just a slogan.
 2. **Speed through layout, not tricks.** Data is stored inline and contiguously by default. Memory is released by moving a pointer, not by calling an allocator. Speed claims are made only against the public benchmark suite (Section 14), losses included.
 3. **The compiler teaches.** Every rejected program gets an error code, the exact location, the reason, and at least one concrete fix.
 4. **One way to write a thing.** If two spellings mean the same thing, one of them gets removed.
+5. **Nothing out of reach.** A rule can ask for a program to be written another way, but never makes it impossible to write. Every error names a way that works, and every limit of the memory model has a safe way around it: a `pool` where lifetimes don't nest (Section 7.6), and calls into C for what Lymra cannot say yet (O8).
 
 ### Non-goals
 
@@ -254,6 +255,21 @@ A custom type's class is the largest class of its fields.
 
 `stack[T]` can shrink, so a reference into it could point at a popped slot. Holding a reference into a `stack` past the next `pop` is error `L0702`.
 
+A list is a value too. `list()` starts an empty one, its type taken from where it goes (`L0412`), and `push(variable items, value)` adds an element at the end. A copy is independent, a `variable` parameter changes the caller's list, and a function can return one. `items = new_value` replaces the whole list (Section 7.9). An index works as it does for an array, but a list's length is only known when the program runs, so an index past the end always stops the program then. In 0.1 a list holds fixed-size values: numbers, booleans, text, arrays, and custom types and choices made of them. A list inside another value comes with nested data (Section 4.5), later in phase 3.
+
+```lymra
+function squares(integer64 count) returns list[integer64]
+    variable list[integer64] result = list()
+    for number in range(0, count)
+        push(variable result, number * number)
+    return result
+
+function main()
+    variable values = squares(4)
+    push(variable values, 100)
+    print("{length(values)} {values[3]} {values[4]}")
+```
+
 An array is a value, like a number. Assigning it to another binding or passing it to a function gives an independent copy (Section 3.1); the compiler passes an array parameter by address, which no one can tell apart, since the function cannot change it. A `variable` parameter changes the caller's array. An array lives on the call stack, so one array takes at most 1 MiB, its length times the size of an element (`L0410`): a call stack holds a few MiB in all. Larger data belongs in a `list`. Arrays cannot be compared with `==` or put into text; compare or print their elements.
 
 ```lymra
@@ -378,8 +394,10 @@ function main()
 |---|---|
 | `print(string text)` | Writes the text and a line break to standard output, as one whole line. The values in the text are computed first, so a call among them that prints writes its own line before this one. |
 | `range(start, end)` | The integers from `start` up to `end`, without `end`. It is only used in a `for` loop for now. |
-| `length(items)` | The number of elements of an array, or of bytes in a `string`, as an `integer64`. An array's length is part of its type, so it is known while compiling. Phase 3 adds lists, stacks and views. |
+| `length(items)` | The number of elements of an array or a list, or of bytes in a `string`, as an `integer64`. An array's length is part of its type, so it is known while compiling. Phase 3 adds stacks and views. |
 | `array(value)` | An array with every element set to `value`. Its type, and so its length, comes from the place it goes: a declared type, a parameter, or a function's return type (`L0412`). |
+| `list()` | An empty list. Its type comes from the place it goes, as for `array(value)` (`L0412`). |
+| `push(variable items, value)` | Adds `value` to the end of a list. Elements never move, so nothing that reads the list sees it change but for its new end. |
 | `wrapping_add(left, right)`, `wrapping_subtract`, `wrapping_multiply` | Arithmetic that wraps around the type instead of stopping the program: the exact result, keeping only as many low bits as the type has, read as two's complement for a signed type. The operands follow the rules of `+`. |
 | `integer8(value)` to `integer64(value)` | Converts an integer to that signed type |
 | `unsigned8(value)` to `unsigned64(value)` | Converts an integer to that unsigned type |
@@ -392,8 +410,8 @@ Later phases add these, and until then the compiler rejects each with `L0309`:
 |---|---|---|
 | `bytes(text)` | The UTF-8 bytes of a `string`, as a `view[unsigned8]` | 3 |
 | `slice(items, start, end)` | The elements from `start` up to `end`, without `end`, as a `view`. A slice of a `string` is a `string` that shares storage (Section 3.1); its ends have to fall between characters. | 3 |
-| `list()`, `stack()` | An empty list or stack | 3 |
-| `push(variable items, value)` | Adds `value` to the end of a list or the top of a stack | 3 |
+| `stack()` | An empty stack | 3 |
+| `push(variable items, value)` on a stack | Adds `value` to the top of a stack | 3 |
 | `pop(variable items)` | Removes the top of a stack and returns it | 3 |
 | `top(items)` | The top of a stack, left in place | 3 |
 | `filter(items) with name`, `sort(variable items) with left, right` | The elements the block accepts; the elements in the block's order (Section 7.7) | 3 |
@@ -424,7 +442,7 @@ for index in range(0, 10)
 - A condition needs no parentheses, and nothing follows it on its line: no `:`, no `then`, no `{`.
 - A condition is a `boolean`. Lymra has no "truthy" values: write `if count != 0`, not `if count` (`L0402`).
 - `for name in range(start, end)` computes `start`, then `end`, each once, then runs the block with `name` set to each integer from `start` up to `end`, without `end`. The loop variable cannot be changed. Name it `_` when the loop only repeats.
-- `for name in items` over an array runs the block once for each element, in order, with `name` set to a copy of it. The array is computed once, and each element is read when its turn comes, so a change the block makes to a later element is seen. Phase 3 adds loops over lists, stacks and views.
+- `for name in items` over an array or a list runs the block once for each element, in order, with `name` set to a copy of it. The array or list is computed once, and each element is read when its turn comes, so a change the block makes to a later element is seen. A list is walked over the elements it holds when the loop starts, so the block can `push` to it without making the loop longer; replacing the list, or passing it with `variable`, would free the elements the loop reads, and is error `L0703`. Phase 3 adds loops over stacks and views.
 - `else if` continues a chain. There is no `elif`.
 - `break` and `continue` work in `while` and `for`. Anywhere else they are error `L0601`.
 - A statement after `return`, `break` or `continue`, or after an `if` whose every branch leaves, can never run. It is error `L0602`.
@@ -453,8 +471,8 @@ There is no `malloc`, no `new`, and no `free`.
 - Because the growable value is always on top, growing it means moving the bump pointer forward. Its data never gets moved, and there's no capacity check against the other values on that stack.
 - When a scope ends, all of its growable values are freed by resetting the bump pointer. That costs one store instruction, whether the scope held one integer list or a million nested orders. There are no destructors and nothing walks the data to free it.
 - Each data stack is reserved as address space up front, and the operating system commits pages only when they are first touched. Unused reservation costs no physical memory.
-- The end of each reservation is a guard page. A program that outgrows its data stack hits the guard page and stops with a clear error. It never overwrites other memory.
-- A growable value grows only while it is on top of its data stack. A `push` to a value that another value may sit above at that point is error `L0704`, and the message names the value above it.
+- A value that would grow past the end of its reservation stops the program with a clear error before it touches anything beyond it. It never overwrites other memory.
+- A growable value grows only while it is on top of its data stack. A `push` to a value that another value may sit above at that point is error `L0704`, and the message names the value above it. Within one call, a function's lists never share a stack, so this comes up in recursion: a call that holds its own copy of a binding cannot change the copy of an earlier call that reached it through a `variable` parameter, since its own copy sits above it. The compiler follows where each list can travel through calls, so it reports only a list that really can be under a newer one. The runtime checks it again before every `push`, as a second line of defense.
 - The compiler assigns stacks statically: two growable values that are live at the same time never share a stack, and values with separate lifetimes reuse one. The copies of one binding at different depths of a recursion share a data stack, each above the copy of the call before it; a call frees its own before it returns, so the one below is on top again when it grows. A list whose elements differ in size keeps their positions on a data stack of its own (Section 4.5). The runtime only tracks the bump pointers.
 - A data stack reserves address space, not memory. On a 64-bit system each reserves up to 64 GiB. On a 32-bit system, where a process has 2 to 3 GiB in all, a program's data stacks share 1 GiB. The runtime reserves one region for all of them, halving its request until the system grants it, and splits it evenly. A value that outgrows its data stack stops the program with `error: data stack full`.
 
@@ -462,7 +480,7 @@ There is no `malloc`, no `new`, and no `free`.
 
 Memory is freed when its scope ends. That timing is deterministic, and you can see it in the source code.
 
-The compiler also frees a value **earlier**, at its last use, when that value is on the top of its data stack. When it isn't on top, the value is freed at scope end.
+The compiler can also free a value **earlier**, at its last use, when that value is on the top of its data stack. When it isn't on top, the value is freed at scope end. The 0.1 compiler frees every value at the end of its scope, and a list a statement computes without a binding, such as the argument in `total(squares(4))`, at the end of that statement.
 
 Why there's no "free every value right after its last use": data stacks free in last-in, first-out order. If `a` dies but `b` sits above it, the memory under `b` can't be reclaimed without a general purpose allocator, and Lymra doesn't have one. Freeing at the last use whenever possible is exactly what's achievable without a heap.
 
@@ -480,7 +498,7 @@ Values on the call stack (integers, floats, fixed arrays) aren't "freed" at all.
 
 These are the costs of having no heap. They are intentional.
 
-- A value can't grow while another value sits above it on its data stack (`L0704`), so nested lists are built in order: an earlier element's list can't take an item that arrives later. Group the input first, or keep the items in one flat list, as `docs/memory/routes.lym` does.
+- A value can't grow while another value sits above it on its data stack (`L0704`). Nested lists are built in order: an earlier element's list can't take an item that arrives later. Group the input first, or keep the items in one flat list, as `docs/memory/routes.lym` does. A recursive function adds to the one list it was given, or returns a new list, rather than filling a list of an earlier call while holding one of its own.
 - The elements of a list whose elements differ in size can't be replaced (`L0407`), and a `packed` list can't be indexed (`L0408`).
 - No closures that escape their defining scope. No function pointers.
 - Whole-program compilation only. No separately compiled libraries in 0.1.
@@ -599,7 +617,7 @@ error: integer overflow
   |                 ^^^^^^^^^
 ```
 
-The checks are integer overflow, division by zero, a conversion whose value does not fit, an index outside its array, and `assert`. Calls that nest too deeply, as in recursion that never reaches its end, stop the program the same way with `error: stack overflow`, without a location: on POSIX systems and on Windows a handler catches the overflow when the stack runs out, so calls cost nothing extra for the check. Every program gets a stack of 8 MiB on Windows as well, the default of Linux and macOS, and the arrays of every call in progress share it. Where the C compiler can, a function with a large frame touches its stack a page at a time, so it cannot step over the guard page that ends the stack. Before the error, the program writes every line it printed. A line appears whole or not at all, so a program that stops in the middle of a `print` leaves no half line behind. Output is UTF-8 text with `\n` line breaks on every system; a Windows console, and a terminal that runs programs in a pseudo console, such as Windows Terminal, show it as the same characters. Output that cannot be written, for example to a full disk, ends the program with exit status 74.
+The checks are integer overflow, division by zero, a conversion whose value does not fit, an index outside its array or list, a list that outgrows its data stack, and `assert`. Calls that nest too deeply, as in recursion that never reaches its end, stop the program the same way with `error: stack overflow`, without a location: on POSIX systems and on Windows a handler catches the overflow when the stack runs out, so calls cost nothing extra for the check. Every program gets a stack of 8 MiB on Windows as well, the default of Linux and macOS, and the arrays of every call in progress share it. Where the C compiler can, a function with a large frame touches its stack a page at a time, so it cannot step over the guard page that ends the stack. Before the error, the program writes every line it printed. A line appears whole or not at all, so a program that stops in the middle of a `print` leaves no half line behind. Output is UTF-8 text with `\n` line breaks on every system; a Windows console, and a terminal that runs programs in a pseudo console, such as Windows Terminal, show it as the same characters. Output that cannot be written, for example to a full disk, ends the program with exit status 74.
 
 ## 12. Open questions
 

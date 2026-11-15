@@ -8,6 +8,9 @@
  * operation whose check was removed must never overflow or divide by zero,
  * and the optimized run must do exactly what the checked one did. A failure
  * prints the program. The generator has a fixed seed, so it reproduces.
+ *
+ * The same interpreter judges random list programs compiled to C (see
+ * `list_programs.rs`), which have to print what it prints.
  */
 
 mod call_facts;
@@ -16,13 +19,14 @@ mod common;
 mod generator;
 mod grids;
 mod interpreter;
+mod list_programs;
 mod loop_paths;
 
 use lymra::diagnostics::render_report;
 use lymra::frontend;
 use lymra::ir::{
-    Argument, Block, Call, Expr, ExprKind, FunctionId, IntegerType, PlaceStep, PrintPart, Program,
-    Statement,
+    Argument, Block, Call, Expr, ExprKind, Extent, FunctionId, IntegerType, PlaceStep, PrintPart,
+    Program, Statement,
 };
 use lymra::optimize;
 
@@ -37,6 +41,8 @@ const PROBES: usize = 600;
 struct CheckCount {
     operations: usize,
     checked: usize,
+    /// The indexes into lists among the checked operations.
+    list_indexes_checked: usize,
 }
 
 impl CheckCount {
@@ -59,7 +65,7 @@ impl CheckCount {
             Statement::Assign { target, value } => {
                 for step in &target.steps {
                     if let PlaceStep::Index(index) = step {
-                        self.operation(index.checked);
+                        self.index(index.length, index.checked);
                         self.expr(&index.value);
                     }
                 }
@@ -68,7 +74,8 @@ impl CheckCount {
             Statement::Declare { value, .. }
             | Statement::Discard(value)
             | Statement::Return(Some(value))
-            | Statement::Assert { condition: value } => self.expr(value),
+            | Statement::Assert { condition: value }
+            | Statement::Push { value, .. } => self.expr(value),
             Statement::Call(call) => self.arguments(call),
             Statement::Print(parts) => {
                 for part in parts {
@@ -133,10 +140,10 @@ impl CheckCount {
             ExprKind::Index {
                 array,
                 index,
+                length,
                 checked,
-                ..
             } => {
-                self.operation(*checked);
+                self.index(*length, *checked);
                 self.expr(array);
                 self.expr(index);
             }
@@ -160,7 +167,10 @@ impl CheckCount {
                 self.expr(right);
             }
             ExprKind::Call(call) => self.arguments(call),
-            ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) => {}
+            ExprKind::Literal(_)
+            | ExprKind::Local(_)
+            | ExprKind::Constant(_)
+            | ExprKind::EmptyList => {}
         }
     }
 
@@ -175,6 +185,13 @@ impl CheckCount {
     fn operation(&mut self, checked: bool) {
         self.operations += 1;
         self.checked += usize::from(checked);
+    }
+
+    fn index(&mut self, length: Extent, checked: bool) {
+        self.operation(checked);
+        if length == Extent::Dynamic {
+            self.list_indexes_checked += usize::from(checked);
+        }
     }
 }
 

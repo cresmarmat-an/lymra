@@ -162,7 +162,7 @@ function main()
         };
         assert!(matches!(
             call.arguments.first(),
-            Some(ir::Argument::Reference(_))
+            Some(ir::Argument::Reference { .. })
         ));
         assert!(matches!(
             call.arguments.get(1),

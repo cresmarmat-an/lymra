@@ -10,10 +10,10 @@
  * of the others never shows.
  */
 
-use super::types::fill_function;
-use super::{Generator, INDENT, Writer, c_syntax, local_access};
+use super::types::{fill_function, list_function};
+use super::{Generator, INDENT, Release, Writer, c_syntax, data_stack, local_access};
 use crate::ir::{
-    Argument, ArithmeticOperator, Call, Expr, ExprKind, FieldValue, FloatType, Function,
+    Argument, ArithmeticOperator, Call, Expr, ExprKind, Extent, FieldValue, FloatType, Function,
     IntegerType, LogicOperator, Type, Value,
 };
 use crate::source::Span;
@@ -21,8 +21,8 @@ use crate::source::Span;
 /// What an index is checked against.
 #[derive(Clone, Copy)]
 pub(super) struct Bounds {
-    /// The length of the array.
-    pub length: u64,
+    /// The length of the array or list.
+    pub length: Extent,
     /// Whether the index can fall outside the array.
     pub checked: bool,
     /// Where a failed check points.
@@ -127,7 +127,11 @@ impl Generator<'_, '_> {
                 left,
                 right,
             } => self.logic(function, *operator, left, right, writer),
-            ExprKind::Call(call) => self.call(function, call, writer),
+            ExprKind::EmptyList => self.list_temporary(function, expr, writer),
+            ExprKind::Call(_) if expr.ty.is_growable() => {
+                self.list_temporary(function, expr, writer)
+            }
+            ExprKind::Call(call) => self.call(function, call, None, writer),
             ExprKind::Convert { operand, checked } => {
                 self.convert(function, operand, expr, *checked, writer)
             }
@@ -159,7 +163,8 @@ impl Generator<'_, '_> {
                     | Type::Boolean
                     | Type::String
                     | Type::Custom(_)
-                    | Type::Choice(_) => format!("((int64_t)({code}).length)"),
+                    | Type::Choice(_)
+                    | Type::List(_) => format!("((int64_t)({code}).length)"),
                 }
             }
             ExprKind::Construct(fields) => self.construct(function, fields, &expr.ty, writer),
@@ -192,8 +197,57 @@ impl Generator<'_, '_> {
         } else {
             code
         };
-        let position = self.position(function, index, bounds, writer);
+        let position = self.position(function, index, bounds, &code, writer);
         format!("{code}.elements[{position}]")
+    }
+
+    /**
+     * A list that an expression computes without a binding, built on a data
+     * stack of its own. The statement that uses it frees it once it is done.
+     */
+    fn list_temporary(
+        &mut self,
+        function: &Function<'_>,
+        expr: &Expr,
+        writer: &mut Writer,
+    ) -> String {
+        let stack = self.new_data_stack();
+        let code = self.build_list(function, expr, &data_stack(stack), writer);
+        let name = self.helper("value");
+        let ty = self.types.name(&expr.ty);
+        writer.line(&format!("const {ty} {name} = {code};"));
+        self.pending.push(Release {
+            stack,
+            list: name.clone(),
+        });
+        name
+    }
+
+    /**
+     * The C that builds the list `value` at the top of the data stack
+     * `stack`: empty, by a call that returns it there, or as a copy of a list
+     * kept elsewhere.
+     */
+    pub(super) fn build_list(
+        &mut self,
+        function: &Function<'_>,
+        value: &Expr,
+        stack: &str,
+        writer: &mut Writer,
+    ) -> String {
+        let list = self.types.name(&value.ty);
+        match &value.kind {
+            ExprKind::EmptyList => format!("{}({stack})", list_function(&list, "start")),
+            ExprKind::Call(call) => self.call(function, call, Some(stack), writer),
+            _ => {
+                let source = self.expr(function, value, writer);
+                let site = self.site(value.span);
+                format!(
+                    "{}({stack}, ({source}).elements, ({source}).length, {site})",
+                    list_function(&list, "place")
+                )
+            }
+        }
     }
 
     /// Works out the address of `code`, stored data of type `ty`, into a new constant and returns its name.
@@ -204,12 +258,16 @@ impl Generator<'_, '_> {
         name
     }
 
-    /// The position `index` selects in an array. A checked index stops the program unless it lies inside the array.
+    /**
+     * The position `index` selects in an array or a list, whose C is
+     * `indexed`. A checked index stops the program unless it lies inside.
+     */
     pub(super) fn position(
         &mut self,
         function: &Function<'_>,
         index: &Expr,
         bounds: Bounds,
+        indexed: &str,
         writer: &mut Writer,
     ) -> String {
         let code = self.expr(function, index, writer);
@@ -218,12 +276,15 @@ impl Generator<'_, '_> {
             return format!("(size_t)({code})");
         }
         let site = self.site(bounds.span);
-        let length = bounds.length;
+        let (length, noun) = match bounds.length {
+            Extent::Fixed(length) => (format!("UINT64_C({length})"), "an array"),
+            Extent::Dynamic => (format!("(uint64_t)({indexed}).length"), "a list"),
+        };
         match index.ty.as_integer() {
             Some(integer) if integer.is_signed() => {
-                format!("lymra_index_signed((int64_t)({code}), UINT64_C({length}), {site})")
+                format!("lymra_index_signed((int64_t)({code}), {length}, \"{noun}\", {site})")
             }
-            _ => format!("lymra_index_unsigned((uint64_t)({code}), UINT64_C({length}), {site})"),
+            _ => format!("lymra_index_unsigned((uint64_t)({code}), {length}, \"{noun}\", {site})"),
         }
     }
 
@@ -349,7 +410,8 @@ impl Generator<'_, '_> {
             | Type::Float(_)
             | Type::Boolean
             | Type::Array(_)
-            | Type::Custom(_) => {
+            | Type::Custom(_)
+            | Type::List(_) => {
                 format!("{left} {symbol} {right}")
             }
         }
@@ -396,7 +458,10 @@ impl Generator<'_, '_> {
     ) -> String {
         let left = self.expr(function, left, writer);
         let mut setup = Writer::at(writer.depth + 1);
+        let earlier = self.pending.len();
         let right = self.expr(function, right, &mut setup);
+        // Lists the right side builds exist only when it runs, so they are freed where it runs.
+        let built: Vec<Release> = self.pending.drain(earlier..).collect();
         let (symbol, needs_right) = match operator {
             LogicOperator::And => ("&&", ""),
             LogicOperator::Or => ("||", "!"),
@@ -409,15 +474,22 @@ impl Generator<'_, '_> {
         writer.line(&format!("if ({needs_right}{result}) {{"));
         writer.append(setup);
         writer.line(&format!("{INDENT}{result} = {right};"));
+        writer.depth += 1;
+        Self::release(writer, &built);
+        writer.depth -= 1;
         writer.line("}");
         result
     }
 
-    /// A call. Its arguments are computed from left to right, then the function runs.
+    /**
+     * A call. Its arguments are computed from left to right, then the function
+     * runs. A function that returns a list builds it on `destination`.
+     */
     pub(super) fn call(
         &mut self,
         function: &Function<'_>,
         call: &Call,
+        destination: Option<&str>,
         writer: &mut Writer,
     ) -> String {
         let last_effect = call.arguments.iter().rposition(
@@ -441,7 +513,7 @@ impl Generator<'_, '_> {
                         code
                     }
                 }
-                Argument::Reference(id) => {
+                Argument::Reference { local: id, .. } => {
                     let local = &function.locals[*id];
                     let name = c_syntax::local_name(local.name);
                     // A `variable` parameter is already a pointer to the caller's binding.
@@ -454,6 +526,11 @@ impl Generator<'_, '_> {
             })
             .collect();
         let callee = &self.program.functions[call.function];
+        let arguments: Vec<String> = destination
+            .map(str::to_owned)
+            .into_iter()
+            .chain(arguments)
+            .collect();
         format!(
             "{}({})",
             c_syntax::function_name(callee.name),

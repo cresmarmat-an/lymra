@@ -37,7 +37,7 @@ error[L0410]: a `Huge` takes 2097152 bytes, more than a value on the call stack 
 17 | type Huge
    |      ^^^^ too large for the call stack
    |
-help: a value on the call stack takes at most 1048576 bytes (1 MiB); use fewer or smaller elements, or keep the data in a `list`, which phase 3 adds
+help: a value on the call stack takes at most 1048576 bytes (1 MiB); use fewer or smaller elements, or keep the data in a `list`, which grows on a data stack
 
 error[L0210]: a top-level constant cannot hold a `Frog`
   --> tests/check/custom_types.lym:21:10

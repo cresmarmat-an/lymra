@@ -68,7 +68,7 @@ enum Slot {
     Float(f64),
     Boolean(bool),
     Text(String),
-    /// The elements of an array, or the fields of a value of a declared type, in order.
+    /// The elements of an array or a list, or the fields of a value of a declared type, in order.
     Compound(Vec<Slot>),
     /// A value of a choice: the position of its variant, and the variant's fields in order.
     Variant {
@@ -157,12 +157,12 @@ impl Interpreter<'_, '_> {
         for argument in &call.arguments {
             arguments.push(match argument {
                 Argument::Value(value) => self.expr(value, slots)?,
-                Argument::Reference(local) => slots[*local].clone(),
+                Argument::Reference { local, .. } => slots[*local].clone(),
             });
         }
         let (result, parameters) = self.call(call.function, arguments)?;
         for (argument, value) in call.arguments.iter().zip(parameters) {
-            if let Argument::Reference(local) = argument {
+            if let Argument::Reference { local, .. } = argument {
                 slots[*local] = value;
             }
         }
@@ -186,9 +186,16 @@ impl Interpreter<'_, '_> {
                 slots[*local] = self.expr(value, slots)?;
             }
             Statement::Assign { target, value } => {
-                let positions = self.positions(&target.steps, slots)?;
+                let positions = self.positions(target.local, &target.steps, slots)?;
                 let value = self.expr(value, slots)?;
                 *element_mut(&mut slots[target.local], &positions)? = value;
+            }
+            Statement::Push { list, value, .. } => {
+                let value = self.expr(value, slots)?;
+                match &mut slots[*list] {
+                    Slot::Compound(elements) => elements.push(value),
+                    other => return Err(Stop::Unsound(format!("a push onto {other:?}"))),
+                }
             }
             Statement::Discard(value) => {
                 self.expr(value, slots)?;
@@ -257,14 +264,19 @@ impl Interpreter<'_, '_> {
             Statement::ForEach {
                 variable,
                 array,
-                length,
                 body,
+                ..
             } => {
                 let elements = self.elements(array, slots)?;
-                for position in 0..*length {
+                // The loop goes over the elements there are when it starts, as the C does.
+                let count = match &elements {
+                    Elements::Stored { local, positions } => {
+                        compound_length(element_mut(&mut slots[*local], positions)?)?
+                    }
+                    Elements::Computed(values) => values.len(),
+                };
+                for position in 0..count {
                     self.step()?;
-                    let position = usize::try_from(position)
-                        .map_err(|_| Stop::Unsound("an array longer than memory".to_owned()))?;
                     let element = match &elements {
                         Elements::Stored { local, positions } => {
                             let mut path = positions.clone();
@@ -320,17 +332,24 @@ impl Interpreter<'_, '_> {
         Ok(Flow::Next)
     }
 
-    /// Computes and checks the steps of an assignment's target, in order.
-    fn positions(&mut self, steps: &[PlaceStep], slots: &mut [Slot]) -> Eval<Vec<usize>> {
+    /// Computes and checks the steps of an assignment's target, from `local` inward, in order.
+    fn positions(
+        &mut self,
+        local: LocalId,
+        steps: &[PlaceStep],
+        slots: &mut [Slot],
+    ) -> Eval<Vec<usize>> {
         let mut positions = Vec::with_capacity(steps.len());
         for step in steps {
-            positions.push(match step {
+            let position = match step {
                 PlaceStep::Index(index) => {
                     let value = self.integer(&index.value, slots)?;
-                    check_index(value, index.length, index.checked, index.span)?
+                    let length = compound_length(element_mut(&mut slots[local], &positions)?)?;
+                    check_index(value, length, index.checked, index.span)?
                 }
                 PlaceStep::Field(field) => *field,
-            });
+            };
+            positions.push(position);
         }
         Ok(positions)
     }
@@ -341,13 +360,16 @@ impl Interpreter<'_, '_> {
             Some((local, steps)) => {
                 let mut positions = Vec::with_capacity(steps.len());
                 for step in steps {
-                    positions.push(match step {
-                        Stored::Index(index, length, checked, span) => {
+                    let position = match step {
+                        Stored::Index(index, checked, span) => {
                             let value = self.integer(index, slots)?;
+                            let length =
+                                compound_length(element_mut(&mut slots[local], &positions)?)?;
                             check_index(value, length, checked, span)?
                         }
                         Stored::Field(field) => field,
-                    });
+                    };
+                    positions.push(position);
                 }
                 Ok(Elements::Stored { local, positions })
             }
@@ -424,18 +446,16 @@ impl Interpreter<'_, '_> {
             ExprKind::Index {
                 array,
                 index,
-                length,
                 checked,
+                ..
             } => {
                 let array = self.expr(array, slots)?;
                 let index = self.integer(index, slots)?;
-                let position = check_index(index, *length, *checked, expr.span)?;
-                return match array {
-                    Slot::Compound(mut values) if position < values.len() => {
-                        Ok(values.swap_remove(position))
-                    }
-                    other => Err(Stop::Unsound(format!("element {position} of {other:?}"))),
+                let Slot::Compound(mut values) = array else {
+                    return Err(Stop::Unsound(format!("an element of {array:?}")));
                 };
+                let position = check_index(index, values.len(), *checked, expr.span)?;
+                return Ok(values.swap_remove(position));
             }
             ExprKind::Wrapping {
                 operator,
@@ -457,6 +477,7 @@ impl Interpreter<'_, '_> {
                     .ok_or_else(|| Stop::Unsound("a fill without an array type".to_owned()))?;
                 return Ok(Slot::Compound(vec![value; length]));
             }
+            ExprKind::EmptyList => return Ok(Slot::Compound(Vec::new())),
             ExprKind::Construct(fields) => {
                 let count = match &expr.ty {
                     Type::Custom(custom) => custom.fields.len(),
@@ -578,23 +599,32 @@ fn arithmetic(
     })
 }
 
-/// The position an index selects, or the trap a checked one causes.
-fn check_index(index: i128, length: u64, checked: bool, span: Span) -> Eval<usize> {
-    if (0..i128::from(length)).contains(&index) {
-        return usize::try_from(index)
-            .map_err(|_| Stop::Unsound("an array longer than memory".to_owned()));
+/// The position an index selects in a value of `length` elements, or the trap a checked one causes.
+fn check_index(index: i128, length: usize, checked: bool, span: Span) -> Eval<usize> {
+    if let Ok(position) = usize::try_from(index) {
+        if position < length {
+            return Ok(position);
+        }
     }
     if checked {
         return Err(Stop::Ended(Ending::Trapped));
     }
     Err(Stop::Unsound(format!(
-        "unchecked index {index} at {span:?} is outside an array of length {length}"
+        "unchecked index {index} at {span:?} is outside a value of length {length}"
     )))
 }
 
-/// One step from a local to the array a `for` loop reads: an index with its length, check and place, or a field.
+/// How many elements an array or a list holds now.
+fn compound_length(slot: &Slot) -> Eval<usize> {
+    match slot {
+        Slot::Compound(values) => Ok(values.len()),
+        other => Err(Stop::Unsound(format!("the elements of {other:?}"))),
+    }
+}
+
+/// One step from a local to the array or list a `for` loop reads: an index with its check and place, or a field.
 enum Stored<'expr> {
-    Index(&'expr Expr, u64, bool, Span),
+    Index(&'expr Expr, bool, Span),
     Field(usize),
 }
 
@@ -605,11 +635,11 @@ fn stored_path(expr: &Expr) -> Option<(LocalId, Vec<Stored<'_>>)> {
         ExprKind::Index {
             array,
             index,
-            length,
             checked,
+            ..
         } => {
             let (local, mut steps) = stored_path(array)?;
-            steps.push(Stored::Index(index, *length, *checked, expr.span));
+            steps.push(Stored::Index(index, *checked, expr.span));
             Some((local, steps))
         }
         ExprKind::Field { object, field } => {

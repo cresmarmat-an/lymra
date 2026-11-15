@@ -15,6 +15,16 @@
 #if defined(__unix__) || defined(__APPLE__)
 #define LYMRA_POSIX 1
 #define _XOPEN_SOURCE 700
+/* Anonymous memory for data stacks: every system has it, under a name each shows only when asked. */
+#if defined(__APPLE__)
+#define _DARWIN_C_SOURCE 1
+#elif defined(__NetBSD__)
+#define _NETBSD_SOURCE 1
+#elif defined(__OpenBSD__)
+#define _BSD_SOURCE 1
+#else
+#define _DEFAULT_SOURCE 1
+#endif
 #elif defined(_WIN32)
 #define LYMRA_WINDOWS 1
 #define WIN32_LEAN_AND_MEAN
@@ -48,7 +58,9 @@
 
 #if defined(LYMRA_POSIX)
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
+#include <sys/mman.h>
 #include <sys/resource.h>
 #include <unistd.h>
 #elif defined(LYMRA_WINDOWS)
@@ -103,7 +115,10 @@ typedef enum {
     LYMRA_INTEGER_OVERFLOW,
     LYMRA_DIVISION_BY_ZERO,
     LYMRA_ASSERTION_FAILED,
-    LYMRA_CONVERSION_OUT_OF_RANGE
+    LYMRA_CONVERSION_OUT_OF_RANGE,
+    LYMRA_DATA_STACK_FULL,
+    LYMRA_NOT_ON_TOP,
+    LYMRA_OUT_OF_MEMORY
 } lymra_trap_kind;
 
 /* Where text goes. The values are the POSIX file descriptors. */
@@ -267,7 +282,8 @@ LYMRA_UNUSED static void lymra_append(const char *data, size_t length) {
 /*
  * Stops the program with a runtime error. `site` is the place in the Lymra
  * source, already rendered by the compiler: the location line, then the
- * source line with the failing part underlined.
+ * source line with the failing part underlined. An error whose message and
+ * place do not say what to do adds a line of help after them.
  */
 LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const char *site) {
     static const char *const messages[] = {
@@ -275,12 +291,29 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
         "division by zero",
         "assertion failed",
         "conversion out of range",
+        "data stack full",
+        "a list changed while a newer list sat above it on its data stack",
+        "out of memory",
+    };
+    static const char *const helps[] = {
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        "help: a list outgrew the address space its data stack reserves, up to 64 GiB on a 64-bit system "
+        "and less on a 32-bit one; look for a loop that keeps adding to a list\n",
+        "help: this is a bug in the Lymra compiler, which should have rejected the program with error "
+        "L0704; please report it with the source file\n",
+        "help: the system has no memory left for a list to grow into\n",
     };
     lymra_write_finished();
     lymra_write_error("error: ");
     lymra_write_error(messages[kind]);
     lymra_write_error("\n");
     lymra_write_error(site);
+    if (helps[kind] != NULL) {
+        lymra_write_error(helps[kind]);
+    }
     exit(LYMRA_RUNTIME_ERROR_STATUS);
 }
 
@@ -588,34 +621,41 @@ LYMRA_UNUSED static void lymra_write_error_number(uint64_t magnitude, bool negat
     lymra_write_error(digits + start);
 }
 
-/* Stops the program because an index of `magnitude`, negative or not, lies outside an array of `length` elements. */
+/*
+ * Stops the program because an index of `magnitude`, negative or not, lies
+ * outside `indexed`, "an array" or "a list", of `length` elements.
+ */
 LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap_index(uint64_t magnitude, bool negative, uint64_t length,
-                                                          const char *site) {
+                                                          const char *indexed, const char *site) {
     lymra_write_finished();
     lymra_write_error("error: index ");
     lymra_write_error_number(magnitude, negative);
-    lymra_write_error(" is out of range for an array of length ");
+    lymra_write_error(" is out of range for ");
+    lymra_write_error(indexed);
+    lymra_write_error(" of length ");
     lymra_write_error_number(length, false);
     lymra_write_error("\n");
     lymra_write_error(site);
     exit(LYMRA_RUNTIME_ERROR_STATUS);
 }
 
-/* Checks a signed index into an array of `length` elements and returns it as a position. */
-LYMRA_UNUSED static inline size_t lymra_index_signed(int64_t index, uint64_t length, const char *site) {
+/* Checks a signed index into `indexed`, an array or a list of `length` elements, and returns it as a position. */
+LYMRA_UNUSED static inline size_t lymra_index_signed(int64_t index, uint64_t length, const char *indexed,
+                                                     const char *site) {
     if (index < 0) {
-        lymra_trap_index((uint64_t)0 - (uint64_t)index, true, length, site);
+        lymra_trap_index((uint64_t)0 - (uint64_t)index, true, length, indexed, site);
     }
     if ((uint64_t)index >= length) {
-        lymra_trap_index((uint64_t)index, false, length, site);
+        lymra_trap_index((uint64_t)index, false, length, indexed, site);
     }
     return (size_t)index;
 }
 
-/* Checks an unsigned index into an array of `length` elements and returns it as a position. */
-LYMRA_UNUSED static inline size_t lymra_index_unsigned(uint64_t index, uint64_t length, const char *site) {
+/* Checks an unsigned index into `indexed`, an array or a list of `length` elements, and returns it as a position. */
+LYMRA_UNUSED static inline size_t lymra_index_unsigned(uint64_t index, uint64_t length, const char *indexed,
+                                                       const char *site) {
     if (index >= length) {
-        lymra_trap_index(index, false, length, site);
+        lymra_trap_index(index, false, length, indexed, site);
     }
     return (size_t)index;
 }
@@ -800,8 +840,13 @@ LYMRA_UNUSED static void lymra_catch_stack_overflow(void) {
             return;
         }
     }
+#if defined(__GNUC__) || defined(__clang__)
+    /* The frame itself: AddressSanitizer can move a local such as `top` below off the stack, to catch use after return. */
+    lymra_stack_top = (uintptr_t)__builtin_frame_address(0);
+#else
     char top;
     lymra_stack_top = (uintptr_t)&top;
+#endif
     /* `rlim_t` is unsigned on most systems and signed on some, such as FreeBSD; the limit itself is never negative. */
     uintmax_t size = (uintmax_t)limit.rlim_cur;
     if (size < LYMRA_LEAST_STACK_SIZE) {
@@ -856,6 +901,224 @@ LYMRA_UNUSED static void lymra_catch_stack_overflow(void) {
 }
 #endif
 
+#if defined(LYMRA_DATA_STACKS) && LYMRA_DATA_STACKS > 0
+/*
+ * Data stacks (spec 7.2). Each is a range of address space reserved when the
+ * program starts, with a top that moves up as a value grows and back down
+ * when values are freed. Pages get memory behind them when the top first
+ * reaches them, in steps that double, so reserved space costs nothing until
+ * it is used. A value that would pass the end of its range stops the program
+ * instead of touching anything beyond it.
+ */
+typedef struct {
+    char *top;       /* The first free byte. */
+    char *committed; /* The end of the part with memory behind it. */
+    char *limit;     /* The end of the range. */
+    char *base;      /* The start of the range. */
+} lymra_data_stack;
+
+/* The generated code defines how many data stacks the program uses: one for each list it builds. */
+LYMRA_UNUSED static lymra_data_stack lymra_data_stacks[LYMRA_DATA_STACKS];
+
+/* Memory is committed in steps of at least this many bytes, and each range is a multiple of it. */
+#define LYMRA_COMMIT_STEP ((size_t)1 << 16)
+
+/*
+ * A build with AddressSanitizer marks the bytes above each top as unusable,
+ * so a read of a freed value stops the program. GCC and MSVC say the
+ * sanitizer is on with __SANITIZE_ADDRESS__, Clang with __has_feature. The
+ * two functions are declared here rather than through their header, which
+ * some installations leave out.
+ */
+#if defined(__SANITIZE_ADDRESS__)
+#define LYMRA_ADDRESS_SANITIZER 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define LYMRA_ADDRESS_SANITIZER 1
+#endif
+#endif
+
+#if defined(LYMRA_ADDRESS_SANITIZER)
+void __asan_poison_memory_region(void const volatile *start, size_t bytes);
+void __asan_unpoison_memory_region(void const volatile *start, size_t bytes);
+#define LYMRA_MARK_FREE(start, bytes) __asan_poison_memory_region((start), (bytes))
+#define LYMRA_MARK_USED(start, bytes) __asan_unpoison_memory_region((start), (bytes))
+#else
+#define LYMRA_MARK_FREE(start, bytes) ((void)(start), (void)(bytes))
+#define LYMRA_MARK_USED(start, bytes) ((void)(start), (void)(bytes))
+#endif
+
+#if defined(LYMRA_WINDOWS)
+LYMRA_UNUSED static char *lymra_reserve_range(size_t bytes) {
+    return (char *)VirtualAlloc(NULL, bytes, MEM_RESERVE, PAGE_NOACCESS);
+}
+
+LYMRA_UNUSED static bool lymra_commit_range(char *start, size_t bytes) {
+    return VirtualAlloc(start, bytes, MEM_COMMIT, PAGE_READWRITE) != NULL;
+}
+#elif !defined(LYMRA_POSIX)
+#error "Lymra's lists need a system that can reserve address space: a POSIX system or Windows"
+#else
+LYMRA_UNUSED static char *lymra_reserve_range(size_t bytes) {
+#if defined(MAP_ANONYMOUS)
+    void *range = mmap(NULL, bytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#elif defined(MAP_ANON)
+    void *range = mmap(NULL, bytes, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+#else
+    /* A system that shows neither name still maps zeroed pages from /dev/zero. */
+    int zero = open("/dev/zero", O_RDWR);
+    if (zero < 0) {
+        return NULL;
+    }
+    void *range = mmap(NULL, bytes, PROT_NONE, MAP_PRIVATE, zero, 0);
+    close(zero);
+#endif
+    return range == MAP_FAILED ? NULL : (char *)range;
+}
+
+LYMRA_UNUSED static bool lymra_commit_range(char *start, size_t bytes) {
+    return mprotect(start, bytes, PROT_READ | PROT_WRITE) == 0;
+}
+#endif
+
+/*
+ * Reserves one range for all the data stacks and splits it evenly. Each asks
+ * for 64 GiB on a 64-bit system; a 32-bit one has 2 to 3 GiB in all, so
+ * there they share 1 GiB. A system that refuses is asked for half as much,
+ * down to one commit step each.
+ */
+LYMRA_UNUSED static void lymra_reserve_data_stacks(void) {
+#if SIZE_MAX > 0xFFFFFFFFu
+    size_t each = (size_t)1 << 36;
+#else
+    size_t each = ((size_t)1 << 30) / LYMRA_DATA_STACKS;
+#endif
+    if (each > SIZE_MAX / LYMRA_DATA_STACKS) {
+        each = SIZE_MAX / LYMRA_DATA_STACKS;
+    }
+    each -= each % LYMRA_COMMIT_STEP;
+    while (each >= LYMRA_COMMIT_STEP) {
+        char *range = lymra_reserve_range(each * LYMRA_DATA_STACKS);
+        if (range != NULL) {
+            for (size_t index = 0; index < LYMRA_DATA_STACKS; index++) {
+                lymra_data_stack *stack = &lymra_data_stacks[index];
+                stack->base = range + index * each;
+                stack->top = stack->base;
+                stack->committed = stack->base;
+                stack->limit = stack->base + each;
+            }
+            return;
+        }
+        each /= 2;
+        each -= each % LYMRA_COMMIT_STEP;
+    }
+    lymra_write_error("error: the system has no address space for the program's data stacks\n");
+    exit(LYMRA_RUNTIME_ERROR_STATUS);
+}
+
+/* Marks the bytes above the top of `stack` as free, in a build with AddressSanitizer. */
+LYMRA_UNUSED static inline void lymra_data_stack_settle(lymra_data_stack *stack) {
+    LYMRA_MARK_FREE(stack->top, (size_t)(stack->committed - stack->top));
+}
+
+/*
+ * Commits memory for `needed` bytes above the top of `stack`: as much as the
+ * stack has committed so far, so the steps double, or more if it needs more.
+ * Stops the program when the range has no room left.
+ */
+LYMRA_UNUSED LYMRA_NO_INLINE static void lymra_data_stack_commit(lymra_data_stack *stack, size_t needed,
+                                                                  const char *site) {
+    if (needed > (size_t)(stack->limit - stack->top)) {
+        lymra_trap(LYMRA_DATA_STACK_FULL, site);
+    }
+    size_t shortfall = needed - (size_t)(stack->committed - stack->top);
+    size_t step = (size_t)(stack->committed - stack->base);
+    if (step < shortfall) {
+        step = shortfall;
+    }
+    if (step < LYMRA_COMMIT_STEP) {
+        step = LYMRA_COMMIT_STEP;
+    }
+    step += (LYMRA_COMMIT_STEP - step % LYMRA_COMMIT_STEP) % LYMRA_COMMIT_STEP;
+    if (step > (size_t)(stack->limit - stack->committed)) {
+        step = (size_t)(stack->limit - stack->committed);
+    }
+    if (!lymra_commit_range(stack->committed, step)) {
+        lymra_trap(LYMRA_OUT_OF_MEMORY, site);
+    }
+    LYMRA_MARK_FREE(stack->committed, step);
+    stack->committed += step;
+}
+
+/*
+ * Moves the top of `stack` up to the next multiple of `align`, where a new
+ * value starts, and returns it. The committed part ends at a multiple of
+ * every alignment, so the new top never passes it.
+ */
+LYMRA_UNUSED static inline char *lymra_data_stack_align(lymra_data_stack *stack, size_t align) {
+    size_t misalignment = (size_t)((uintptr_t)stack->top % align);
+    if (misalignment != 0) {
+        stack->top += align - misalignment;
+    }
+    return stack->top;
+}
+
+/* Stops the program unless `end`, where a value ends, is the top of `stack`: only the newest value can grow. */
+LYMRA_UNUSED static inline void lymra_data_stack_require_top(const lymra_data_stack *stack, const char *end,
+                                                             const char *site) {
+    if (end != stack->top) {
+        lymra_trap(LYMRA_NOT_ON_TOP, site);
+    }
+}
+
+/* Room for `size` more bytes at `end`, the end of the newest value on `stack`. */
+LYMRA_UNUSED static inline char *lymra_data_stack_extend(lymra_data_stack *stack, char *end, size_t size,
+                                                         const char *site) {
+    lymra_data_stack_require_top(stack, end, site);
+    if ((size_t)(stack->committed - end) < size) {
+        lymra_data_stack_commit(stack, size, site);
+    }
+    LYMRA_MARK_USED(end, size);
+    stack->top = end + size;
+    return end;
+}
+
+/*
+ * Copies `bytes` bytes from `source` to the aligned top of `stack`, which
+ * they then end, and returns where they start. The source can lie anywhere,
+ * on this stack too, below the copy or overlapping it.
+ */
+LYMRA_UNUSED static inline char *lymra_data_stack_place(lymra_data_stack *stack, const void *source,
+                                                        size_t bytes, size_t align, const char *site) {
+    char *start = lymra_data_stack_align(stack, align);
+    if ((size_t)(stack->committed - start) < bytes) {
+        lymra_data_stack_commit(stack, bytes, site);
+    }
+    LYMRA_MARK_USED(start, bytes);
+    if (bytes != 0) {
+        memmove(start, source, bytes);
+    }
+    stack->top = start + bytes;
+    lymra_data_stack_settle(stack);
+    return start;
+}
+
+/* Frees everything on `stack` from `start` up: the newest value there, which starts at `start`. */
+LYMRA_UNUSED static inline void lymra_data_stack_release(lymra_data_stack *stack, char *start) {
+    stack->top = start;
+    lymra_data_stack_settle(stack);
+}
+
+/*
+ * Frees as `lymra_data_stack_release` does, but a build with AddressSanitizer
+ * keeps the freed bytes readable until the next `lymra_data_stack_settle`,
+ * so a returning function can move its result out of what it frees.
+ */
+LYMRA_UNUSED static inline void lymra_data_stack_drop(lymra_data_stack *stack, char *start) {
+    stack->top = start;
+}
+#endif
+
 /* Prepares the program to run. The C `main` calls it before anything else. */
 LYMRA_UNUSED LYMRA_NO_INLINE static void lymra_start(void) {
 #if defined(LYMRA_POSIX)
@@ -866,6 +1129,9 @@ LYMRA_UNUSED LYMRA_NO_INLINE static void lymra_start(void) {
     lymra_console[LYMRA_STANDARD_ERROR] = GetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), &mode) != 0;
     lymra_catch_stack_overflow();
 #endif
+#if defined(LYMRA_DATA_STACKS) && LYMRA_DATA_STACKS > 0
+    lymra_reserve_data_stacks();
+#endif
 }
 
 /* Writes the waiting output when `main` returns, and reports if any of it could not be written. */
@@ -875,5 +1141,14 @@ LYMRA_UNUSED static inline int lymra_finish(void) {
         lymra_write_error("error: the output could not be written\n");
         return LYMRA_OUTPUT_ERROR_STATUS;
     }
+#if defined(LYMRA_ADDRESS_SANITIZER) && defined(LYMRA_DATA_STACKS) && LYMRA_DATA_STACKS > 0
+    /* Every list is freed by the time `main` returns. A build with AddressSanitizer checks that the code did so. */
+    for (size_t index = 0; index < LYMRA_DATA_STACKS; index++) {
+        if (lymra_data_stacks[index].top != lymra_data_stacks[index].base) {
+            lymra_write_error("error: a list was never freed; this is a bug in the Lymra compiler\n");
+            return LYMRA_RUNTIME_ERROR_STATUS;
+        }
+    }
+#endif
     return 0;
 }

@@ -17,23 +17,29 @@
  * - Parameters start with the bounds of every call in the program, and a
  *   call gives the bounds of every value its function returns (see
  *   `facts.rs`).
+ * - An index into a list is proven by a fact that ties two locals: an
+ *   integer plus a constant is below the list's length. A `for` loop up to
+ *   `length(items)` gives its variable one, and so do tests such as
+ *   `index + 1 < length(items)`. The fact lasts until either local takes a
+ *   new value; a `push` only makes the list longer, so it keeps the fact.
  *
  * Anything else is treated as any value of its type, such as a variable
  * changed in ways the analysis does not follow. Its mistakes can only keep a
  * check that could have gone.
  */
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use super::facts::Facts;
 use super::interval::Interval;
 use super::loops::{self, Change, Changes, Followed};
-use super::proof::UnprovenIndex;
+use super::proof::{Bound, UnprovenIndex};
 use crate::ir::{
     Argument, ArithmeticOperator, Block, Branch, Call, Case, ComparisonOperator, Expr, ExprKind,
-    Function, FunctionId, IntegerType, Local, LocalId, LogicOperator, PlaceStep, PrintPart,
+    Extent, Function, FunctionId, IntegerType, Local, LocalId, LogicOperator, PlaceStep, PrintPart,
     Statement, Type, Value,
 };
+use crate::source::Span;
 
 /**
  * How many times a loop's changes are worked out. A variable whose change
@@ -97,32 +103,70 @@ pub(super) fn observe_function(
     );
 }
 
-/// Bounds for each local, by id. `None` stands for any value of the local's type.
+/**
+ * What holds at one point of a function: bounds for each integer local, by
+ * id, where `None` stands for any value of the local's type, and the
+ * integers known to be below the length of a list.
+ */
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct Bounds(Vec<Option<Interval>>);
+pub(super) struct Bounds {
+    values: Vec<Option<Interval>>,
+    /**
+     * For an integer local and a list local, the largest known `offset`
+     * with `integer + offset < length(list)`. A smaller offset holds too.
+     */
+    below_lengths: BTreeMap<(LocalId, LocalId), i128>,
+}
 
 impl Bounds {
+    /// Nothing known about any of `locals` locals.
+    fn unknown(locals: usize) -> Bounds {
+        Bounds {
+            values: vec![None; locals],
+            below_lengths: BTreeMap::new(),
+        }
+    }
+
     pub fn get(&self, local: LocalId) -> Option<Interval> {
-        self.0.get(local).copied().flatten()
+        self.values.get(local).copied().flatten()
     }
 
     pub fn set(&mut self, local: LocalId, bounds: Option<Interval>) {
-        if let Some(slot) = self.0.get_mut(local) {
+        if let Some(slot) = self.values.get_mut(local) {
             *slot = bounds;
         }
     }
 
     /// The locals and their bounds, by id.
     pub fn iter(&self) -> impl Iterator<Item = (LocalId, Option<Interval>)> + '_ {
-        self.0.iter().copied().enumerate()
+        self.values.iter().copied().enumerate()
+    }
+
+    /// Whether `index + offset` is known to be below the length of the list `list`.
+    fn is_below_length(&self, index: LocalId, offset: i128, list: LocalId) -> bool {
+        self.below_lengths
+            .get(&(index, list))
+            .is_some_and(|&known| known >= offset)
+    }
+
+    /// Records that `index + offset < length(list)` holds, keeping the stronger of what was known.
+    fn set_below_length(&mut self, index: LocalId, offset: i128, list: LocalId) {
+        let known = self.below_lengths.entry((index, list)).or_insert(offset);
+        *known = (*known).max(offset);
+    }
+
+    /// Drops what ties `local` to another local, which no longer holds once `local` takes a new value.
+    fn untie(&mut self, local: LocalId) {
+        self.below_lengths
+            .retain(|&(index, list), _| index != local && list != local);
     }
 
     /// Bounds that hold where both do: on a path that has passed both tests.
     pub fn meet(&self, other: &Bounds) -> Bounds {
-        let met = self
-            .0
+        let values = self
+            .values
             .iter()
-            .zip(&other.0)
+            .zip(&other.values)
             .map(|(first, second)| match (first, second) {
                 // An empty meet is a place no value reaches; either side holds there.
                 (Some(first), Some(second)) => Some(first.intersect(*second).unwrap_or(*first)),
@@ -130,33 +174,84 @@ impl Bounds {
                 (None, None) => None,
             })
             .collect();
-        Bounds(met)
+        let mut below_lengths = self.below_lengths.clone();
+        for (&(index, list), &offset) in &other.below_lengths {
+            let known = below_lengths.entry((index, list)).or_insert(offset);
+            *known = (*known).max(offset);
+        }
+        Bounds {
+            values,
+            below_lengths,
+        }
     }
 
     /// Whether every value these bounds allow, `other` allows too.
     pub fn within(&self, other: &Bounds) -> bool {
-        self.0
-            .iter()
-            .zip(&other.0)
-            .all(|(inner, outer)| match (inner, outer) {
-                (_, None) => true,
-                (None, Some(_)) => false,
-                (Some(inner), Some(outer)) => outer.low <= inner.low && inner.high <= outer.high,
-            })
+        let values_within =
+            self.values
+                .iter()
+                .zip(&other.values)
+                .all(|(inner, outer)| match (inner, outer) {
+                    (_, None) => true,
+                    (None, Some(_)) => false,
+                    (Some(inner), Some(outer)) => {
+                        outer.low <= inner.low && inner.high <= outer.high
+                    }
+                });
+        values_within
+            && other
+                .below_lengths
+                .iter()
+                .all(|(&(index, list), &offset)| self.is_below_length(index, offset, list))
     }
 
     /// Bounds that hold on either of two paths.
     pub fn join(&self, other: &Bounds) -> Bounds {
-        let joined = self
-            .0
+        let values = self
+            .values
             .iter()
-            .zip(&other.0)
+            .zip(&other.values)
             .map(|(first, second)| match (first, second) {
                 (Some(first), Some(second)) => Some(first.join(*second)),
                 _ => None,
             })
             .collect();
-        Bounds(joined)
+        // A fact holds on both paths with the smaller of their offsets.
+        let below_lengths = self
+            .below_lengths
+            .iter()
+            .filter_map(|(&key, &offset)| {
+                let other = other.below_lengths.get(&key)?;
+                Some((key, offset.min(*other)))
+            })
+            .collect();
+        Bounds {
+            values,
+            below_lengths,
+        }
+    }
+}
+
+/**
+ * The variable of a counted loop: its local, its bounds in every iteration,
+ * and a list it stays below the length of, with the offset it has to add to
+ * reach it.
+ */
+#[derive(Clone, Copy)]
+struct Counter {
+    local: LocalId,
+    bounds: Option<Interval>,
+    below_length_of: Option<(LocalId, i128)>,
+}
+
+impl Counter {
+    /// Gives the variable its value for an iteration.
+    fn start_iteration(self, bounds: &mut Bounds) {
+        bounds.set(self.local, self.bounds);
+        bounds.untie(self.local);
+        if let Some((list, offset)) = self.below_length_of {
+            bounds.set_below_length(self.local, offset, list);
+        }
     }
 }
 
@@ -290,7 +385,7 @@ impl<'function> Analyzer<'function> {
 
     /// Bounds where the function starts: its parameters have the bounds of every call to it.
     fn entry(&self, parameters: &[LocalId], function: FunctionId) -> Bounds {
-        let mut bounds = Bounds(vec![None; self.locals.len()]);
+        let mut bounds = Bounds::unknown(self.locals.len());
         if self.facts.is_called(function) {
             for (position, &local) in parameters.iter().enumerate() {
                 bounds.set(local, self.facts.parameter(function, position));
@@ -309,7 +404,7 @@ impl<'function> Analyzer<'function> {
             .iter()
             .map(|argument| match argument {
                 Argument::Value(value) => self.range(value, bounds),
-                Argument::Reference(local) => self.local_range(bounds, *local),
+                Argument::Reference { local, .. } => self.local_range(bounds, *local),
             })
             .collect();
         if let Some((_, observed)) = self.observer.as_mut() {
@@ -404,7 +499,8 @@ impl<'function> Analyzer<'function> {
                 | Type::Boolean
                 | Type::String
                 | Type::Custom(_)
-                | Type::Choice(_) => Interval {
+                | Type::Choice(_)
+                | Type::List(_) => Interval {
                     low: 0,
                     high: whole_type.high,
                 },
@@ -417,6 +513,7 @@ impl<'function> Analyzer<'function> {
             | ExprKind::Logic { .. }
             | ExprKind::Index { .. }
             | ExprKind::Fill(_)
+            | ExprKind::EmptyList
             | ExprKind::Construct(_)
             | ExprKind::Variant { .. }
             | ExprKind::Field { .. } => whole_type,
@@ -435,24 +532,50 @@ impl<'function> Analyzer<'function> {
 
     /**
      * Clears an index check when every value the index can have lies inside
-     * its array, and otherwise records what is known about the index.
+     * its array or list, and otherwise records what is known about the index.
+     * `list` is the list indexed, when that is a local.
      */
-    fn prove_index(&mut self, index: &Expr, length: u64, checked: &mut bool, bounds: &Bounds) {
+    fn prove_index(
+        &mut self,
+        index: &Expr,
+        bound: Bound,
+        list: Option<LocalId>,
+        checked: &mut bool,
+        bounds: &Bounds,
+    ) {
         if !*checked {
             return;
         }
         let range = self.range(index, bounds);
-        if range.is_some_and(|range| range.low >= 0 && range.high < i128::from(length)) {
+        let proven = match bound {
+            Bound::Fixed(length) => {
+                range.is_some_and(|range| range.low >= 0 && range.high < i128::from(length))
+            }
+            // Only the running program knows a list's length, so an index needs a fact that ties it to the list.
+            Bound::List(_) => {
+                let below = match (self.offset_local(index, bounds), list) {
+                    (Some((local, offset)), Some(list)) => {
+                        bounds.is_below_length(local, offset, list)
+                    }
+                    _ => false,
+                };
+                below && range.is_some_and(|range| range.low >= 0)
+            }
+        };
+        if proven {
             *checked = false;
         } else {
-            self.unproven.push(UnprovenIndex::new(index, range, length));
+            self.unproven.push(UnprovenIndex::new(index, range, bound));
         }
     }
 
     /// Clears the checks of an expression's operations that cannot fail with values in these bounds.
     fn remove_checks(&mut self, expr: &mut Expr, bounds: &Bounds) {
         match &mut expr.kind {
-            ExprKind::Literal(_) | ExprKind::Local(_) | ExprKind::Constant(_) => {}
+            ExprKind::Literal(_)
+            | ExprKind::Local(_)
+            | ExprKind::Constant(_)
+            | ExprKind::EmptyList => {}
             ExprKind::Negate { operand, .. }
             | ExprKind::Not(operand)
             | ExprKind::Convert { operand, .. }
@@ -493,13 +616,18 @@ impl<'function> Analyzer<'function> {
             ExprKind::Call(call) => self.remove_argument_checks(call, bounds),
         }
         if let ExprKind::Index {
+            array,
             index,
             length,
             checked,
-            ..
         } = &mut expr.kind
         {
-            self.prove_index(index, *length, checked, bounds);
+            let bound = Bound::of(*length, array.span);
+            let list = match array.kind {
+                ExprKind::Local(local) => Some(local),
+                _ => None,
+            };
+            self.prove_index(index, bound, list, checked, bounds);
             return;
         }
         let Some(ty) = expr.ty.as_integer() else {
@@ -590,6 +718,7 @@ impl<'function> Analyzer<'function> {
                 let range = self.range(value, bounds);
                 self.evaluate(value, bounds, changes, mode);
                 bounds.set(*local, range);
+                bounds.untie(*local);
             }
             Statement::Assign { target, value } if target.steps.is_empty() => {
                 let range = self.range(value, bounds);
@@ -600,12 +729,17 @@ impl<'function> Analyzer<'function> {
             }
             // A part of an array or of a declared type changes, which no bounds the analysis holds describe.
             Statement::Assign { target, value } => {
-                for step in &mut target.steps {
+                for (position, step) in target.steps.iter_mut().enumerate() {
                     if let PlaceStep::Index(index) = step {
                         if mode == Mode::Remove {
+                            // The part of the place before this index is what it indexes.
+                            let indexed = Span::new(index.span.start, index.value.span.start);
+                            // Only the first step indexes the local itself.
+                            let list = (position == 0).then_some(target.local);
                             self.prove_index(
                                 &index.value,
-                                index.length,
+                                Bound::of(index.length, indexed),
+                                list,
                                 &mut index.checked,
                                 bounds,
                             );
@@ -615,7 +749,9 @@ impl<'function> Analyzer<'function> {
                 }
                 self.evaluate(value, bounds, changes, mode);
             }
-            Statement::Discard(value) => self.evaluate(value, bounds, changes, mode),
+            Statement::Discard(value) | Statement::Push { value, .. } => {
+                self.evaluate(value, bounds, changes, mode);
+            }
             Statement::Call(call) => {
                 if mode == Mode::Remove {
                     for argument in &call.arguments {
@@ -629,7 +765,7 @@ impl<'function> Analyzer<'function> {
                 let mut passed = HashSet::new();
                 for argument in &call.arguments {
                     match argument {
-                        Argument::Reference(local) => {
+                        Argument::Reference { local, .. } => {
                             passed.insert(*local);
                         }
                         Argument::Value(value) => loops::collect_references(value, &mut passed),
@@ -667,9 +803,17 @@ impl<'function> Analyzer<'function> {
             } => {
                 self.evaluate(array, bounds, changes, mode);
                 // The loop runs once for each element, and its variable can be any value of their type.
-                let trips = i128::from(*length);
+                let trips = match length {
+                    Extent::Fixed(length) => i128::from(*length),
+                    // A list holds fewer elements than an `integer64` can count.
+                    Extent::Dynamic => i128::from(i64::MAX),
+                };
                 let changed = loops::changed_outside(body);
-                let element = variable.map(|variable| (variable, None));
+                let element = variable.map(|local| Counter {
+                    local,
+                    bounds: None,
+                    below_length_of: None,
+                });
                 self.walk_counted(body, element, trips, &changed, bounds, changes, mode);
             }
             Statement::Match { value, cases } => {
@@ -754,6 +898,7 @@ impl<'function> Analyzer<'function> {
             let mut inside = bounds.clone();
             for binding in &case.bindings {
                 inside.set(binding.local, None);
+                inside.untie(binding.local);
             }
             let mut case_changes = changes.clone();
             let flow = self.walk_block(&mut case.body, &mut inside, &mut case_changes, mode);
@@ -792,12 +937,21 @@ impl<'function> Analyzer<'function> {
         self.evaluate(start, bounds, changes, mode);
         self.evaluate(end, bounds, changes, mode);
         let changed = loops::changed_outside(body);
+        // `range(start, length(items) - 1)` stops below what `length(items) - 1` is when the loop starts, and a list that gets no shorter keeps it.
+        let below_length_of = self
+            .length_less(end, bounds)
+            .filter(|&(list, _)| !loops::shortened_outside(body).contains(&list));
         let (Some(start_range), Some(end_range)) = (start_range, end_range) else {
             // Bounds the analysis cannot follow: the body still runs, any number of times, so its calls count.
             forget(&changed, bounds, changes);
             let mut inside = bounds.clone();
-            if let Some(variable) = variable {
-                inside.set(variable, None);
+            if let Some(local) = variable {
+                Counter {
+                    local,
+                    bounds: None,
+                    below_length_of,
+                }
+                .start_iteration(&mut inside);
             }
             self.walk_loop_body(body, &mut inside, &mut Changes::new(), mode);
             return;
@@ -807,7 +961,11 @@ impl<'function> Analyzer<'function> {
             low: start_range.low,
             high: end_range.high - 1,
         };
-        let counter = variable.map(|variable| (variable, Some(value)));
+        let counter = variable.map(|local| Counter {
+            local,
+            bounds: Some(value),
+            below_length_of,
+        });
         self.walk_counted(body, counter, trips, &changed, bounds, changes, mode);
     }
 
@@ -820,7 +978,7 @@ impl<'function> Analyzer<'function> {
     fn walk_counted(
         &mut self,
         body: &mut Block,
-        variable: Option<(LocalId, Option<Interval>)>,
+        counter: Option<Counter>,
         trips: i128,
         changed: &HashSet<LocalId>,
         bounds: &mut Bounds,
@@ -840,7 +998,7 @@ impl<'function> Analyzer<'function> {
             loop_wide,
             entry,
             extents,
-        } = self.loop_bounds(body, variable, trips, changed, bounds, rounds);
+        } = self.loop_bounds(body, counter, trips, changed, bounds, rounds);
 
         // Tell an enclosing loop being probed what this whole loop does to the variables it follows.
         for local in changed {
@@ -858,8 +1016,8 @@ impl<'function> Analyzer<'function> {
 
         if mode == Mode::Remove {
             let mut inside = entry;
-            if let Some((variable, value)) = variable {
-                inside.set(variable, value);
+            if let Some(counter) = counter {
+                counter.start_iteration(&mut inside);
             }
             self.walk_loop_body(body, &mut inside, &mut Changes::new(), Mode::Remove);
         }
@@ -870,6 +1028,7 @@ impl<'function> Analyzer<'function> {
                 None => loop_wide.get(local),
             };
             bounds.set(local, after);
+            bounds.untie(local);
         }
     }
 
@@ -884,7 +1043,7 @@ impl<'function> Analyzer<'function> {
     fn loop_bounds(
         &mut self,
         body: &mut Block,
-        variable: Option<(LocalId, Option<Interval>)>,
+        counter: Option<Counter>,
         trips: i128,
         changed: &HashSet<LocalId>,
         bounds: &Bounds,
@@ -896,8 +1055,8 @@ impl<'function> Analyzer<'function> {
         let mut extents = Vec::new();
         for _ in 0..rounds {
             let mut probe = entry.clone();
-            if let Some((variable, value)) = variable {
-                probe.set(variable, value);
+            if let Some(counter) = counter {
+                counter.start_iteration(&mut probe);
             }
             let mut changes: Changes = changed
                 .iter()
@@ -987,6 +1146,8 @@ impl<'function> Analyzer<'function> {
                         self.narrow(bounds, local, mirrored(operator), other);
                     }
                 }
+                self.tie_below_length(bounds, left, operator, right);
+                self.tie_below_length(bounds, right, mirrored(operator), left);
                 if let Some(local) = squared_local(left) {
                     if let Some(other) = self.range(right, bounds) {
                         self.narrow_square(bounds, local, operator, other);
@@ -1000,6 +1161,100 @@ impl<'function> Analyzer<'function> {
             }
             _ => {}
         }
+    }
+
+    /**
+     * Records that an integer is below a list's length where `index operator
+     * length` holds, `index` is a local plus a constant and `length` is a
+     * list's length less a constant, as in `position + 1 < length(items)`.
+     * Each side is exact where the comparison runs: a checked operation that
+     * overflowed would have stopped the program.
+     */
+    fn tie_below_length(
+        &self,
+        bounds: &mut Bounds,
+        index: &Expr,
+        operator: ComparisonOperator,
+        length: &Expr,
+    ) {
+        let (Some((local, added)), Some((list, subtracted))) = (
+            self.offset_local(index, bounds),
+            self.length_less(length, bounds),
+        ) else {
+            return;
+        };
+        // `local + added < length - subtracted` is `local + added + subtracted < length`; `<=` allows one less.
+        let offset = match operator {
+            ComparisonOperator::Less => added + subtracted,
+            ComparisonOperator::LessEqual => added + subtracted - 1,
+            _ => return,
+        };
+        bounds.set_below_length(local, offset, list);
+    }
+
+    /// A local plus a constant, as in `position + 1` or `position - 1`: the local and the constant.
+    fn offset_local(&self, expr: &Expr, bounds: &Bounds) -> Option<(LocalId, i128)> {
+        match &expr.kind {
+            ExprKind::Local(local) => Some((*local, 0)),
+            // A conversion that does not stop the program keeps the value.
+            ExprKind::Convert { operand, .. } => self.offset_local(operand, bounds),
+            ExprKind::Arithmetic {
+                operator: ArithmeticOperator::Add,
+                left,
+                right,
+                ..
+            } => match (&left.kind, &right.kind) {
+                (ExprKind::Local(local), _) => Some((*local, self.exact(right, bounds)?)),
+                (_, ExprKind::Local(local)) => Some((*local, self.exact(left, bounds)?)),
+                _ => None,
+            },
+            ExprKind::Arithmetic {
+                operator: ArithmeticOperator::Subtract,
+                left,
+                right,
+                ..
+            } => match left.kind {
+                ExprKind::Local(local) => Some((local, -self.exact(right, bounds)?)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// A list's length less a constant, as in `length(items) - 1`: the list and the constant.
+    fn length_less(&self, expr: &Expr, bounds: &Bounds) -> Option<(LocalId, i128)> {
+        match &expr.kind {
+            ExprKind::Length(operand) => match operand.kind {
+                ExprKind::Local(list) if operand.ty.is_growable() => Some((list, 0)),
+                _ => None,
+            },
+            ExprKind::Arithmetic {
+                operator: ArithmeticOperator::Subtract,
+                left,
+                right,
+                ..
+            } => {
+                let (list, less) = self.length_less(left, bounds)?;
+                Some((list, less + self.exact(right, bounds)?))
+            }
+            ExprKind::Arithmetic {
+                operator: ArithmeticOperator::Add,
+                left,
+                right,
+                ..
+            } => {
+                let (list, less) = self.length_less(left, bounds)?;
+                Some((list, less - self.exact(right, bounds)?))
+            }
+            _ => None,
+        }
+    }
+
+    /// The one value an integer expression can have, if the bounds pin it down.
+    fn exact(&self, expr: &Expr, bounds: &Bounds) -> Option<i128> {
+        self.range(expr, bounds)
+            .filter(|range| range.low == range.high)
+            .map(|range| range.low)
     }
 
     /**
@@ -1125,12 +1380,14 @@ fn assign(
         }
         None => bounds.set(target, range),
     }
+    bounds.untie(target);
 }
 
 /// Forgets what is known about locals that something may have changed in an unknown way.
 pub(super) fn forget(locals: &HashSet<LocalId>, bounds: &mut Bounds, changes: &mut Changes) {
     for &local in locals {
         bounds.set(local, None);
+        bounds.untie(local);
     }
     unfollow(locals, changes);
 }

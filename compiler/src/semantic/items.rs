@@ -154,6 +154,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         if name.text == "array" {
             return self.resolve_array_type(arguments, ty.span);
         }
+        if name.text == "list" {
+            return self.resolve_list_type(arguments, ty.span);
+        }
         if let Some(Global::Type(id)) = self.globals.get(name.text).copied() {
             self.no_arguments(name.text, arguments, ty.span)?;
             return self.declared_type(id, name.span);
@@ -184,7 +187,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 let known = IntegerType::ALL
                     .iter()
                     .map(|integer| integer.name())
-                    .chain(["float32", "float64", "boolean", "string", "array"])
+                    .chain(["float32", "float64", "boolean", "string", "array", "list"])
                     .chain(declared);
                 let suggestion = similarity::closest_match(name.text, known);
                 Err(self.report(errors::unknown_type(
@@ -319,6 +322,7 @@ fn runtime_part(expr: &ir::Expr) -> Span {
         | ir::ExprKind::Local(_)
         | ir::ExprKind::Call(_)
         | ir::ExprKind::Fill(_)
+        | ir::ExprKind::EmptyList
         | ir::ExprKind::Construct(_)
         | ir::ExprKind::Variant { .. } => expr.span,
     }

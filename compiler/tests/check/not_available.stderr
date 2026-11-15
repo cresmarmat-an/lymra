@@ -6,22 +6,6 @@ error[L0309]: modules are not available yet
   |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-error[L0309]: `list`, `stack` and `view` are not available yet
-  --> tests/check/not_available.lym:14:14
-   |
-14 |     constant list[integer32] numbers = list()
-   |              ^^^^^^^^^^^^^^^ the compiler adds this in roadmap phase 3
-   |
-help: write this part another way for now; the roadmap in the README lists what each phase adds
-
-error[L0309]: `list` is not available yet
-  --> tests/check/not_available.lym:14:40
-   |
-14 |     constant list[integer32] numbers = list()
-   |                                        ^^^^ the compiler adds this in roadmap phase 3
-   |
-help: write this part another way for now; the roadmap in the README lists what each phase adds
-
 error[L0309]: `packed` choices are not available yet
   --> tests/check/not_available.lym:16:14
    |
@@ -70,5 +54,5 @@ error[L0309]: `with` blocks are not available yet
    |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-found 9 errors in tests/check/not_available.lym
+found 7 errors in tests/check/not_available.lym
 run `lymra explain L0309` to read why a rule exists and how to fix it

@@ -89,10 +89,10 @@ error_codes! {
     L0404 => "number does not fit its type",
     L0405 => "operator used on the wrong type",
     L0406 => "division by zero",
-    L0409 => "array type written wrong",
+    L0409 => "array or list type written wrong",
     L0410 => "value too large for the call stack",
     L0411 => "index out of range",
-    L0412 => "`array(value)` without a type",
+    L0412 => "`array(value)` or `list()` without a type",
     L0413 => "unknown field",
     L0414 => "field not given once by name",
     L0415 => "type contains itself",
@@ -106,6 +106,8 @@ error_codes! {
     L0508 => "binding changed and used in one expression",
     L0601 => "`break` or `continue` outside a loop",
     L0602 => "unreachable code",
+    L0703 => "value replaced while something still uses it",
+    L0704 => "list changed while a newer list sits above it",
 }
 
 impl ErrorCode {
