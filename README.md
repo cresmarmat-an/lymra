@@ -22,7 +22,7 @@ Every name the language defines is a whole English word: `variable`, `constant`,
 
 ## Status
 
-**Edition 0.1, roadmap phase 1.** The compiler checks Lymra programs and compiles them to native executables through C. Phase 1 covers integers of every size and checked conversions between them, booleans, text values, functions, `variable` parameters, `if`, `while`, `for` over `range`, and `print`. Every integer operation is checked for overflow, in every build mode, except where the compiler proves the check can never fail. A failed check, or recursion that runs out of stack, stops the program with an error message and exit status 70 instead of a crash. Anything later phases add is rejected with an error that names the phase.
+**Edition 0.1, roadmap phase 2.** The compiler checks Lymra programs and compiles them to native executables through C. It covers integers of every size and floats, with checked conversions between them, wrapping arithmetic, booleans, text values and comparing them, arrays, custom types, choices and `match`, functions, `variable` parameters, `if`, `while`, `for` over `range` and over arrays, and `print`. Every integer operation and every index is checked, in every build mode, except where the compiler proves the check can never fail. A failed check, or recursion that runs out of stack, stops the program with an error message and exit status 70 instead of a crash. Anything later phases add is rejected with an error that names the phase.
 
 ## Try it
 
@@ -85,8 +85,8 @@ error: integer overflow
 
 `cargo run --release -p lymra-bench` times six programs written in Lymra, C and Rust, and writes [bench/results.md](bench/results.md). On the last run:
 
-- Where the compiler proves that no overflow check in a loop can fail, Lymra runs as fast as C. In one benchmark that lets GCC and Clang replace the loop with a formula: it takes 1 millisecond, against 0.62 seconds for Rust with overflow checks, which keeps every check.
-- Where checks stay in hot code, Lymra takes up to 1.7 times as long as C, about what Rust with overflow checks takes.
+- Where the compiler proves that no check can fail, Lymra runs as fast as C: four of the six programs keep no check, and built with GCC they run within 1% of C's time. In one, GCC and Clang replace the loop with a formula: it takes 1 millisecond, against 0.7 seconds for Rust with overflow checks, which keeps every check.
+- The checks that stay guard values no bound the compiler finds can hold, such as a Collatz chain. Built with GCC, that program takes 1.12 times as long as C. Built with Clang, its time on the benchmark machine moves by up to 45% with changes outside its loop.
 
 [bench/README.md](bench/README.md) explains every number, including the one that flatters Lymra by accident.
 
