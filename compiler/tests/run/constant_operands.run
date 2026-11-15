@@ -1,0 +1,10 @@
+exit status 70
+--- standard output
+127 -128 127
+126 -126 127
+--- standard error
+error: integer overflow
+  --> tests/run/constant_operands.lym:16:13
+   |
+16 |     print("{values[0] + 10}")
+   |             ^^^^^^^^^^^^^^

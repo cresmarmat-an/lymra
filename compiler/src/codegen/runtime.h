@@ -434,33 +434,90 @@ LYMRA_UNUSED static inline uint64_t lymra_unsigned_product(uint64_t left, uint64
 #endif
 #endif
 
+/*
+ * Overflow tests for an operation whose second operand is a constant of the
+ * program, such as the 3 and the 1 of `value * 3 + 1`. They compare the other
+ * operand with limits the C compiler works out while compiling, so the
+ * operation itself stays plain arithmetic the compiler can fold: on x86 both
+ * of those become one `lea`. An overflow flag would tie each operation to an
+ * instruction that sets it. Each test is exact for any second operand,
+ * constant or not.
+ */
+#define LYMRA_SIGNED_CONSTANT_CHECKS(name, type, minimum, maximum)                                             \
+    LYMRA_UNUSED static inline bool lymra_add_constant_overflows_##name(type left, type constant,              \
+                                                                       type *result) {                         \
+        if (constant > 0 ? left > (maximum) - constant : left < (minimum) - constant) {                        \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = (type)(left + constant);                                                                     \
+        return false;                                                                                          \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline bool lymra_subtract_constant_overflows_##name(type left, type constant,         \
+                                                                            type *result) {                    \
+        if (constant > 0 ? left < (minimum) + constant : left > (maximum) + constant) {                        \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = (type)(left - constant);                                                                     \
+        return false;                                                                                          \
+    }                                                                                                          \
+    /* A negative constant swaps which limit bounds which side, and -1 overflows the lowest value alone. */    \
+    LYMRA_UNUSED static inline bool lymra_multiply_constant_overflows_##name(type left, type constant,         \
+                                                                            type *result) {                    \
+        if (constant > 0    ? left > (maximum) / constant || left < (minimum) / constant                       \
+            : constant < -1 ? left < (maximum) / constant || left > (minimum) / constant                       \
+                            : constant == -1 && left == (minimum)) {                                           \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = (type)(left * constant);                                                                     \
+        return false;                                                                                          \
+    }
+#define LYMRA_UNSIGNED_CONSTANT_CHECKS(name, type, maximum)                                                    \
+    LYMRA_UNUSED static inline bool lymra_add_constant_overflows_##name(type left, type constant,              \
+                                                                       type *result) {                         \
+        if (left > (maximum) - constant) {                                                                     \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = (type)(left + constant);                                                                     \
+        return false;                                                                                          \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline bool lymra_subtract_constant_overflows_##name(type left, type constant,         \
+                                                                            type *result) {                    \
+        if (left < constant) {                                                                                 \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = (type)(left - constant);                                                                     \
+        return false;                                                                                          \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline bool lymra_multiply_constant_overflows_##name(type left, type constant,         \
+                                                                            type *result) {                    \
+        if (constant != 0 && left > (maximum) / constant) {                                                    \
+            return true;                                                                                       \
+        }                                                                                                      \
+        *result = (type)(left * constant);                                                                     \
+        return false;                                                                                          \
+    }
+
 /* The trapping form of each check, which the generated code calls. */
-#define LYMRA_CHECKED_ARITHMETIC(name, type)                                                                   \
-    LYMRA_UNUSED static inline type lymra_add_##name(type left, type right, const char *site) {                \
+#define LYMRA_TRAPPING(operation, name, type)                                                                  \
+    LYMRA_UNUSED static inline type lymra_##operation##_##name(type left, type right, const char *site) {      \
         type result = 0;                                                                                       \
-        if (lymra_add_overflows_##name(left, right, &result)) {                                                \
-            lymra_trap(LYMRA_INTEGER_OVERFLOW, site);                                                          \
-        }                                                                                                      \
-        return result;                                                                                         \
-    }                                                                                                          \
-    LYMRA_UNUSED static inline type lymra_subtract_##name(type left, type right, const char *site) {           \
-        type result = 0;                                                                                       \
-        if (lymra_subtract_overflows_##name(left, right, &result)) {                                           \
-            lymra_trap(LYMRA_INTEGER_OVERFLOW, site);                                                          \
-        }                                                                                                      \
-        return result;                                                                                         \
-    }                                                                                                          \
-    LYMRA_UNUSED static inline type lymra_multiply_##name(type left, type right, const char *site) {           \
-        type result = 0;                                                                                       \
-        if (lymra_multiply_overflows_##name(left, right, &result)) {                                           \
+        if (lymra_##operation##_overflows_##name(left, right, &result)) {                                      \
             lymra_trap(LYMRA_INTEGER_OVERFLOW, site);                                                          \
         }                                                                                                      \
         return result;                                                                                         \
     }
+#define LYMRA_CHECKED_ARITHMETIC(name, type)                                                                   \
+    LYMRA_TRAPPING(add, name, type)                                                                            \
+    LYMRA_TRAPPING(subtract, name, type)                                                                       \
+    LYMRA_TRAPPING(multiply, name, type)                                                                       \
+    LYMRA_TRAPPING(add_constant, name, type)                                                                   \
+    LYMRA_TRAPPING(subtract_constant, name, type)                                                              \
+    LYMRA_TRAPPING(multiply_constant, name, type)
 
 /* Checked arithmetic for a signed type, with division and negation. */
 #define LYMRA_SIGNED_OPERATIONS(name, type, minimum, maximum, product)                                         \
     LYMRA_SIGNED_OVERFLOW_CHECKS(name, type, minimum, maximum, product)                                        \
+    LYMRA_SIGNED_CONSTANT_CHECKS(name, type, minimum, maximum)                                                 \
     LYMRA_CHECKED_ARITHMETIC(name, type)                                                                       \
     LYMRA_UNUSED static inline type lymra_divide_##name(type left, type right, const char *site) {             \
         if (right == 0) {                                                                                      \
@@ -491,6 +548,7 @@ LYMRA_UNUSED static inline uint64_t lymra_unsigned_product(uint64_t left, uint64
 /* Checked arithmetic for an unsigned type, with division. Lymra has no negation of unsigned values. */
 #define LYMRA_UNSIGNED_OPERATIONS(name, type, maximum, product)                                                \
     LYMRA_UNSIGNED_OVERFLOW_CHECKS(name, type, maximum, product)                                               \
+    LYMRA_UNSIGNED_CONSTANT_CHECKS(name, type, maximum)                                                        \
     LYMRA_CHECKED_ARITHMETIC(name, type)                                                                       \
     LYMRA_UNUSED static inline type lymra_divide_##name(type left, type right, const char *site) {             \
         if (right == 0) {                                                                                      \

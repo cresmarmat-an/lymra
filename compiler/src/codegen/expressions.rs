@@ -14,7 +14,7 @@ use super::types::fill_function;
 use super::{Generator, INDENT, Writer, c_syntax, local_access};
 use crate::ir::{
     Argument, ArithmeticOperator, Call, Expr, ExprKind, FieldValue, FloatType, Function,
-    IntegerType, LogicOperator, Type,
+    IntegerType, LogicOperator, Type, Value,
 };
 use crate::source::Span;
 
@@ -68,6 +68,7 @@ impl Generator<'_, '_> {
                 right,
                 checked,
             } => {
+                let constant = ConstantOperand::of(*operator, left, right);
                 let (left, right) = self.pair(function, left, right, writer);
                 if !checked {
                     /*
@@ -90,7 +91,17 @@ impl Generator<'_, '_> {
                     ArithmeticOperator::Divide => "divide",
                     ArithmeticOperator::Remainder => "remainder",
                 };
-                format!("lymra_{operation}_{}({left}, {right}, {site})", expr.ty)
+                let ty = &expr.ty;
+                match constant {
+                    Some(ConstantOperand::Right) => {
+                        format!("lymra_{operation}_constant_{ty}({left}, {right}, {site})")
+                    }
+                    // A constant has no effects, so it can move to the second place of an operation that commutes.
+                    Some(ConstantOperand::Left) => {
+                        format!("lymra_{operation}_constant_{ty}({right}, {left}, {site})")
+                    }
+                    None => format!("lymra_{operation}_{ty}({left}, {right}, {site})"),
+                }
             }
             ExprKind::Compare { .. } => format!("({})", self.condition(function, expr, writer)),
             ExprKind::Wrapping {
@@ -517,4 +528,41 @@ fn float_bounds(ty: IntegerType) -> (f64, f64) {
         (true, _) => ty.minimum() as f64 - 1.0,
     };
     (below, above)
+}
+
+/**
+ * Which operand of a checked `+`, `-` or `*` is a constant of the program,
+ * whose check then compares the other operand with limits the C compiler
+ * works out (see `runtime.h`). Both operands are never constants: the checker
+ * computes such an operation itself.
+ */
+#[derive(Clone, Copy)]
+enum ConstantOperand {
+    Left,
+    Right,
+}
+
+impl ConstantOperand {
+    fn of(operator: ArithmeticOperator, left: &Expr, right: &Expr) -> Option<Self> {
+        let commutes = match operator {
+            ArithmeticOperator::Add | ArithmeticOperator::Multiply => true,
+            ArithmeticOperator::Subtract => false,
+            ArithmeticOperator::Divide | ArithmeticOperator::Remainder => return None,
+        };
+        if is_constant(right) {
+            Some(ConstantOperand::Right)
+        } else if commutes && is_constant(left) {
+            Some(ConstantOperand::Left)
+        } else {
+            None
+        }
+    }
+}
+
+/// Whether an integer operand is known while compiling: a literal, or a named constant.
+fn is_constant(operand: &Expr) -> bool {
+    matches!(
+        operand.kind,
+        ExprKind::Literal(Value::Integer { .. }) | ExprKind::Constant(_)
+    )
 }

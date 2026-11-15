@@ -1,0 +1,16 @@
+#[
+    Checked arithmetic with a constant on either side gives exact results up
+    to the ends of the type, then stops at the first operation that does not
+    fit. The array hides the values from the optimizer, so every check stays.
+]#
+
+constant integer8 nine = 9
+
+function main()
+    variable array[integer8, 3] values = array(0)
+    values[0] = 118
+    values[1] = -118
+    values[2] = 42
+    print("{values[0] + nine} {values[1] - 10} {9 - values[1]}")
+    print("{values[2] * 3} {-3 * values[2]} {nine + values[0]}")
+    print("{values[0] + 10}")

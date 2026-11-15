@@ -1,7 +1,9 @@
 /*!
  * The runtime's overflow checks agree with exact arithmetic in both of their
  * forms: the builtins GCC and Clang provide, and the portable code that
- * other compilers, such as MSVC, use. A check that is wrong in either form
+ * other compilers, such as MSVC, use. So do the checks for a constant second
+ * operand, which compare the other operand with limits and are tried on the
+ * same pairs, since they hold for any second operand. A check that is wrong in either form
  * would let a program continue with a wrong number, so every pair of 8-bit
  * values is tried, and for wider types every pair of values near zero, the
  * limits, each power of two and the square root of the limit. Exact 64-bit
@@ -117,6 +119,19 @@ static size_t interesting(long long minimum, long long maximum, long long *value
                 overflowed = lymra_multiply_overflows_##name(left, right, &result);                           \
                 expect(#name " multiply", overflowed, product < (minimum) || product > (maximum),              \
                        result == product, values[i], values[j]);                                              \
+                result = 0;                                                                                   \
+                overflowed = lymra_add_constant_overflows_##name(left, right, &result);                       \
+                expect(#name " add constant", overflowed, sum < (minimum) || sum > (maximum), result == sum,   \
+                       values[i], values[j]);                                                                 \
+                result = 0;                                                                                   \
+                overflowed = lymra_subtract_constant_overflows_##name(left, right, &result);                  \
+                expect(#name " subtract constant", overflowed,                                                \
+                       difference < (minimum) || difference > (maximum), result == difference, values[i],     \
+                       values[j]);                                                                            \
+                result = 0;                                                                                   \
+                overflowed = lymra_multiply_constant_overflows_##name(left, right, &result);                  \
+                expect(#name " multiply constant", overflowed, product < (minimum) || product > (maximum),     \
+                       result == product, values[i], values[j]);                                              \
             }                                                                                                 \
         }                                                                                                     \
     }
@@ -143,6 +158,18 @@ static size_t interesting(long long minimum, long long maximum, long long *value
                 result = 0;                                                                                   \
                 overflowed = lymra_multiply_overflows_##name(left, right, &result);                           \
                 expect(#name " multiply", overflowed, product > (exact)(maximum), result == product,           \
+                       (long long)left, (long long)right);                                                    \
+                result = 0;                                                                                   \
+                overflowed = lymra_add_constant_overflows_##name(left, right, &result);                       \
+                expect(#name " add constant", overflowed, sum > (exact)(maximum), result == sum,               \
+                       (long long)left, (long long)right);                                                    \
+                result = 0;                                                                                   \
+                overflowed = lymra_subtract_constant_overflows_##name(left, right, &result);                  \
+                expect(#name " subtract constant", overflowed, left < right, result == (type)(left - right),   \
+                       (long long)left, (long long)right);                                                    \
+                result = 0;                                                                                   \
+                overflowed = lymra_multiply_constant_overflows_##name(left, right, &result);                  \
+                expect(#name " multiply constant", overflowed, product > (exact)(maximum), result == product,  \
                        (long long)left, (long long)right);                                                    \
             }                                                                                                 \
         }                                                                                                     \
@@ -275,6 +302,18 @@ static void check_integer64(void) {
             overflowed = lymra_multiply_overflows_integer64(left, right, &result);
             expect("integer64 multiply", overflowed, !fits_integer64(product), (uint64_t)result == low_bits(product),
                    values[i], values[j]);
+            result = 0;
+            overflowed = lymra_add_constant_overflows_integer64(left, right, &result);
+            expect("integer64 add constant", overflowed, !fits_integer64(sum), (uint64_t)result == low_bits(sum),
+                   values[i], values[j]);
+            result = 0;
+            overflowed = lymra_subtract_constant_overflows_integer64(left, right, &result);
+            expect("integer64 subtract constant", overflowed, !fits_integer64(difference),
+                   (uint64_t)result == low_bits(difference), values[i], values[j]);
+            result = 0;
+            overflowed = lymra_multiply_constant_overflows_integer64(left, right, &result);
+            expect("integer64 multiply constant", overflowed, !fits_integer64(product),
+                   (uint64_t)result == low_bits(product), values[i], values[j]);
         }
     }
 }
@@ -309,6 +348,18 @@ static void check_unsigned64(void) {
             result = 0;
             overflowed = lymra_multiply_overflows_unsigned64(left, right, &result);
             expect("unsigned64 multiply", overflowed, !fits_unsigned64(product), result == low_bits(product),
+                   (long long)left, (long long)right);
+            result = 0;
+            overflowed = lymra_add_constant_overflows_unsigned64(left, right, &result);
+            expect("unsigned64 add constant", overflowed, !fits_unsigned64(sum), result == low_bits(sum),
+                   (long long)left, (long long)right);
+            result = 0;
+            overflowed = lymra_subtract_constant_overflows_unsigned64(left, right, &result);
+            expect("unsigned64 subtract constant", overflowed, !fits_unsigned64(difference),
+                   result == low_bits(difference), (long long)left, (long long)right);
+            result = 0;
+            overflowed = lymra_multiply_constant_overflows_unsigned64(left, right, &result);
+            expect("unsigned64 multiply constant", overflowed, !fits_unsigned64(product), result == low_bits(product),
                    (long long)left, (long long)right);
         }
     }
