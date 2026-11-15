@@ -121,6 +121,28 @@ jobs:
         env:
           CC: gcc -m32
 
+  sanitized:
+    name: Test programs under the sanitizers with ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: GCC on Linux
+            os: ubuntu-latest
+            compiler: gcc
+          - name: Clang on macOS
+            os: macos-latest
+            compiler: clang
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      # Every program the tests build stops at the first read of freed or unowned memory, a leak, or undefined behavior in its C.
+      - name: Test
+        run: cargo test --no-fail-fast
+        env:
+          LYMRA_TEST_COMPILERS: ${{ matrix.compiler }} -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all
+
   emulated:
     name: Test ${{ matrix.name }} programs under QEMU
     runs-on: ubuntu-latest
