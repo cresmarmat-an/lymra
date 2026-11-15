@@ -37,7 +37,8 @@
  * wider stops. A program without floats is not affected.
  */
 #if defined(LYMRA_USES_FLOATS)
-#if defined(_MSC_VER)
+/* Clang on Windows defines `_MSC_VER` too, but takes `-ffp-contract=off` like GCC and rejects this pragma. */
+#if defined(_MSC_VER) && !defined(__clang__)
 #pragma fp_contract(off)
 #endif
 #if defined(FLT_EVAL_METHOD) && FLT_EVAL_METHOD != 0 && FLT_EVAL_METHOD != -1
@@ -71,12 +72,15 @@
 #define LYMRA_UNREACHABLE() __assume(0)
 #define LYMRA_SIGNAL_FENCE() _ReadWriteBarrier()
 /*
- * Two MSVC warnings do not apply to generated code: a program uses only part
- * of the runtime, and MSVC has no attribute for unused functions (C4505);
- * and once runtime checks are inlined, the optimizer finds trap paths that a
- * known value can never take (C4702). Lymra itself rejects unreachable code.
+ * Three MSVC warnings do not apply to generated code: a program uses only
+ * part of the runtime, and MSVC has no attribute for unused functions
+ * (C4505); once runtime checks are inlined, the optimizer finds trap paths
+ * that a known value can never take (C4702), and Lymra itself rejects
+ * unreachable code; and inlining can make a divisor a known zero (C4723),
+ * where Lymra stops the program before any integer division by zero and a
+ * float division by zero gives infinity or NaN, as IEEE 754 defines.
  */
-#pragma warning(disable : 4505 4702)
+#pragma warning(disable : 4505 4702 4723)
 #else
 #error "Lymra programs are compiled with GCC, Clang or MSVC"
 #endif
