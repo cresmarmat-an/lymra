@@ -19,7 +19,9 @@
  */
 
 mod c_syntax;
+mod copies;
 mod expressions;
+mod reservations;
 mod statements;
 mod strips;
 mod text_types;
@@ -57,6 +59,7 @@ pub fn generate(program: &Program<'_>, source: &SourceFile) -> String {
         text_regions: HashMap::new(),
         return_stack: None,
         open_strips: Vec::new(),
+        open_reservations: Vec::new(),
     };
     let functions: Vec<String> = program
         .functions
@@ -186,6 +189,8 @@ struct Generator<'program, 'src> {
     return_stack: Option<usize>,
     /// The range loops run in blocks whose body is being generated, innermost last.
     open_strips: Vec<OpenStrip>,
+    /// The lists a loop being generated reserved room for, which its pushes take with no check.
+    open_reservations: Vec<LocalId>,
 }
 
 /// A range loop run in blocks whose body is being generated: in it, the remainder of `strip.counter` by `strip.size` is `place`.

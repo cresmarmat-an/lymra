@@ -22,7 +22,7 @@ mod grids;
 mod interpreter;
 mod list_programs;
 mod loop_paths;
-mod remainder_loops;
+mod loop_shapes;
 
 use lymra::diagnostics::render_report;
 use lymra::frontend;

@@ -1193,14 +1193,14 @@ LYMRA_UNUSED static inline void lymra_data_stack_settle(lymra_data_stack *stack)
 }
 
 /*
- * Commits memory for `needed` bytes above the top of `stack`: as much as the
- * stack has committed so far, so the steps double, or more if it needs more.
- * Stops the program when the range has no room left.
+ * Commits memory for `needed` bytes above the top of `stack`, more than the
+ * committed part already holds: as much as the stack has committed so far,
+ * so the steps double, or more if it needs more. Returns false, committing
+ * nothing, when the range has no room left or the system has no memory.
  */
-LYMRA_UNUSED LYMRA_NO_INLINE static void lymra_data_stack_commit(lymra_data_stack *stack, size_t needed,
-                                                                  const char *site) {
+LYMRA_UNUSED LYMRA_NO_INLINE static bool lymra_data_stack_try_commit(lymra_data_stack *stack, size_t needed) {
     if (needed > (size_t)(stack->limit - stack->top)) {
-        lymra_trap(LYMRA_DATA_STACK_FULL, site);
+        return false;
     }
     size_t shortfall = needed - (size_t)(stack->committed - stack->top);
     size_t step = (size_t)(stack->committed - stack->base);
@@ -1215,10 +1215,22 @@ LYMRA_UNUSED LYMRA_NO_INLINE static void lymra_data_stack_commit(lymra_data_stac
         step = (size_t)(stack->limit - stack->committed);
     }
     if (!lymra_commit_range(stack->committed, step)) {
-        lymra_trap(LYMRA_OUT_OF_MEMORY, site);
+        return false;
     }
     LYMRA_MARK_FREE(stack->committed, step);
     stack->committed += step;
+    return true;
+}
+
+/* Commits memory for `needed` bytes above the top of `stack`, as lymra_data_stack_try_commit does, or stops the program. */
+LYMRA_UNUSED LYMRA_NO_INLINE static void lymra_data_stack_commit(lymra_data_stack *stack, size_t needed,
+                                                                  const char *site) {
+    if (needed > (size_t)(stack->limit - stack->top)) {
+        lymra_trap(LYMRA_DATA_STACK_FULL, site);
+    }
+    if (!lymra_data_stack_try_commit(stack, needed)) {
+        lymra_trap(LYMRA_OUT_OF_MEMORY, site);
+    }
 }
 
 /*
@@ -1252,6 +1264,28 @@ LYMRA_UNUSED static inline char *lymra_data_stack_extend(lymra_data_stack *stack
     LYMRA_MARK_USED(end, size);
     stack->top = end + size;
     return end;
+}
+
+/*
+ * Makes room for `count` more elements of `size` bytes at `end`, where the
+ * newest value on `stack` ends, for the value to grow into with no check:
+ * commits memory for them and moves the top past them. Returns false, and
+ * changes nothing, when the value is not the newest or the room cannot be
+ * had. Growing one element at a time then stops the program where room
+ * runs out, as it would have without the reservation.
+ */
+LYMRA_UNUSED static inline bool lymra_data_stack_reserve(lymra_data_stack *stack, char *end, uint64_t count,
+                                                         size_t size) {
+    if (end != stack->top || count > (uint64_t)((size_t)(stack->limit - end) / size)) {
+        return false;
+    }
+    size_t bytes = (size_t)count * size;
+    if ((size_t)(stack->committed - end) < bytes && !lymra_data_stack_try_commit(stack, bytes)) {
+        return false;
+    }
+    LYMRA_MARK_USED(end, bytes);
+    stack->top = end + bytes;
+    return true;
 }
 
 /*

@@ -5,6 +5,7 @@
  */
 
 use std::num::NonZeroUsize;
+use std::ops::AddAssign;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, PoisonError};
@@ -20,35 +21,35 @@ use super::common;
 use super::interpreter::{self, Ending};
 
 /// What a test counts in a program whose builds agreed: given the program as checked, the program optimized, and the optimized C.
-pub type Measure = fn(&Program<'_>, &Program<'_>, &str) -> usize;
+pub type Measure<T> = fn(&Program<'_>, &Program<'_>, &str) -> T;
 
 /// What became of one program.
-enum Verdict {
+enum Verdict<T> {
     /// The checker rejected it, which the generators are written to avoid. Holds the program and the report.
     Rejected(String),
     /// The interpreter ran out of steps, so nothing says what it should print.
     TooLong,
     /// Every build printed what the interpreter printed and ended the same way. Holds what the test measured.
-    Agreed(usize),
+    Agreed(T),
 }
 
 /// What became of a run of programs whose builds all agreed with the interpreter.
-pub struct Tally {
+pub struct Tally<T> {
     /// How many programs ran to an end the interpreter knows.
     pub agreed: usize,
     /// What the test measured, added up over those programs.
-    pub measured: usize,
+    pub measured: T,
     /// How many programs ran out of the interpreter's steps.
     pub too_long: usize,
 }
 
 /// Checks, interprets, builds and runs one program. A disagreement comes back as an error that shows the program.
-fn try_program(
+fn try_program<T>(
     name: &str,
     text: &str,
     compilers: &[Compiler],
-    measure: Measure,
-) -> Result<Verdict, String> {
+    measure: Measure<T>,
+) -> Result<Verdict<T>, String> {
     let source = common::source(name, text);
     let program = match frontend::check_program(&source) {
         Ok(program) => program,
@@ -108,7 +109,12 @@ fn try_program(
  * processors, each checked under the file name `name`. Panics with the
  * program on the first disagreement, and when the checker rejects any.
  */
-pub fn run_all(texts: &[String], name: &str, compilers: &[Compiler], measure: Measure) -> Tally {
+pub fn run_all<T: Default + AddAssign + Send>(
+    texts: &[String],
+    name: &str,
+    compilers: &[Compiler],
+    measure: Measure<T>,
+) -> Tally<T> {
     let workers = std::thread::available_parallelism()
         .map_or(1, NonZeroUsize::get)
         .min(texts.len());
@@ -132,7 +138,7 @@ pub fn run_all(texts: &[String], name: &str, compilers: &[Compiler], measure: Me
         .unwrap_or_else(PoisonError::into_inner);
     let mut tally = Tally {
         agreed: 0,
-        measured: 0,
+        measured: T::default(),
         too_long: 0,
     };
     let mut rejected = Vec::new();

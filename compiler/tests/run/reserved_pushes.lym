@@ -1,0 +1,126 @@
+#[
+    A loop that pushes onto a list once on every turn reserves room for every
+    element first, in an optimized build, and pushes into it with no check.
+    The list reads the same during the loop as after it and grows again
+    after it, and a recursive call inside the loop builds its own list above
+    the room. A loop over a list can push onto that list: it goes over the
+    elements the list holds when it starts. Loops that push less or more
+    than once a turn keep every check.
+]#
+
+type Point
+    integer32 x
+    integer32 y
+
+function total(view[integer64] values) returns integer64
+    variable integer64 sum = 0
+    for value in values
+        sum = sum + value
+    return sum
+
+function squares_into(variable list[integer64] values, integer64 count)
+    for index in range(0, count)
+        push(variable values, index * index)
+
+function nested_sum(integer64 depth) returns integer64
+    variable list[integer64] values = list()
+    variable integer64 inner = 0
+    for index in range(0, 3)
+        push(variable values, depth * 10 + index)
+        if depth > 0
+            inner = inner + nested_sum(depth - 1)
+    return total(values) + inner
+
+function main()
+    variable list[boolean] flags = list()
+    for _ in range(0, 1000)
+        push(variable flags, false)
+    flags[999] = true
+    print("flags {length(flags)} {flags[0]} {flags[999]}")
+
+    variable list[integer64] counted = list()
+    for _ in range(0, 50)
+        push(variable counted, length(counted))
+    print("counted {length(counted)} {counted[0]} {counted[49]} {total(counted)}")
+
+    variable list[integer64] fibonacci = list()
+    push(variable fibonacci, 0)
+    push(variable fibonacci, 1)
+    for index in range(2, 60)
+        push(variable fibonacci, fibonacci[index - 1] + fibonacci[index - 2])
+    print("fibonacci {fibonacci[59]}")
+    push(variable fibonacci, -1)
+    print("grown after {length(fibonacci)} {fibonacci[60]}")
+
+    variable list[integer64] squares = list()
+    squares_into(variable squares, 20)
+    squares_into(variable squares, 0)
+    print("squares {length(squares)} {total(squares)}")
+
+    variable list[integer64] around = list()
+    for index in range(-5, 5)
+        push(variable around, index)
+    print("around {length(around)} {total(around)}")
+
+    constant integer8 lowest = -100
+    variable list[integer8] small = list()
+    for index in range(lowest, 100)
+        push(variable small, index)
+    print("small {length(small)} {small[0]} {small[199]}")
+
+    variable stack[Point] points = stack()
+    for index in range(0, 30)
+        push(variable points, Point(x = integer32(index), y = integer32(index * 2)))
+    constant last = pop(variable points)
+    print("points {length(points)} {last.x} {last.y} {top(points).y}")
+
+    variable list[integer64] residues = list()
+    for index in range(0, 40)
+        push(variable residues, index % 7)
+    print("residues {length(residues)} {total(residues)}")
+
+    print("nested {nested_sum(3)}")
+
+    variable list[integer64] skipped = list()
+    for index in range(0, 20)
+        if index % 3 == 0
+            continue
+        push(variable skipped, index)
+    print("skipped {length(skipped)} {total(skipped)}")
+
+    variable list[integer64] twice = list()
+    for index in range(0, 10)
+        push(variable twice, index)
+        push(variable twice, -index)
+    print("twice {length(twice)} {total(twice)}")
+
+    variable list[integer64] none = list()
+    for index in range(5, 5)
+        push(variable none, index)
+    print("none {length(none)}")
+
+    variable list[integer64] doubled = list()
+    for value in squares
+        push(variable doubled, value * 2)
+    print("doubled {length(doubled)} {total(doubled)}")
+
+    variable list[integer64] grown = list()
+    push(variable grown, 1)
+    push(variable grown, 2)
+    for value in grown
+        push(variable grown, value * 10)
+    print("grown while walking {length(grown)} {total(grown)}")
+
+    constant array[integer32, 4] fixed = array(3)
+    variable list[integer32] from_array = list()
+    for value in fixed
+        push(variable from_array, value + integer32(length(from_array)))
+    print("from an array {length(from_array)} {from_array[0]} {from_array[3]}")
+
+    variable list[string] names = list()
+    push(variable names, "ab")
+    push(variable names, "cde")
+    variable list[integer64] sizes = list()
+    for name in names
+        push(variable sizes, length(name))
+    print("sizes {length(sizes)} {total(sizes)}")

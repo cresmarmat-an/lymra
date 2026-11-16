@@ -1,14 +1,20 @@
 /*!
- * Random programs full of range loops that take their counter's remainder
- * by small numbers, which an optimized build runs in blocks of turns. They
- * start at multiples of the block size and elsewhere, below zero too, and end
- * with turns left over after the last whole block. Counters have every
+ * Random programs full of the range loops an optimized build writes in
+ * another shape: loops that take their counter's remainder by small
+ * numbers, which run in blocks of turns, and loops that push onto a list
+ * once on every turn, which reserve room for every element first. The loops
+ * start at multiples of the block size and elsewhere, below zero too, and
+ * end with turns left over after the last whole block. Counters have every
  * width; remainders are by divisors of the block size and by other numbers;
- * bodies hold `continue`, `break`, `return` in a function, nested loops, and
- * arithmetic that overflows on some turn. Each program is compiled to C
- * with every C compiler, with every check and optimized, and has to print
- * what the interpreter prints and stop at the same turn.
+ * bodies hold `continue`, `break`, `return` in a function, nested loops,
+ * pushes in nested loops, reads of the list being filled, and arithmetic
+ * that overflows on some turn. A last loop goes over the filled list and may
+ * push onto it as it goes. Each program is compiled to C with every C
+ * compiler, with every check and optimized, and has to print what the
+ * interpreter prints and stop at the same turn.
  */
+
+use std::ops::AddAssign;
 
 use super::generator::Random;
 use super::{common, compiled};
@@ -32,6 +38,16 @@ const PRIME: u32 = 1_000_003;
 
 /// Block sizes a loop leans towards: its remainders are mostly by these and by numbers that divide them.
 const SIZES: [u32; 12] = [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 16];
+
+/// The function every program has, which adds up the elements of the list its loops fill.
+const TOTAL: &str = "\
+function total(view[integer64] values) returns integer64
+    variable integer64 sum = 0
+    for value in values
+        sum = (sum * 7 + value) % 1000003
+    return sum
+
+";
 
 /// A counter type other than `integer64`, the highest end a range of it gets, and whether it is signed.
 const NARROW: [(&str, i64, bool); 6] = [
@@ -72,6 +88,7 @@ pub fn program(random: &mut Random) -> String {
         counters: Vec::new(),
         small,
     };
+    writer.text.push_str(TOTAL);
     for helper in 0..HELPERS {
         writer.helper(helper);
     }
@@ -130,8 +147,13 @@ impl Writer<'_> {
             self.line(&format!("variable integer8 small = {start}"));
             self.line("small = small + 1");
         }
+        self.line("variable list[integer64] kept = list()");
+        self.line("push(variable kept, 0)");
         for _ in 0..=self.random.below(LOOPS) {
             self.range_loop(NESTING);
+        }
+        if self.random.chance(60) {
+            self.walk_kept();
         }
         // Each accumulator gets a helper's result at the end, so each changes.
         for helper in 0..HELPERS {
@@ -147,7 +169,20 @@ impl Writer<'_> {
         if self.small {
             shown.push("{small}".to_owned());
         }
+        shown.push("{length(kept)} {total(kept)}".to_owned());
         self.line(&format!("print(\"{}\")", shown.join(" ")));
+    }
+
+    /// A loop over the list the range loops filled, which may push onto that list as it goes over it.
+    fn walk_kept(&mut self) {
+        let value = self.name("value");
+        self.line(&format!("for {value} in kept"));
+        self.depth += 1;
+        self.fold_in(&value);
+        if self.random.chance(60) {
+            self.line(&format!("push(variable kept, {value} % 5)"));
+        }
+        self.depth -= 1;
     }
 
     /// `for counter in range(start, end)`, with a start that is a multiple of the block size or not.
@@ -186,6 +221,11 @@ impl Writer<'_> {
         self.fold_in(&remainder);
         if self.small && self.random.chance(50) {
             self.line(&format!("small = small + integer8({remainder})"));
+        }
+        if self.random.chance(40) {
+            self.line(&format!(
+                "push(variable kept, {remainder} * 3 + length(kept))"
+            ));
         }
         self.counters.push(counter);
         for _ in 0..statements {
@@ -230,6 +270,12 @@ impl Writer<'_> {
             5 | 6 => self.branch(nesting),
             7 if nesting > 0 => self.nested_loop(nesting - 1),
             8 => self.call(),
+            9 if self.random.chance(50) => {
+                let index = self.random.below(ACCUMULATORS);
+                self.line(&format!(
+                    "sum_{index} = (sum_{index} + kept[length(kept) - 1]) % {PRIME}"
+                ));
+            }
             _ => self.fold(),
         }
     }
@@ -258,8 +304,12 @@ impl Writer<'_> {
     /// An `if` on a remainder, which may leave the turn with `continue` or the loop with `break`.
     fn branch(&mut self, nesting: usize) {
         let (remainder, _, divisor) = self.remainder();
-        let wanted = self.below(divisor);
         let comparison = *self.random.pick(&["==", "!=", "<"]);
+        // Never `< 0`, which no remainder of a counter that never goes below zero is.
+        let wanted = match comparison {
+            "<" => 1 + self.below(divisor - 1),
+            _ => self.below(divisor),
+        };
         self.line(&format!("if {remainder} {comparison} {wanted}"));
         self.depth += 1;
         match self.random.below(10) {
@@ -323,38 +373,60 @@ fn widened((remainder, ty, _): (String, &'static str, u32)) -> String {
     }
 }
 
-/// How many loops in optimized C run in blocks of turns.
-fn loops_in_blocks(c_source: &str) -> usize {
-    c_source
-        .lines()
-        .filter(|line| line.trim_start().starts_with("for (") && line.contains("block_place"))
-        .count()
+/// How many loops of the optimized C run in each other shape.
+#[derive(Clone, Copy, Default)]
+struct Shapes {
+    in_blocks: usize,
+    reserved: usize,
+}
+
+impl Shapes {
+    fn of(c_source: &str) -> Self {
+        let count = |found: fn(&str) -> bool| {
+            c_source
+                .lines()
+                .map(str::trim_start)
+                .filter(|line| found(line))
+                .count()
+        };
+        Self {
+            in_blocks: count(|line| line.starts_with("for (") && line.contains("block_place")),
+            reserved: count(|line| line.starts_with("if (") && line.contains("_reserve(")),
+        }
+    }
+}
+
+impl AddAssign for Shapes {
+    fn add_assign(&mut self, other: Self) {
+        self.in_blocks += other.in_blocks;
+        self.reserved += other.reserved;
+    }
 }
 
 #[test]
-fn loops_run_in_blocks_print_what_the_interpreter_prints() {
+fn loops_in_other_shapes_print_what_the_interpreter_prints() {
     let compilers = common::c_compilers();
     let mut random = Random::new(SEED);
     let texts: Vec<String> = (0..PROGRAMS).map(|_| program(&mut random)).collect();
-    let tally = compiled::run_all(
-        &texts,
-        "remainder_loops.lym",
-        &compilers,
-        |_, _, c_source| loops_in_blocks(c_source),
-    );
+    let tally = compiled::run_all(&texts, "loop_shapes.lym", &compilers, |_, _, c_source| {
+        Shapes::of(c_source)
+    });
     assert!(
         tally.agreed * 3 >= PROGRAMS * 2,
-        "only {} of {PROGRAMS} remainder loop programs ran; {} ran out of steps",
+        "only {} of {PROGRAMS} loop shape programs ran; {} ran out of steps",
         tally.agreed,
         tally.too_long
     );
+    let Shapes {
+        in_blocks,
+        reserved,
+    } = tally.measured;
     assert!(
-        tally.measured >= PROGRAMS,
-        "only {} loops ran in blocks of turns",
-        tally.measured
+        in_blocks >= PROGRAMS && reserved >= PROGRAMS / 2,
+        "only {in_blocks} loops ran in blocks of turns and {reserved} reserved room"
     );
     println!(
-        "{} of {PROGRAMS} remainder loop programs agreed, {} ran out of steps, {} loops ran in blocks",
-        tally.agreed, tally.too_long, tally.measured
+        "{} of {PROGRAMS} loop shape programs agreed, {} ran out of steps, {in_blocks} loops ran in blocks, {reserved} reserved room",
+        tally.agreed, tally.too_long
     );
 }

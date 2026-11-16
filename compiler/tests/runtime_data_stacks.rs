@@ -1,11 +1,12 @@
 /*!
  * The runtime's data stacks on their own, with every C compiler: the
  * reservation, memory committed in doubling steps as a value grows, moves
- * between and within stacks, freeing, shrinking, where text lies, and the
- * two errors a growing value or new text can stop the program with. Built with AddressSanitizer, it
- * also checks which bytes are marked as freed. Programs only reach these through generated
- * code, which cannot make a stack small enough to fill or put a value under
- * another on purpose, so the harness calls the runtime directly.
+ * between and within stacks, room reserved for a loop's pushes, freeing,
+ * shrinking, where text lies, and the two errors a growing value or new
+ * text can stop the program with. Built with AddressSanitizer, it also
+ * checks which bytes are marked as freed. Programs only reach these through
+ * generated code, which cannot make a stack small enough to fill or put a
+ * value under another on purpose, so the harness calls the runtime directly.
  */
 
 mod common;
@@ -169,6 +170,51 @@ static void check_places(void) {
     lymra_data_stack_release(second, second->base);
 }
 
+/*
+ * Room reserved at the end of the newest value: the value grows into it
+ * with no check, and what it did not take is freed. A value that is not the
+ * newest, or room the range cannot hold, gets none, and nothing changes.
+ */
+static void check_reserve(void) {
+    lymra_data_stack *stack = &lymra_data_stacks[1];
+    int32_t *values = (int32_t *)(void *)lymra_data_stack_align(stack, _Alignof(int32_t));
+    require("no room is reserved for nothing, and the top stays",
+            lymra_data_stack_reserve(stack, (char *)values, 0, sizeof(int32_t)) && stack->top == (char *)values);
+    const uint64_t count = 300000;
+    require("room is reserved at the newest value's end",
+            lymra_data_stack_reserve(stack, (char *)values, count, sizeof(int32_t)));
+    require("the top moves past the room", stack->top == (char *)(values + count));
+    require("memory is committed for the room", stack->committed >= stack->top);
+#if defined(LYMRA_ADDRESS_SANITIZER)
+    require("the room is not marked as freed", marked(values, (size_t)count * sizeof(int32_t), false));
+#endif
+    fill(values, 1000, 5);
+    char *newer = lymra_data_stack_extend(stack, stack->top, 16, "newer");
+    require("a newer value goes above the room", newer == (char *)(values + count));
+    require("room is not reserved under a newer value",
+            !lymra_data_stack_reserve(stack, (char *)(values + 1000), 10, sizeof(int32_t)));
+    require("a refusal changes nothing", stack->top == newer + 16);
+    lymra_data_stack_release(stack, newer);
+    lymra_data_stack_release(stack, (char *)(values + 1000));
+    require("freeing the room keeps the elements", stack->top == (char *)(values + 1000) && counts_up(values, 1000, 5));
+#if defined(LYMRA_ADDRESS_SANITIZER)
+    require("the room freed is marked", marked(values + 1000, 64, true));
+#endif
+
+    char *limit = stack->limit;
+    stack->limit = stack->base + 4 * LYMRA_COMMIT_STEP;
+    char *end = stack->top;
+    size_t room = span(end, stack->limit);
+    require("room past the end of the range is refused",
+            !lymra_data_stack_reserve(stack, end, room / sizeof(int32_t) + 1, sizeof(int32_t)));
+    require("a count no range holds is refused", !lymra_data_stack_reserve(stack, end, UINT64_MAX, sizeof(int32_t)));
+    require("refusals change nothing", stack->top == end);
+    require("room up to the end of the range is had",
+            lymra_data_stack_reserve(stack, end, room / sizeof(int32_t), sizeof(int32_t)));
+    lymra_data_stack_release(stack, stack->base);
+    stack->limit = limit;
+}
+
 /* A value can grow only from the top of its stack. */
 static void check_top(void) {
     lymra_data_stack *stack = &lymra_data_stacks[1];
@@ -289,6 +335,7 @@ int main(int argc, char **argv) {
     check_large_request();
     check_places();
     check_top();
+    check_reserve();
     check_shrink();
     check_text_ends();
     printf("%s: %lu checks, %lu wrong\n", failures == 0 ? "ok" : "failed", checks, failures);

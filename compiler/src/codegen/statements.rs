@@ -13,7 +13,7 @@ use super::text_types::{TextWalk, text_function};
 use super::types::list_function;
 use super::{
     DESTINATION, Generator, INDENT, OpenStrip, Region, Release, Scope, Storage, Writer, c_syntax,
-    data_stack, destination_names, local_access, local_address, releases_of, strips,
+    data_stack, destination_names, local_access, local_address, releases_of, reservations, strips,
 };
 use crate::ir::{
     Block, Branch, Case, Expr, ExprKind, Extent, FloatType, Function, LocalId, Place, PlaceStep,
@@ -169,13 +169,16 @@ impl Generator<'_, '_> {
             }
             Statement::Push { list, value, span } => {
                 let code = self.expr(function, value, writer);
-                let site = self.site(*span);
                 let list_type = self.types.name(&function.locals[*list].ty);
-                writer.line(&format!(
-                    "{}({}, {code}, {site});",
-                    list_function(&list_type, "push"),
-                    local_address(function, *list)
-                ));
+                let address = local_address(function, *list);
+                if self.open_reservations.contains(list) {
+                    let push = list_function(&list_type, "push_reserved");
+                    writer.line(&format!("{push}({address}, {code});"));
+                } else {
+                    let push = list_function(&list_type, "push");
+                    let site = self.site(*span);
+                    writer.line(&format!("{push}({address}, {code}, {site});"));
+                }
             }
             Statement::Remove { pool, handle, span } => {
                 let handle = self.expr(function, handle, writer);
@@ -815,6 +818,7 @@ impl Generator<'_, '_> {
         let counter = self.helper("range_next");
         let limit = self.helper("range_end");
         let strip = strips::strip(self.program, function, variable, start, body);
+        let reserved = reservations::reserved_list(self.program, function, body);
         self.open_wrapper(writer);
         let start = self.expr(function, start, writer);
         writer.line(&format!("{ty} {counter} = {start};"));
@@ -825,9 +829,39 @@ impl Generator<'_, '_> {
             ty: &ty,
             counter: &counter,
             limit: &limit,
+            variable,
         };
+        match reserved {
+            Some(list) => {
+                // The difference of any two values of a counter fits 64 unsigned bits.
+                let turns =
+                    format!("{counter} < {limit} ? (uint64_t){limit} - (uint64_t){counter} : 0u");
+                self.reserved_turns(function, list, &turns, writer, &mut |generator, writer| {
+                    generator.range_turns(function, strip, &range, body, writer);
+                });
+            }
+            None => self.range_turns(function, strip, &range, body, writer),
+        }
+        self.close_wrapper(writer);
+    }
+
+    /// The turns of a range loop: in whole blocks first when it runs in blocks (see `strips`), then one at a time.
+    fn range_turns(
+        &mut self,
+        function: &Function<'_>,
+        strip: Option<Strip>,
+        range: &RangeNames<'_>,
+        body: &Block,
+        writer: &mut Writer,
+    ) {
+        let RangeNames {
+            ty,
+            counter,
+            limit,
+            variable,
+        } = *range;
         if let Some(strip) = strip {
-            self.whole_blocks(function, strip, &range, body, writer);
+            self.whole_blocks(function, strip, range, body, writer);
         }
         writer.line(&format!("for (; {counter} < {limit}; ++{counter}) {{"));
         writer.depth += 1;
@@ -838,7 +872,39 @@ impl Generator<'_, '_> {
         writer.depth -= 1;
         self.loop_body(function, body, &[], writer);
         writer.line("}");
-        self.close_wrapper(writer);
+    }
+
+    /**
+     * Two versions of a loop that pushes onto `list` once on every turn, for
+     * `turns` turns, a `uint64_t` in C (see `reservations`). `write_loop`
+     * writes the loop: first with room reserved for every element, pushed
+     * with no check, which runs when the room can be had; then as written,
+     * which runs when it cannot.
+     */
+    fn reserved_turns(
+        &mut self,
+        function: &Function<'_>,
+        list: LocalId,
+        turns: &str,
+        writer: &mut Writer,
+        write_loop: &mut dyn FnMut(&mut Self, &mut Writer),
+    ) {
+        let list_type = self.types.name(&function.locals[list].ty);
+        let address = local_address(function, list);
+        let reserve = list_function(&list_type, "reserve");
+        writer.line(&format!("if ({reserve}({address}, {turns})) {{"));
+        writer.depth += 1;
+        self.open_reservations.push(list);
+        write_loop(self, writer);
+        self.open_reservations.pop();
+        let release = list_function(&list_type, "release_room");
+        writer.line(&format!("{release}({address});"));
+        writer.depth -= 1;
+        writer.line("} else {");
+        writer.depth += 1;
+        write_loop(self, writer);
+        writer.depth -= 1;
+        writer.line("}");
     }
 
     /**
@@ -855,7 +921,9 @@ impl Generator<'_, '_> {
         body: &Block,
         writer: &mut Writer,
     ) {
-        let RangeNames { ty, counter, limit } = *range;
+        let RangeNames {
+            ty, counter, limit, ..
+        } = *range;
         let size = c_syntax::integer_literal(strip.size, strip.ty);
         let zero = c_syntax::integer_literal(0, strip.ty);
         // The counter never goes below zero, so the difference cannot overflow once it is below the limit.
@@ -899,6 +967,11 @@ impl Generator<'_, '_> {
         let array_name = self.types.name(&array.ty);
         let items = self.helper("items");
         let position = self.helper("position");
+        // A binding that copies its text would get a data stack in each version of a loop that reserves room.
+        let reserved = variable
+            .is_none_or(|local| Storage::of(&function.locals[local].ty) == Storage::None)
+            .then(|| reservations::reserved_list(self.program, function, body))
+            .flatten();
         self.open_wrapper(writer);
         let code = self.expr(function, array, writer);
         // A view is copied: the loop goes over what it shows when the loop starts, whatever the binding shows later.
@@ -909,18 +982,14 @@ impl Generator<'_, '_> {
         };
         self.keep_in_wrapper();
         writer.line(&format!("const {array_name} *{items} = {address};"));
-        match length {
-            Extent::Fixed(length) => writer.line(&format!(
-                "for (size_t {position} = 0; {position} < {length}u; ++{position}) {{"
-            )),
+        let count = match length {
+            Extent::Fixed(length) => format!("{length}u"),
             Extent::Dynamic => {
                 let count = self.helper("count");
                 writer.line(&format!("const size_t {count} = (size_t){items}->length;"));
-                writer.line(&format!(
-                    "for (size_t {position} = 0; {position} < {count}; ++{position}) {{"
-                ));
+                count
             }
-        }
+        };
         // A list, a stack or a view keeps its elements' text in place while a loop goes over it (L0702, L0703, L0407).
         let copies_text = array.ty.as_array().is_some() && !keeps_text_in_place(function, array);
         let bindings: Vec<Binding> = variable
@@ -931,8 +1000,20 @@ impl Generator<'_, '_> {
             })
             .into_iter()
             .collect();
-        self.loop_body(function, body, &bindings, writer);
-        writer.line("}");
+        let mut each_turn = |generator: &mut Self, writer: &mut Writer| {
+            writer.line(&format!(
+                "for (size_t {position} = 0; {position} < {count}; ++{position}) {{"
+            ));
+            generator.loop_body(function, body, &bindings, writer);
+            writer.line("}");
+        };
+        match reserved {
+            Some(list) => {
+                let turns = format!("(uint64_t){count}");
+                self.reserved_turns(function, list, &turns, writer, &mut each_turn);
+            }
+            None => each_turn(self, writer),
+        }
         self.close_wrapper(writer);
     }
 
@@ -1105,12 +1186,13 @@ fn reads_old_value(function: &Function<'_>, target: LocalId, value: &Expr) -> bo
             .any(|local| function.locals[local].ty.as_view().is_some() && value.mentions(local))
 }
 
-/// The C names of a range loop's counter, its limit and their type.
+/// The C names of a range loop's counter, its limit and their type, and the binding that holds each turn's value.
 #[derive(Clone, Copy)]
 struct RangeNames<'a> {
     ty: &'a str,
     counter: &'a str,
     limit: &'a str,
+    variable: Option<LocalId>,
 }
 
 /// Whether `value` holds only text the program itself keeps, so a constant that holds it needs no data stack.

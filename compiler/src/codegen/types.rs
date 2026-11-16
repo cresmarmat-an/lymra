@@ -244,7 +244,9 @@ pub(super) fn list_function(name: &str, operation: &str) -> String {
 /**
  * The struct for a list type and the functions that work on it. `start`
  * begins an empty list at the top of a stack; `push` adds to the end of a
- * list, which has to be the newest value on its stack; `place` copies
+ * list, which has to be the newest value on its stack; `reserve` makes room
+ * for elements a loop pushes with `push_reserved`, which checks nothing, and
+ * `release_room` frees the room the list did not take; `place` copies
  * elements to the top of a stack, from anywhere, the same stack included;
  * `replace` moves a list built right above another one down into its place.
  */
@@ -270,6 +272,20 @@ LYMRA_UNUSED static void {name}_push({name} *list, const {element} value, const 
     {element} *slot = ({element} *)(void *)lymra_data_stack_extend(list->stack, end, sizeof value, site);
     *slot = value;
     list->length += 1;
+}}
+
+LYMRA_UNUSED static bool {name}_reserve({name} *list, const uint64_t count) {{
+    char *end = (char *)(list->elements + list->length);
+    return lymra_data_stack_reserve(list->stack, end, count, sizeof *list->elements);
+}}
+
+LYMRA_UNUSED static void {name}_push_reserved({name} *list, const {element} value) {{
+    list->elements[list->length] = value;
+    list->length += 1;
+}}
+
+LYMRA_UNUSED static void {name}_release_room({name} *list) {{
+    lymra_data_stack_release(list->stack, (char *)(list->elements + list->length));
 }}
 
 LYMRA_UNUSED static {name} {name}_place(lymra_data_stack *stack, const {name} source, const char *site) {{
