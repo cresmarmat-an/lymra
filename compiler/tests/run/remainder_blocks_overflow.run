@@ -1,0 +1,27 @@
+exit status 70
+--- standard output
+0 100
+1 101
+2 103
+3 106
+4 106
+5 107
+6 109
+7 112
+8 112
+9 113
+10 115
+11 118
+12 118
+13 119
+14 121
+15 124
+16 124
+17 125
+18 127
+--- standard error
+error: integer overflow
+  --> tests/run/remainder_blocks_overflow.lym:11:17
+   |
+11 |         level = level + turn % 4
+   |                 ^^^^^^^^^^^^^^^^

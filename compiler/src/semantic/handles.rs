@@ -21,8 +21,9 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::errors::{self, Origin};
-use super::walk::{Blocks, each_expr, statement_blocks, statement_calls, statement_exprs};
+use super::walk::{Blocks, statement_calls};
 use crate::diagnostics::Diagnostic;
+use crate::ir::walk::{each_expr, statement_blocks, statement_exprs};
 use crate::ir::{Argument, Block, Call, Expr, ExprKind, Function, LocalId, PlaceStep, Statement};
 use crate::source::Span;
 

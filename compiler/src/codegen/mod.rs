@@ -21,6 +21,7 @@
 mod c_syntax;
 mod expressions;
 mod statements;
+mod strips;
 mod text_types;
 mod types;
 
@@ -55,6 +56,7 @@ pub fn generate(program: &Program<'_>, source: &SourceFile) -> String {
         pending: Vec::new(),
         text_regions: HashMap::new(),
         return_stack: None,
+        open_strips: Vec::new(),
     };
     let functions: Vec<String> = program
         .functions
@@ -182,6 +184,15 @@ struct Generator<'program, 'src> {
     text_regions: HashMap<LocalId, Region>,
     /// The data stack the function's `return` copies its text onto before it frees its own, once it needs one.
     return_stack: Option<usize>,
+    /// The range loops run in blocks whose body is being generated, innermost last.
+    open_strips: Vec<OpenStrip>,
+}
+
+/// A range loop run in blocks whose body is being generated: in it, the remainder of `strip.counter` by `strip.size` is `place`.
+#[derive(Clone, Debug)]
+struct OpenStrip {
+    strip: strips::Strip,
+    place: String,
 }
 
 /// Where a value keeps its text: a data stack, and where the value's text starts on it, both as C.

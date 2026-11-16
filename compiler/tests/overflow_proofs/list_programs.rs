@@ -15,21 +15,8 @@
  * where a newer one sits above it (error L0704), and none loops forever.
  */
 
-use std::num::NonZeroUsize;
-use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, PoisonError};
-
-use lymra::codegen;
-use lymra::diagnostics::render_report;
-use lymra::driver::{Compiler, TemporaryDirectory, Warnings};
-use lymra::frontend;
-use lymra::optimize;
-
-use super::CheckCount;
-use super::common;
 use super::generator::Random;
-use super::interpreter::{self, Ending};
+use super::{CheckCount, common, compiled};
 
 /// How many programs a run writes.
 const PROGRAMS: usize = 40;
@@ -596,123 +583,32 @@ impl Writer {
     }
 }
 
-/// What became of one program.
-enum Verdict {
-    /// The checker rejected it, which the generator is written to avoid. Holds the program and the report.
-    Rejected(String),
-    /// The interpreter ran out of steps, so nothing says what it should print.
-    TooLong,
-    /// Every build printed what the interpreter printed and ended the same way. Holds how many list index checks the optimizer removed.
-    Agreed(usize),
-}
-
-/// Checks, interprets, builds and runs one program. A disagreement comes back as an error that shows the program.
-fn try_program(text: &str, compilers: &[Compiler]) -> Result<Verdict, String> {
-    let source = common::source("list_program.lym", text);
-    let program = match frontend::check_program(&source) {
-        Ok(program) => program,
-        Err(diagnostics) => {
-            let report = render_report(&diagnostics, &source);
-            return Ok(Verdict::Rejected(format!("{text}\n{report}")));
-        }
-    };
-    let main = program.main.expect("a checked program has `main`");
-    let expected = interpreter::run(&program, main, &[])
-        .map_err(|problem| format!("the interpreter found {problem} in:\n{text}"))?;
-    let status = match expected.ending {
-        Ending::Finished => 0,
-        Ending::Trapped => 70,
-        Ending::OutOfSteps => return Ok(Verdict::TooLong),
-    };
-    let every_check = codegen::generate(&program, &source);
-    let before = CheckCount::of(&program);
-    let mut optimized = program;
-    optimize::remove_proven_checks(&mut optimized);
-    let removed = before.list_indexes_checked - CheckCount::of(&optimized).list_indexes_checked;
-    let fewer_checks = codegen::generate(&optimized, &source);
-    for compiler in compilers {
-        for (build, c_source) in [("every check", &every_check), ("optimized", &fewer_checks)] {
-            let workspace = TemporaryDirectory::new().map_err(|error| error.to_string())?;
-            let executable = workspace
-                .path()
-                .join(format!("program{}", std::env::consts::EXE_SUFFIX));
-            compiler
-                .compile(c_source, &executable, None, Warnings::Strict)
-                .map_err(|error| {
-                    format!("{} ({build}) rejects:\n{text}\n{error}", compiler.name())
-                })?;
-            let output = Command::new(&executable)
-                .output()
-                .map_err(|error| format!("cannot run a program: {error}"))?;
-            let printed = String::from_utf8_lossy(&output.stdout);
-            if output.status.code() != Some(status) || printed != expected.output {
-                return Err(format!(
-                    "{} ({build}) ended with {:?} where the interpreter expects {status}, \
-                     printing:\n{printed}\ninstead of:\n{}\nerrors:\n{}\nin:\n{text}",
-                    compiler.name(),
-                    output.status.code(),
-                    expected.output,
-                    String::from_utf8_lossy(&output.stderr)
-                ));
-            }
-        }
-    }
-    Ok(Verdict::Agreed(removed))
-}
-
 #[test]
 fn compiled_list_programs_print_what_the_interpreter_prints() {
     let compilers = common::c_compilers();
     let mut random = Random::new(SEED);
     let texts: Vec<String> = (0..PROGRAMS).map(|_| program(&mut random)).collect();
-    let workers = std::thread::available_parallelism()
-        .map_or(1, NonZeroUsize::get)
-        .min(texts.len());
-    let next = AtomicUsize::new(0);
-    let verdicts = Mutex::new(Vec::with_capacity(texts.len()));
-    std::thread::scope(|threads| {
-        for _ in 0..workers {
-            threads.spawn(|| {
-                while let Some(text) = texts.get(next.fetch_add(1, Ordering::Relaxed)) {
-                    let verdict = try_program(text, &compilers);
-                    verdicts
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .push(verdict);
-                }
-            });
-        }
-    });
-    let verdicts = verdicts
-        .into_inner()
-        .unwrap_or_else(PoisonError::into_inner);
-    let mut agreed = 0;
-    let mut removed = 0;
-    let mut too_long = 0;
-    let mut rejected = Vec::new();
-    for verdict in verdicts {
-        match verdict {
-            Ok(Verdict::Agreed(list_checks)) => {
-                agreed += 1;
-                removed += list_checks;
-            }
-            Ok(Verdict::Rejected(report)) => rejected.push(report),
-            Ok(Verdict::TooLong) => too_long += 1,
-            Err(failure) => panic!("{failure}"),
-        }
-    }
-    if let Some(first) = rejected.first() {
-        panic!(
-            "the checker rejected {} generated list programs, the first of them:\n{first}",
-            rejected.len()
-        );
-    }
-    assert!(
-        agreed * 3 >= PROGRAMS * 2,
-        "only {agreed} of {PROGRAMS} list programs ran; {too_long} ran out of steps"
+    let tally = compiled::run_all(
+        &texts,
+        "list_program.lym",
+        &compilers,
+        |checked, optimized, _| {
+            CheckCount::of(checked).list_indexes_checked
+                - CheckCount::of(optimized).list_indexes_checked
+        },
     );
-    assert!(removed > 0, "the optimizer removed no list index checks");
+    assert!(
+        tally.agreed * 3 >= PROGRAMS * 2,
+        "only {} of {PROGRAMS} list programs ran; {} ran out of steps",
+        tally.agreed,
+        tally.too_long
+    );
+    assert!(
+        tally.measured > 0,
+        "the optimizer removed no list index checks"
+    );
     println!(
-        "{agreed} of {PROGRAMS} list programs agreed, {too_long} ran out of steps, {removed} list index checks removed"
+        "{} of {PROGRAMS} list programs agreed, {} ran out of steps, {} list index checks removed",
+        tally.agreed, tally.too_long, tally.measured
     );
 }

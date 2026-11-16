@@ -20,10 +20,9 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::errors::{self, Change, Collection};
-use super::walk::{
-    each_expr, statement_blocks, statement_calls, statement_inserts, statement_pops,
-};
+use super::walk::{statement_calls, statement_inserts, statement_pops};
 use crate::diagnostics::Diagnostic;
+use crate::ir::walk::{each_expr, statement_blocks};
 use crate::ir::{
     Argument, Block, Call, Expr, ExprKind, Function, FunctionId, LocalId, Place, PlaceStep,
     Statement, Type,

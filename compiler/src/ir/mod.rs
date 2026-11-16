@@ -8,6 +8,7 @@
  */
 
 mod types;
+pub mod walk;
 
 pub use types::{
     ArrayType, ChoiceType, CustomType, FAILURE_VARIANT, FieldType, FloatType, HandleTarget,

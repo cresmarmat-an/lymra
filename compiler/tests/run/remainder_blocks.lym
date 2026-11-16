@@ -1,0 +1,101 @@
+#[
+    Range loops that take their counter's remainder by a small number run in
+    blocks of turns in an optimized build. The build with every check runs
+    each loop as written, and both have to print the same. Each fingerprint
+    folds in every remainder in turn, so a turn out of order changes it.
+]#
+
+constant integer64 week = 7
+constant integer64 prime = 1_000_003
+
+function fingerprint(integer64 sum, integer64 remainder) returns integer64
+    return (sum * 31 + remainder + 1) % prime
+
+function days(integer64 start, integer64 end) returns integer64
+    variable integer64 sum = 0
+    for day in range(start, end)
+        sum = fingerprint(sum, day % 7)
+    return sum
+
+function from_zero(integer64 end) returns integer64
+    variable integer64 sum = 0
+    for day in range(0, end)
+        sum = fingerprint(sum, day % 7)
+    return sum
+
+function from_fourteen(integer64 end) returns integer64
+    variable integer64 sum = 0
+    for day in range(14, end)
+        sum = fingerprint(sum, day % week)
+    return sum
+
+function first_late_match(integer64 wanted, integer64 end) returns integer64
+    for index in range(0, end)
+        if index % 8 == wanted and index > 20
+            return index
+    return -1
+
+function small_counter(unsigned8 end) returns unsigned8
+    variable unsigned8 sum = 0
+    for index in range(0, end)
+        sum = (sum * 2 + index % 4) % 113
+    return sum
+
+function main()
+    print("from zero {from_zero(0)} {from_zero(1)} {from_zero(6)} {from_zero(7)}")
+    print("from zero {from_zero(8)} {from_zero(13)} {from_zero(14)} {from_zero(20)}")
+    print("same as {days(0, 20)}")
+    print("from fourteen {from_fourteen(14)} {from_fourteen(20)} {from_fourteen(21)} {from_fourteen(40)}")
+    print("same as {days(14, 40)}")
+    print("from three {days(3, 20)}")
+    print("from below zero {days(-10, 10)}")
+
+    for number in range(0, 31)
+        if number % 15 == 0
+            print("FizzBuzz")
+        else if number % 3 == 0
+            print("Fizz")
+        else if number % 5 == 0
+            print("Buzz")
+        else
+            print("{number}")
+
+    variable integer64 kept = 0
+    for index in range(0, 30)
+        if index % 4 == 3
+            continue
+        kept = fingerprint(kept, index % 4)
+    print("kept {kept}")
+
+    variable integer64 nested = 0
+    for row in range(0, 25)
+        for column in range(0, row % 6)
+            nested = fingerprint(nested, column * 10 + row % 6)
+    print("nested {nested}")
+
+    print("first {first_late_match(3, 100)} {first_late_match(5, 22)} {first_late_match(9, 100)}")
+    print("small {small_counter(0)} {small_counter(3)} {small_counter(4)} {small_counter(250)}")
+
+    variable integer64 broken = 0
+    for index in range(0, 100)
+        if index % 9 == 8 and index > 30
+            break
+        broken = fingerprint(broken, index % 9)
+    print("broken {broken}")
+
+    variable integer64 mixed = 0
+    for index in range(0, 50)
+        mixed = fingerprint(mixed, index % 7 * 3 + index % 3)
+    print("mixed {mixed}")
+
+    variable integer64 sixteenths = 0
+    for index in range(0, 70)
+        sixteenths = fingerprint(sixteenths, index % 16 + index % 2 * 100)
+    print("sixteenths {sixteenths}")
+
+    variable integer64 listed = 0
+    for index in range(0, 20)
+        variable list[integer64] parts = list()
+        push(variable parts, index % 5)
+        listed = fingerprint(listed, parts[0])
+    print("listed {listed}")

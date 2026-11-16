@@ -1,0 +1,12 @@
+#[
+    An overflow inside a loop run in blocks of turns stops the program at the
+    same turn, and at the same place, as the loop written out plainly.
+]#
+
+constant integer8 turns = 40
+
+function main()
+    variable integer8 level = 100
+    for turn in range(0, turns)
+        level = level + turn % 4
+        print("{turn} {level}")

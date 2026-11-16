@@ -1,0 +1,49 @@
+exit status 0
+--- standard output
+from zero 0 1 569481 653867
+from zero 269818 31021 961658 15214
+same as 15214
+from fourteen 0 569481 653867 884983
+same as 884983
+from three 694579
+from below zero -870007
+FizzBuzz
+1
+2
+Fizz
+4
+Buzz
+Fizz
+7
+8
+Fizz
+Buzz
+11
+Fizz
+13
+14
+FizzBuzz
+16
+17
+Fizz
+19
+Buzz
+Fizz
+22
+23
+Fizz
+Buzz
+26
+Fizz
+28
+29
+FizzBuzz
+kept 507137
+nested 639748
+first 27 21 -1
+small 0 4 11 83
+broken 124173
+mixed 446929
+sixteenths 961477
+listed 501766
+--- standard error

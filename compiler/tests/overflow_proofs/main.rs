@@ -16,11 +16,13 @@
 mod call_facts;
 #[path = "../common/mod.rs"]
 mod common;
+mod compiled;
 mod generator;
 mod grids;
 mod interpreter;
 mod list_programs;
 mod loop_paths;
+mod remainder_loops;
 
 use lymra::diagnostics::render_report;
 use lymra::frontend;

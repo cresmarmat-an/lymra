@@ -15,6 +15,7 @@ use super::text_types::{TextWalk, text_function};
 use super::types::{fill_function, list_function};
 use super::{
     Generator, INDENT, Release, Storage, Writer, c_syntax, data_stack, local_access, releases_of,
+    strips,
 };
 use crate::ir::{
     Argument, ArithmeticOperator, Attempt, Call, ChoiceType, ComparisonOperator, Expr, ExprKind,
@@ -106,6 +107,9 @@ impl Generator<'_, '_> {
                 right,
                 checked,
             } => {
+                if let Some(place) = self.place_in_block(function, expr, right, writer) {
+                    return place;
+                }
                 let constant = ConstantOperand::of(*operator, left, right);
                 let (left, right) = self.pair(function, left, right, writer);
                 if !checked {
@@ -759,6 +763,33 @@ impl Generator<'_, '_> {
             "{}(&({stored}), {handle}, {site})",
             list_function(&pool_type, "find")
         )
+    }
+
+    /**
+     * The C for `expr` when it is the remainder of the counter of a loop run
+     * in blocks (see `strips`) by `divisor`, which divides the block size:
+     * the place of the turn in its block, or the remainder of that place.
+     */
+    fn place_in_block(
+        &mut self,
+        function: &Function<'_>,
+        expr: &Expr,
+        divisor: &Expr,
+        writer: &mut Writer,
+    ) -> Option<String> {
+        let (place, value, size) = self.open_strips.iter().rev().find_map(|open| {
+            let value = strips::block_divisor(self.program, open.strip.counter, expr)?;
+            Some((open.place.clone(), value, open.strip.size))
+        })?;
+        if size % value != 0 {
+            return None;
+        }
+        if value == size {
+            return Some(place);
+        }
+        let divisor = self.expr(function, divisor, writer);
+        let ty = self.types.name(&expr.ty);
+        Some(format!("(({ty})({place} % {divisor}))"))
     }
 
     /// Computes `code`, of type `ty`, into a new constant and returns the constant's name.

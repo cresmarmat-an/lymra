@@ -30,8 +30,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::errors::{self, Freeing, Holder, Owner};
 use super::handles::PoolsOfLocals;
-use super::walk::{Blocks, each_expr, statement_blocks, statement_calls, statement_pops};
+use super::walk::{Blocks, statement_calls, statement_pops};
 use crate::diagnostics::Diagnostic;
+use crate::ir::walk::{each_expr, statement_blocks};
 use crate::ir::{
     Argument, Block, Call, Expr, ExprKind, Function, LocalId, Place, PlaceStep, PrintPart,
     Statement, text_values,

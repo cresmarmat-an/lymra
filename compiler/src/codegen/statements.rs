@@ -8,11 +8,12 @@
  */
 
 use super::expressions::{Bounds, indexed_noun, is_addressable};
+use super::strips::Strip;
 use super::text_types::{TextWalk, text_function};
 use super::types::list_function;
 use super::{
-    DESTINATION, Generator, INDENT, Region, Release, Scope, Storage, Writer, c_syntax, data_stack,
-    destination_names, local_access, local_address, releases_of,
+    DESTINATION, Generator, INDENT, OpenStrip, Region, Release, Scope, Storage, Writer, c_syntax,
+    data_stack, destination_names, local_access, local_address, releases_of, strips,
 };
 use crate::ir::{
     Block, Branch, Case, Expr, ExprKind, Extent, FloatType, Function, LocalId, Place, PlaceStep,
@@ -813,12 +814,21 @@ impl Generator<'_, '_> {
         let ty = self.types.name(&start.ty);
         let counter = self.helper("range_next");
         let limit = self.helper("range_end");
+        let strip = strips::strip(self.program, function, variable, start, body);
         self.open_wrapper(writer);
         let start = self.expr(function, start, writer);
         writer.line(&format!("{ty} {counter} = {start};"));
         let end = self.expr(function, end, writer);
         writer.line(&format!("const {ty} {limit} = {end};"));
         self.keep_in_wrapper();
+        let range = RangeNames {
+            ty: &ty,
+            counter: &counter,
+            limit: &limit,
+        };
+        if let Some(strip) = strip {
+            self.whole_blocks(function, strip, &range, body, writer);
+        }
         writer.line(&format!("for (; {counter} < {limit}; ++{counter}) {{"));
         writer.depth += 1;
         if let Some(variable) = variable {
@@ -829,6 +839,46 @@ impl Generator<'_, '_> {
         self.loop_body(function, body, &[], writer);
         writer.line("}");
         self.close_wrapper(writer);
+    }
+
+    /**
+     * The turns of a range loop run in blocks (see `strips`) that make up
+     * whole blocks: an outer loop over the blocks, and an inner one over the
+     * places in a block, where the counter's remainder is the place. The
+     * plain loop after it runs the turns that are left.
+     */
+    fn whole_blocks(
+        &mut self,
+        function: &Function<'_>,
+        strip: Strip,
+        range: &RangeNames<'_>,
+        body: &Block,
+        writer: &mut Writer,
+    ) {
+        let RangeNames { ty, counter, limit } = *range;
+        let size = c_syntax::integer_literal(strip.size, strip.ty);
+        let zero = c_syntax::integer_literal(0, strip.ty);
+        // The counter never goes below zero, so the difference cannot overflow once it is below the limit.
+        writer.line(&format!(
+            "while ({counter} < {limit} && {limit} - {counter} >= {size}) {{"
+        ));
+        writer.depth += 1;
+        let place = self.helper("block_place");
+        writer.line(&format!(
+            "for ({ty} {place} = {zero}; {place} < {size}; ++{place}, ++{counter}) {{"
+        ));
+        writer.depth += 1;
+        let name = c_syntax::local_name(function.locals[strip.counter].name);
+        writer.line(&format!("const {ty} {name} = {counter};"));
+        // A body that reads the counter only for its remainder reads the place instead.
+        writer.line(&format!("(void){name};"));
+        writer.depth -= 1;
+        self.open_strips.push(OpenStrip { strip, place });
+        self.loop_body(function, body, &[], writer);
+        self.open_strips.pop();
+        writer.line("}");
+        writer.depth -= 1;
+        writer.line("}");
     }
 
     /**
@@ -1053,6 +1103,14 @@ fn reads_old_value(function: &Function<'_>, target: LocalId, value: &Expr) -> bo
     value.mentions(target)
         || (0..function.locals.len())
             .any(|local| function.locals[local].ty.as_view().is_some() && value.mentions(local))
+}
+
+/// The C names of a range loop's counter, its limit and their type.
+#[derive(Clone, Copy)]
+struct RangeNames<'a> {
+    ty: &'a str,
+    counter: &'a str,
+    limit: &'a str,
 }
 
 /// Whether `value` holds only text the program itself keeps, so a constant that holds it needs no data stack.
