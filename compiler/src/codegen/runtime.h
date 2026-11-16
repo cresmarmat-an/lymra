@@ -511,13 +511,32 @@ LYMRA_UNUSED static inline uint64_t lymra_unsigned_product(uint64_t left, uint64
 
 /*
  * Overflow tests for an operation whose second operand is a constant of the
- * program, such as the 3 and the 1 of `value * 3 + 1`. They compare the other
- * operand with limits the C compiler works out while compiling, so the
- * operation itself stays plain arithmetic the compiler can fold: on x86 both
- * of those become one `lea`. An overflow flag would tie each operation to an
- * instruction that sets it. Each test is exact for any second operand,
- * constant or not.
+ * program, such as the 3 and the 1 of `value * 3 + 1`. GCC gets tests that
+ * compare the other operand with limits it works out while compiling, so the
+ * operation itself stays plain arithmetic it can fold: on x86 both of those
+ * become one `lea`, where an overflow flag would tie each operation to an
+ * instruction that sets it. Clang does the opposite: it keeps the limit
+ * tests apart from the arithmetic and does better with its builtins, which
+ * made the Collatz benchmark 31% faster with Clang and 15% slower with GCC.
+ * Each test is exact for any second operand, constant or not.
  */
+#if defined(__clang__) && !defined(LYMRA_PORTABLE_ARITHMETIC)
+#define LYMRA_CONSTANT_BUILTINS(name, type)                                                                    \
+    LYMRA_UNUSED static inline bool lymra_add_constant_overflows_##name(type left, type constant,              \
+                                                                       type *result) {                         \
+        return __builtin_add_overflow(left, constant, result);                                                 \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline bool lymra_subtract_constant_overflows_##name(type left, type constant,         \
+                                                                            type *result) {                    \
+        return __builtin_sub_overflow(left, constant, result);                                                 \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline bool lymra_multiply_constant_overflows_##name(type left, type constant,         \
+                                                                            type *result) {                    \
+        return __builtin_mul_overflow(left, constant, result);                                                 \
+    }
+#define LYMRA_SIGNED_CONSTANT_CHECKS(name, type, minimum, maximum) LYMRA_CONSTANT_BUILTINS(name, type)
+#define LYMRA_UNSIGNED_CONSTANT_CHECKS(name, type, maximum) LYMRA_CONSTANT_BUILTINS(name, type)
+#else
 #define LYMRA_SIGNED_CONSTANT_CHECKS(name, type, minimum, maximum)                                             \
     LYMRA_UNUSED static inline bool lymra_add_constant_overflows_##name(type left, type constant,              \
                                                                        type *result) {                         \
@@ -571,6 +590,7 @@ LYMRA_UNUSED static inline uint64_t lymra_unsigned_product(uint64_t left, uint64
         *result = (type)(left * constant);                                                                     \
         return false;                                                                                          \
     }
+#endif
 
 /* The trapping form of each check, which the generated code calls. */
 #define LYMRA_TRAPPING(operation, name, type)                                                                  \

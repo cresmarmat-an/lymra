@@ -18,25 +18,25 @@ Written by `cargo run --release -p lymra-bench`. Each number is the median wall-
 
 | Program | C | Lymra | Lymra with every check | Lymra / C |
 |---|---:|---:|---:|---:|
-| `collatz` | 0.262 | 0.279 | 0.258 | 1.07 |
-| `fibonacci` | 0.188 | 0.004 | 0.004 | 0.02 |
-| `gcd_sum` | 0.145 | 0.150 | 0.153 | 1.04 |
-| `modulo_sum` | 0.291 | 0.001 | 0.344 | < 0.01 |
-| `primes` | 1.024 | 1.034 | 1.028 | 1.01 |
-| `sieve` | 0.881 | 0.869 | 0.828 | 0.99 |
-| `sum_formula` | 0.001 | 0.001 | 1.011 | n/a |
+| `collatz` | 0.254 | 0.289 | 0.281 | 1.14 |
+| `fibonacci` | 0.166 | 0.004 | 0.003 | 0.02 |
+| `gcd_sum` | 0.158 | 0.154 | 0.156 | 0.98 |
+| `modulo_sum` | 0.315 | 0.001 | 0.370 | < 0.01 |
+| `primes` | 1.038 | 1.027 | 1.026 | 0.99 |
+| `sieve` | 0.885 | 0.965 | 0.930 | 1.09 |
+| `sum_formula` | 0.001 | 0.001 | 1.113 | n/a |
 
 ## Built with clang
 
 | Program | C | Lymra | Lymra with every check | Lymra / C |
 |---|---:|---:|---:|---:|
-| `collatz` | 0.169 | 0.375 | 0.376 | 2.22 |
-| `fibonacci` | 0.335 | 0.502 | 0.500 | 1.50 |
-| `gcd_sum` | 0.122 | 0.122 | 0.126 | 1.00 |
-| `modulo_sum` | 0.318 | 0.001 | 0.318 | < 0.01 |
-| `primes` | 0.648 | 0.635 | 0.624 | 0.98 |
-| `sieve` | 0.944 | 0.871 | 0.933 | 0.92 |
-| `sum_formula` | 0.001 | 0.001 | 0.659 | n/a |
+| `collatz` | 0.162 | 0.274 | 0.289 | 1.69 |
+| `fibonacci` | 0.311 | 0.477 | 0.484 | 1.54 |
+| `gcd_sum` | 0.126 | 0.123 | 0.122 | 0.97 |
+| `modulo_sum` | 0.289 | 0.001 | 0.323 | < 0.01 |
+| `primes` | 0.628 | 0.626 | 0.624 | 1.00 |
+| `sieve` | 0.978 | 0.894 | 0.834 | 0.91 |
+| `sum_formula` | 0.001 | 0.001 | 0.703 | n/a |
 
 ## Against Rust
 
@@ -44,17 +44,17 @@ Rust and Clang both generate code with LLVM. Rust with overflow checks stops on 
 
 | Program | Lymra (clang) | Rust with overflow checks | Rust | Lymra / Rust with overflow checks |
 |---|---:|---:|---:|---:|
-| `collatz` | 0.375 | 0.275 | 0.172 | 1.36 |
-| `fibonacci` | 0.502 | 0.621 | 0.304 | 0.81 |
-| `gcd_sum` | 0.122 | 0.115 | 0.118 | 1.06 |
-| `modulo_sum` | 0.001 | 0.317 | 0.279 | < 0.01 |
-| `primes` | 0.635 | 0.620 | 0.626 | 1.02 |
-| `sieve` | 0.871 | 0.946 | 0.896 | 0.92 |
-| `sum_formula` | 0.001 | 0.690 | 0.002 | < 0.01 |
+| `collatz` | 0.274 | 0.269 | 0.183 | 1.02 |
+| `fibonacci` | 0.477 | 0.621 | 0.314 | 0.77 |
+| `gcd_sum` | 0.123 | 0.123 | 0.126 | 0.99 |
+| `modulo_sum` | 0.001 | 0.319 | 0.269 | < 0.01 |
+| `primes` | 0.626 | 0.624 | 0.640 | 1.00 |
+| `sieve` | 0.894 | 0.991 | 0.961 | 0.90 |
+| `sum_formula` | 0.001 | 0.725 | 0.002 | < 0.01 |
 
 ## Noise
 
-Among versions whose median is at least 50 ms, the slowest timed run was 30% slower than that version's median.
+Among versions whose median is at least 50 ms, the slowest timed run was 36% slower than that version's median.
 
 ## Machine
 

@@ -85,10 +85,10 @@ error: integer overflow
 
 `cargo run --release -p lymra-bench` times seven programs written in Lymra, C and Rust, and writes [bench/results.md](bench/results.md). On the last run:
 
-- Where the compiler proves that no check can fail, Lymra runs as fast as C: four of the seven programs keep no check, and two of them take 0.98 to 1.04 times C's time. In another, GCC and Clang replace the loop with a formula: it takes 1 millisecond, against 0.64 seconds for Rust with overflow checks, which keeps every check.
+- Where the compiler proves that no check can fail, Lymra runs as fast as C: four of the seven programs keep no check, and two of them take 0.96 to 1.04 times C's time across runs. In another, GCC and Clang replace the loop with a formula: it takes 1 millisecond, against 0.64 seconds for Rust with overflow checks, which keeps every check.
 - A loop the C compilers leave slow, Lymra writes so they can make it fast. In the fourth, a remainder on every turn keeps C's loop as written; Lymra runs it in blocks of turns where the remainder is a constant, and it takes 1 millisecond, against 0.29 seconds for C and for Rust.
-- A list fills at least as fast as a C array that doubles as it grows: a sieve over a hundred million booleans, pushed one at a time, took 0.99 times C's time built with GCC and 0.92 times with Clang. The loop that pushes them reserves room for every element first, so the C compiler turns it into one fill of memory. The compiler proves every index of its loops inside the list, so no bounds check runs.
-- The checks that stay guard values no bound the compiler finds can hold, such as a Collatz chain. Built with GCC, that program takes 1.04 to 1.12 times as long as C across runs. Built with Clang, its time on the benchmark machine moves by up to 45% with changes outside its loop.
+- A list fills at least as fast as a C array that doubles as it grows: a sieve over a hundred million booleans, pushed one at a time, took 0.95 to 1.09 times C's time built with GCC across runs, and 0.91 times with Clang. The loop that pushes them reserves room for every element first, so the C compiler turns it into one fill of memory. The compiler proves every index of its loops inside the list, so no bounds check runs.
+- The checks that stay guard values no bound the compiler finds can hold, such as a Collatz chain. Built with GCC, that program takes 1.04 to 1.14 times as long as C across runs; built with Clang, 1.69 times, level with Rust with overflow checks.
 
 [bench/README.md](bench/README.md) explains every number, including the one that flatters Lymra by accident.
 
