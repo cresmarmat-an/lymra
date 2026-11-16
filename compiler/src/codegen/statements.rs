@@ -845,7 +845,7 @@ impl Generator<'_, '_> {
         self.close_wrapper(writer);
     }
 
-    /// The turns of a range loop: in whole blocks first when it runs in blocks (see `strips`), then one at a time.
+    /// The turns of a range loop: in blocks when it runs in blocks (see `strips`), else one at a time.
     fn range_turns(
         &mut self,
         function: &Function<'_>,
@@ -854,15 +854,16 @@ impl Generator<'_, '_> {
         body: &Block,
         writer: &mut Writer,
     ) {
+        if let Some(strip) = strip {
+            self.turns_in_blocks(function, strip, range, body, writer);
+            return;
+        }
         let RangeNames {
             ty,
             counter,
             limit,
             variable,
         } = *range;
-        if let Some(strip) = strip {
-            self.whole_blocks(function, strip, range, body, writer);
-        }
         writer.line(&format!("for (; {counter} < {limit}; ++{counter}) {{"));
         writer.depth += 1;
         if let Some(variable) = variable {
@@ -908,12 +909,14 @@ impl Generator<'_, '_> {
     }
 
     /**
-     * The turns of a range loop run in blocks (see `strips`) that make up
-     * whole blocks: an outer loop over the blocks, and an inner one over the
-     * places in a block, where the counter's remainder is the place. The
-     * plain loop after it runs the turns that are left.
+     * The turns of a range loop run in blocks (see `strips`): an outer loop
+     * over the whole blocks, an inner one over the places in a block, then
+     * one block more for the turns that are left, fewer than a block. That
+     * block starts at a multiple of the block size too, and its loop says
+     * it takes no more turns than a block, which C compilers would not
+     * work out from the limit alone.
      */
-    fn whole_blocks(
+    fn turns_in_blocks(
         &mut self,
         function: &Function<'_>,
         strip: Strip,
@@ -921,19 +924,40 @@ impl Generator<'_, '_> {
         body: &Block,
         writer: &mut Writer,
     ) {
-        let RangeNames {
-            ty, counter, limit, ..
-        } = *range;
+        let RangeNames { counter, limit, .. } = *range;
         let size = c_syntax::integer_literal(strip.size, strip.ty);
-        let zero = c_syntax::integer_literal(0, strip.ty);
         // The counter never goes below zero, so the difference cannot overflow once it is below the limit.
         writer.line(&format!(
             "while ({counter} < {limit} && {limit} - {counter} >= {size}) {{"
         ));
         writer.depth += 1;
+        self.block_of_turns(function, strip, range, None, body, writer);
+        writer.depth -= 1;
+        writer.line("}");
+        self.block_of_turns(function, strip, range, Some(limit), body, writer);
+    }
+
+    /**
+     * One block of the turns of a range loop run in blocks: a turn for each
+     * place in the block, or until the counter reaches `limit` when given,
+     * where the counter's remainder is the place.
+     */
+    fn block_of_turns(
+        &mut self,
+        function: &Function<'_>,
+        strip: Strip,
+        range: &RangeNames<'_>,
+        limit: Option<&str>,
+        body: &Block,
+        writer: &mut Writer,
+    ) {
+        let RangeNames { ty, counter, .. } = *range;
+        let size = c_syntax::integer_literal(strip.size, strip.ty);
+        let zero = c_syntax::integer_literal(0, strip.ty);
         let place = self.helper("block_place");
+        let below_limit = limit.map_or(String::new(), |limit| format!(" && {counter} < {limit}"));
         writer.line(&format!(
-            "for ({ty} {place} = {zero}; {place} < {size}; ++{place}, ++{counter}) {{"
+            "for ({ty} {place} = {zero}; {place} < {size}{below_limit}; ++{place}, ++{counter}) {{"
         ));
         writer.depth += 1;
         let name = c_syntax::local_name(function.locals[strip.counter].name);
@@ -944,8 +968,6 @@ impl Generator<'_, '_> {
         self.open_strips.push(OpenStrip { strip, place });
         self.loop_body(function, body, &[], writer);
         self.open_strips.pop();
-        writer.line("}");
-        writer.depth -= 1;
         writer.line("}");
     }
 
