@@ -235,6 +235,7 @@ impl<'a, 'src> Analysis<'a, 'src> {
             | ExprKind::EmptyList
             | ExprKind::Bytes(_)
             | ExprKind::Text(_)
+            | ExprKind::System { .. }
             | ExprKind::Length(_) => Sources::new(),
         }
     }

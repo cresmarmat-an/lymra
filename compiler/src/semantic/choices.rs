@@ -254,15 +254,19 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             let (ty, field) = match field {
                 Some((_, Some((position, field)))) => (Ok(field.ty.clone()), Some(position)),
                 Some((declared, None)) => {
-                    let suggestion = similarity::closest_match(
-                        written.text,
-                        declared.fields.iter().map(|field| field.name.as_str()),
-                    );
-                    let error = errors::unknown_field(
+                    let fields: Vec<&str> = declared
+                        .fields
+                        .iter()
+                        .map(|field| field.name.as_str())
+                        .collect();
+                    let suggestion =
+                        similarity::closest_match(written.text, fields.iter().copied());
+                    let error = errors::unknown_case_field(
                         &declared.name,
                         written.text,
                         written.span,
                         suggestion,
+                        &fields,
                     );
                     (Err(self.report(error)), None)
                 }

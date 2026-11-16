@@ -1490,6 +1490,416 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_argument_not_text(size_t position
     exit(LYMRA_USAGE_ERROR_STATUS);
 }
 
+/*
+ * The codes the file functions give: the position of a `FileError` variant,
+ * in the order the choice lists them, or LYMRA_FILE_DONE when nothing failed.
+ */
+#define LYMRA_FILE_DONE (-1)
+#define LYMRA_NO_SUCH_FILE 0
+#define LYMRA_NO_PERMISSION 1
+#define LYMRA_NOT_TEXT 2
+#define LYMRA_END_OF_INPUT 3
+#define LYMRA_SYSTEM_ERROR 4
+
+/* Files and standard input are read in pieces of this many bytes. */
+#define LYMRA_READ_STEP ((size_t)1 << 16)
+
+#if defined(LYMRA_POSIX)
+/* A path with a NUL after it, as the system takes it. No system takes a longer one. */
+LYMRA_UNUSED static char lymra_path_text[4096];
+
+/* The `FileError` for `error`, an `errno` value the system gave. */
+LYMRA_UNUSED static int lymra_file_error(int error) {
+    switch (error) {
+    case ENOENT:
+    case ENOTDIR:
+        return LYMRA_NO_SUCH_FILE;
+    case EACCES:
+    case EPERM:
+    case EROFS:
+        return LYMRA_NO_PERMISSION;
+    default:
+        return LYMRA_SYSTEM_ERROR;
+    }
+}
+
+/* Puts `path` in `lymra_path_text` with a NUL after it. A NUL inside names no file, and a path too long for any system fails. */
+LYMRA_UNUSED static int lymra_system_path(lymra_string path) {
+    if (memchr(path.data, 0, path.length) != NULL) {
+        return LYMRA_NO_SUCH_FILE;
+    }
+    if (path.length >= sizeof lymra_path_text) {
+        return LYMRA_SYSTEM_ERROR;
+    }
+    memcpy(lymra_path_text, path.data, path.length);
+    lymra_path_text[path.length] = 0;
+    return LYMRA_FILE_DONE;
+}
+#elif defined(LYMRA_WINDOWS)
+/* A path as the wide functions of Windows take it, with a NUL after it. No path is longer. */
+LYMRA_UNUSED static wchar_t lymra_path_units[32768];
+
+/* The `FileError` for `error`, a code from `GetLastError`. */
+LYMRA_UNUSED static int lymra_file_error(DWORD error) {
+    switch (error) {
+    case ERROR_FILE_NOT_FOUND:
+    case ERROR_PATH_NOT_FOUND:
+    case ERROR_INVALID_NAME:
+    case ERROR_BAD_NETPATH:
+        return LYMRA_NO_SUCH_FILE;
+    case ERROR_ACCESS_DENIED:
+    case ERROR_SHARING_VIOLATION:
+    case ERROR_WRITE_PROTECT:
+        return LYMRA_NO_PERMISSION;
+    default:
+        return LYMRA_SYSTEM_ERROR;
+    }
+}
+
+/*
+ * The `FileError` for a file at `lymra_path_units` that Windows would not
+ * open. Windows refuses a directory as it refuses a file the program may
+ * not open, and POSIX opens it and then fails to read it, so a directory
+ * gives the same error on both.
+ */
+LYMRA_UNUSED static int lymra_open_error(DWORD error) {
+    DWORD attributes = GetFileAttributesW(lymra_path_units);
+    if (error == ERROR_ACCESS_DENIED && attributes != INVALID_FILE_ATTRIBUTES &&
+        (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+        return LYMRA_SYSTEM_ERROR;
+    }
+    return lymra_file_error(error);
+}
+
+/* Puts `path` in `lymra_path_units` as UTF-16 with a NUL after it. A NUL inside names no file, and a path too long for Windows fails. */
+LYMRA_UNUSED static int lymra_system_path(lymra_string path) {
+    if (memchr(path.data, 0, path.length) != NULL) {
+        return LYMRA_NO_SUCH_FILE;
+    }
+    if (path.length == 0) {
+        lymra_path_units[0] = 0;
+        return LYMRA_FILE_DONE;
+    }
+    if (path.length >= sizeof lymra_path_units / sizeof lymra_path_units[0]) {
+        return LYMRA_SYSTEM_ERROR;
+    }
+    int units = MultiByteToWideChar(CP_UTF8, 0, path.data, (int)path.length, lymra_path_units,
+                                    (int)(sizeof lymra_path_units / sizeof lymra_path_units[0]) - 1);
+    if (units <= 0) {
+        return LYMRA_SYSTEM_ERROR;
+    }
+    lymra_path_units[units] = 0;
+    return LYMRA_FILE_DONE;
+}
+#endif
+
+/* Writes `text` as the whole file at `path`, which is made if it is missing and emptied if it is not. */
+LYMRA_UNUSED static int lymra_write_file(lymra_string path, lymra_string text) {
+    int prepared = lymra_system_path(path);
+    if (prepared != LYMRA_FILE_DONE) {
+        return prepared;
+    }
+#if defined(LYMRA_POSIX)
+    int descriptor;
+    do {
+        descriptor = open(lymra_path_text, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    } while (descriptor < 0 && errno == EINTR);
+    if (descriptor < 0) {
+        return lymra_file_error(errno);
+    }
+    const char *at = text.data;
+    size_t left = text.length;
+    while (left > 0) {
+        ssize_t written = write(descriptor, at, left);
+        if (written < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            int error = errno;
+            close(descriptor);
+            return lymra_file_error(error);
+        }
+        at += written;
+        left -= (size_t)written;
+    }
+    /* A file system can report a write that failed only when the file is closed. */
+    if (close(descriptor) != 0 && errno != EINTR) {
+        return lymra_file_error(errno);
+    }
+    return LYMRA_FILE_DONE;
+#elif defined(LYMRA_WINDOWS)
+    HANDLE file = CreateFileW(lymra_path_units, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) {
+        return lymra_open_error(GetLastError());
+    }
+    const char *at = text.data;
+    size_t left = text.length;
+    while (left > 0) {
+        DWORD part = left < ((size_t)1 << 30) ? (DWORD)left : (DWORD)1 << 30;
+        DWORD written = 0;
+        if (!WriteFile(file, at, part, &written, NULL)) {
+            DWORD error = GetLastError();
+            CloseHandle(file);
+            return lymra_file_error(error);
+        }
+        at += written;
+        left -= written;
+    }
+    if (!CloseHandle(file)) {
+        return lymra_file_error(GetLastError());
+    }
+    return LYMRA_FILE_DONE;
+#endif
+}
+
+#if defined(LYMRA_DATA_STACKS) && LYMRA_DATA_STACKS > 0
+/*
+ * Ends reading text onto `stack` from `start`, where reading gave `code`.
+ * Text that is UTF-8 becomes `text`; on a failure, or bytes that are not
+ * UTF-8, what was read is freed and the code says why.
+ */
+LYMRA_UNUSED static int lymra_finish_text(lymra_data_stack *stack, char *start, int code, lymra_string *text) {
+    size_t length = (size_t)(stack->top - start);
+    if (code == LYMRA_FILE_DONE && !lymra_is_utf8((const unsigned char *)start, length)) {
+        code = LYMRA_NOT_TEXT;
+    }
+    if (code != LYMRA_FILE_DONE || length == 0) {
+        lymra_data_stack_release(stack, start);
+        text->data = "";
+        text->length = 0;
+        return code;
+    }
+    text->data = start;
+    text->length = length;
+    return code;
+}
+
+/* Reads the whole file at `path` onto the top of `stack` as text. */
+LYMRA_UNUSED static int lymra_read_file(lymra_string path, lymra_data_stack *stack, lymra_string *text,
+                                        const char *site) {
+    int prepared = lymra_system_path(path);
+    if (prepared != LYMRA_FILE_DONE) {
+        return prepared;
+    }
+    char *start = stack->top;
+    int code = LYMRA_FILE_DONE;
+#if defined(LYMRA_POSIX)
+    int descriptor;
+    do {
+        descriptor = open(lymra_path_text, O_RDONLY);
+    } while (descriptor < 0 && errno == EINTR);
+    if (descriptor < 0) {
+        return lymra_file_error(errno);
+    }
+    for (;;) {
+        char *piece = lymra_data_stack_extend(stack, stack->top, LYMRA_READ_STEP, site);
+        ssize_t got = read(descriptor, piece, LYMRA_READ_STEP);
+        int error = errno;
+        lymra_data_stack_release(stack, got > 0 ? piece + got : piece);
+        if (got < 0 && error == EINTR) {
+            continue;
+        }
+        if (got < 0) {
+            code = lymra_file_error(error);
+        }
+        if (got <= 0) {
+            break;
+        }
+    }
+    close(descriptor);
+#elif defined(LYMRA_WINDOWS)
+    HANDLE file = CreateFileW(lymra_path_units, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) {
+        return lymra_open_error(GetLastError());
+    }
+    for (;;) {
+        char *piece = lymra_data_stack_extend(stack, stack->top, LYMRA_READ_STEP, site);
+        DWORD got = 0;
+        BOOL succeeded = ReadFile(file, piece, (DWORD)LYMRA_READ_STEP, &got, NULL);
+        DWORD error = succeeded ? 0 : GetLastError();
+        lymra_data_stack_release(stack, piece + got);
+        if (!succeeded) {
+            code = lymra_file_error(error);
+            break;
+        }
+        if (got == 0) {
+            break;
+        }
+    }
+    CloseHandle(file);
+#endif
+    return lymra_finish_text(stack, start, code, text);
+}
+
+/* Standard input read but not taken yet: `read_line` reads ahead to find where a line ends. */
+LYMRA_UNUSED static char lymra_input[LYMRA_READ_STEP];
+LYMRA_UNUSED static size_t lymra_input_start;
+LYMRA_UNUSED static size_t lymra_input_end;
+/* Whether standard input has given its end, after which it gives nothing more. */
+LYMRA_UNUSED static bool lymra_input_ended;
+
+#if defined(LYMRA_WINDOWS)
+/* What a console gives, as UTF-16, before it becomes UTF-8. Each unit takes at most 3 bytes of UTF-8. */
+LYMRA_UNUSED static wchar_t lymra_console_input[LYMRA_READ_STEP / 3];
+/* The first half of a UTF-16 surrogate pair whose second half the next read gives. */
+LYMRA_UNUSED static wchar_t lymra_console_held;
+
+/*
+ * Reads what the console gives into `lymra_input` as UTF-8. A console
+ * gives UTF-16, as its characters are typed, a line at a time. A line that
+ * starts with Ctrl+Z ends the input, as it does for every console program.
+ */
+LYMRA_UNUSED static int lymra_fill_from_console(HANDLE console) {
+    size_t capacity = sizeof lymra_console_input / sizeof lymra_console_input[0];
+    size_t kept = 0;
+    if (lymra_console_held != 0) {
+        lymra_console_input[0] = lymra_console_held;
+        lymra_console_held = 0;
+        kept = 1;
+    }
+    DWORD got = 0;
+    if (!ReadConsoleW(console, lymra_console_input + kept, (DWORD)(capacity - kept), &got, NULL)) {
+        return LYMRA_SYSTEM_ERROR;
+    }
+    size_t units = kept + got;
+    if (got == 0 || (kept == 0 && lymra_console_input[0] == 0x1A)) {
+        lymra_input_ended = true;
+        return LYMRA_END_OF_INPUT;
+    }
+    wchar_t last = lymra_console_input[units - 1];
+    if (last >= 0xD800 && last <= 0xDBFF) {
+        lymra_console_held = last;
+        units--;
+    }
+    if (units == 0) {
+        return LYMRA_FILE_DONE;
+    }
+    int bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, lymra_console_input, (int)units, lymra_input,
+                                    (int)sizeof lymra_input, NULL, NULL);
+    if (bytes <= 0) {
+        return LYMRA_NOT_TEXT;
+    }
+    lymra_input_end = (size_t)bytes;
+    return LYMRA_FILE_DONE;
+}
+#endif
+
+/*
+ * Reads more of standard input into `lymra_input`, which has been taken
+ * whole. Gives LYMRA_FILE_DONE, LYMRA_END_OF_INPUT when nothing is left, or
+ * the `FileError` of a read that failed.
+ */
+LYMRA_UNUSED static int lymra_fill_input(void) {
+    lymra_input_start = 0;
+    lymra_input_end = 0;
+    if (lymra_input_ended) {
+        return LYMRA_END_OF_INPUT;
+    }
+#if defined(LYMRA_POSIX)
+    for (;;) {
+        ssize_t got = read(0, lymra_input, sizeof lymra_input);
+        if (got < 0 && errno == EINTR) {
+            continue;
+        }
+        if (got < 0) {
+            return lymra_file_error(errno);
+        }
+        if (got == 0) {
+            lymra_input_ended = true;
+            return LYMRA_END_OF_INPUT;
+        }
+        lymra_input_end = (size_t)got;
+        return LYMRA_FILE_DONE;
+    }
+#elif defined(LYMRA_WINDOWS)
+    HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode = 0;
+    if (input != NULL && input != INVALID_HANDLE_VALUE && GetConsoleMode(input, &mode)) {
+        return lymra_fill_from_console(input);
+    }
+    DWORD got = 0;
+    if (!ReadFile(input, lymra_input, (DWORD)sizeof lymra_input, &got, NULL)) {
+        DWORD error = GetLastError();
+        /* A pipe whose writer is done reads as its end. */
+        if (error != ERROR_BROKEN_PIPE && error != ERROR_HANDLE_EOF) {
+            return lymra_file_error(error);
+        }
+        got = 0;
+    }
+    if (got == 0) {
+        lymra_input_ended = true;
+        return LYMRA_END_OF_INPUT;
+    }
+    lymra_input_end = (size_t)got;
+    return LYMRA_FILE_DONE;
+#endif
+}
+
+/*
+ * Reads the next line of standard input onto the top of `stack`, without
+ * its line break, `\r\n` or `\n`. The last line needs no line break; once
+ * nothing is left, it gives LYMRA_END_OF_INPUT. What the program printed
+ * goes out first, so a question shows before the program waits for its
+ * answer.
+ */
+LYMRA_UNUSED static int lymra_read_line(lymra_data_stack *stack, lymra_string *text, const char *site) {
+    lymra_flush();
+    char *start = stack->top;
+    bool started = false;
+    for (;;) {
+        if (lymra_input_start == lymra_input_end) {
+            int filled = lymra_fill_input();
+            if (filled == LYMRA_END_OF_INPUT && started) {
+                break;
+            }
+            if (filled != LYMRA_FILE_DONE) {
+                return lymra_finish_text(stack, start, filled, text);
+            }
+        }
+        started = true;
+        const char *from = lymra_input + lymra_input_start;
+        size_t available = lymra_input_end - lymra_input_start;
+        const char *line_break = (const char *)memchr(from, '\n', available);
+        size_t taken = line_break != NULL ? (size_t)(line_break - from) : available;
+        char *copy = lymra_data_stack_extend(stack, stack->top, taken, site);
+        memcpy(copy, from, taken);
+        lymra_input_start += taken;
+        if (line_break != NULL) {
+            lymra_input_start++;
+            break;
+        }
+    }
+    size_t length = (size_t)(stack->top - start);
+    if (length > 0 && start[length - 1] == '\r') {
+        lymra_data_stack_release(stack, start + length - 1);
+    }
+    return lymra_finish_text(stack, start, LYMRA_FILE_DONE, text);
+}
+
+/* Reads everything standard input still holds onto the top of `stack`. What the program printed goes out first. */
+LYMRA_UNUSED static int lymra_read_input(lymra_data_stack *stack, lymra_string *text, const char *site) {
+    lymra_flush();
+    char *start = stack->top;
+    for (;;) {
+        if (lymra_input_start == lymra_input_end) {
+            int filled = lymra_fill_input();
+            if (filled == LYMRA_END_OF_INPUT) {
+                break;
+            }
+            if (filled != LYMRA_FILE_DONE) {
+                return lymra_finish_text(stack, start, filled, text);
+            }
+        }
+        size_t available = lymra_input_end - lymra_input_start;
+        char *copy = lymra_data_stack_extend(stack, stack->top, available, site);
+        memcpy(copy, lymra_input + lymra_input_start, available);
+        lymra_input_start = lymra_input_end;
+    }
+    return lymra_finish_text(stack, start, LYMRA_FILE_DONE, text);
+}
+#endif
+
 #if defined(LYMRA_DATA_STACKS) && LYMRA_DATA_STACKS > 0
 /* Where an error while the arguments are taken in points. */
 #define LYMRA_ARGUMENTS_SITE " --> the command line\n"

@@ -195,6 +195,11 @@ impl CheckCount {
                     self.expr(part);
                 }
             }
+            ExprKind::System { arguments, .. } => {
+                for argument in arguments {
+                    self.expr(argument);
+                }
+            }
             ExprKind::Text(parts) => {
                 for part in parts {
                     if let PrintPart::Value { value, .. } = part {

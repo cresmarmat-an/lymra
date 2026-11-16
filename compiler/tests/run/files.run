@@ -1,0 +1,17 @@
+exit status 0
+--- standard output
+13 bytes
+first
+second
+13
+
+missing.txt: no such file
+no path: no such file
+name?
+hello Ana Lima
+1: [one]
+2: []
+3: [last line without a break]
+then end of input
+rest: 0 bytes
+--- standard error

@@ -185,3 +185,42 @@ pub(in crate::semantic) fn missing_cases(
         Help::text(format!("add {}", english::listed(&cases))),
     )
 }
+
+/**
+ * A `case` that binds a field its variant lacks. A variant with one field,
+ * such as a result's `Success`, takes the name as a new name for that field.
+ */
+pub(in crate::semantic) fn unknown_case_field(
+    variant: &str,
+    field: &str,
+    span: Span,
+    suggestion: Option<&str>,
+    fields: &[&str],
+) -> Diagnostic {
+    let help = match (suggestion, fields) {
+        (Some(name), _) => Help::replace(format!("did you mean `{name}`?"), span, name),
+        (None, []) => Help::text(format!(
+            "`{variant}` has no fields; write `case {variant}` with nothing after it"
+        )),
+        (None, [only]) => Help::replace(
+            format!(
+                "`{variant}` holds `{only}`; to call it `{field}` here, write `{only} = {field}`"
+            ),
+            span,
+            format!("{only} = {field}"),
+        ),
+        (None, many) => {
+            let listed: Vec<String> = many.iter().map(|name| format!("`{name}`")).collect();
+            Help::text(format!(
+                "`{variant}` has the fields {}; bind one under another name with `field = name`",
+                listed.join(", ")
+            ))
+        }
+    };
+    Diagnostic::new(
+        ErrorCode::L0413,
+        format!("`{variant}` has no field `{field}`"),
+        Label::new(span, "not a field of this variant"),
+        help,
+    )
+}

@@ -1,0 +1,56 @@
+#[
+    Reading and writing files, and reading standard input, from
+    `files.input`. Each call can fail with a `FileError`, which `match`
+    takes apart, `try` passes on and `else fail` turns into text. What the
+    program prints goes out before it waits for input.
+]#
+
+function describe(FileError error) returns string
+    match error
+        case NoSuchFile
+            return "no such file"
+        case NoPermission
+            return "no permission"
+        case NotText
+            return "not text"
+        case EndOfInput
+            return "end of input"
+        case SystemError
+            return "system error"
+
+function copy_upper_case(string from, string to) fails FileError
+    constant text = try read_file(from)
+    try write_file(to, "{text}{length(text)}\n")
+
+function main() fails string
+    try write_file("notes.txt", "first\nsecond\n") else fail "cannot write notes.txt"
+    constant notes = try read_file("notes.txt") else fail "cannot read notes.txt"
+    print("{length(notes)} bytes")
+    try copy_upper_case("notes.txt", "copy.txt") else fail "cannot copy"
+    constant copied = try read_file("copy.txt") else fail "cannot read copy.txt"
+    print(copied)
+    match read_file("missing.txt")
+        case Success(value)
+            print(value)
+        case Failure(error)
+            print("missing.txt: {describe(error)}")
+    match read_file("")
+        case Success(value)
+            print(value)
+        case Failure(error)
+            print("no path: {describe(error)}")
+    print("name?")
+    constant name = try read_line() else fail "no name"
+    print("hello {name}")
+    variable integer64 count = 0
+    variable boolean reading = true
+    while reading
+        match read_line()
+            case Success(value = line)
+                count = count + 1
+                print("{count}: [{line}]")
+            case Failure(error)
+                print("then {describe(error)}")
+                reading = false
+    constant rest = try read_input() else fail "no rest"
+    print("rest: {length(rest)} bytes")

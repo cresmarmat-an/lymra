@@ -1,0 +1,16 @@
+#[
+    `read_input` gives everything standard input holds at once, here
+    after `read_line` took the first line, and an empty text once nothing
+    is left.
+]#
+
+function main() fails string
+    constant title = try read_line() else fail "no title"
+    constant rest = try read_input() else fail "cannot read the rest"
+    variable integer64 lines = 0
+    for byte in bytes(rest)
+        if byte == 10
+            lines = lines + 1
+    print("{title}: {lines} more lines, {length(rest)} bytes")
+    constant after = try read_input() else fail "cannot read after the end"
+    print("after the end: {length(after)} bytes")

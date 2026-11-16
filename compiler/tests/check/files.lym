@@ -1,0 +1,23 @@
+#[
+    Errors about the file functions: the wrong number of arguments
+    (L0501), an argument marked `variable` (L0504) or not text (L0402), a
+    result nothing handles (L0505), and a declaration that takes the name
+    of the built-in `FileError` or one of its variants (L0207).
+]#
+
+choice FileError
+    Gone
+
+choice Outcome
+    Done
+    NoSuchFile
+
+function main() fails string
+    variable path = "notes.txt"
+    path = "{path}.old"
+    constant missing = try read_file() else fail "no path"
+    constant extra = try read_line("prompt") else fail "no line"
+    constant marked = try read_file(variable path) else fail "marked"
+    constant number = try read_file(42) else fail "number"
+    write_file(path, "text")
+    print("{missing}{extra}{marked}{number}")

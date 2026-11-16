@@ -19,7 +19,7 @@ pub(super) use arrays::{
 };
 pub(super) use choices::{
     Stranger, choice_called, field_name_taken, fieldless_variant_called, match_needs_choice,
-    missing_cases, not_a_variant, variant_handled_twice,
+    missing_cases, not_a_variant, unknown_case_field, variant_handled_twice,
 };
 pub(super) use custom_types::{
     compound_constant, field_given_twice, missing_fields, no_fields, unknown_field, unnamed_field,
@@ -581,6 +581,44 @@ pub(super) fn range_arguments_plain(arguments: Span) -> Diagnostic {
         "the arguments of `range` are plain values",
         Label::new(arguments, "marked or named here"),
         Help::text("pass the start and the end as plain values: `range(0, 10)`"),
+    )
+}
+
+/// A built-in function whose parameters, each a `string`, are `parameters`, given `found` arguments.
+pub(super) fn built_in_argument_count(
+    function: &str,
+    parameters: &[&str],
+    found: usize,
+    arguments: Span,
+) -> Diagnostic {
+    let given = if found == 1 { "was" } else { "were" };
+    let takes = match parameters.len() {
+        0 => "no arguments".to_owned(),
+        1 => "1 argument".to_owned(),
+        count => format!("{count} arguments"),
+    };
+    let written: Vec<String> = parameters
+        .iter()
+        .map(|parameter| format!("string {parameter}"))
+        .collect();
+    Diagnostic::new(
+        ErrorCode::L0501,
+        format!("`{function}` takes {takes}, but {found} {given} given"),
+        Label::new(arguments, "these are the arguments"),
+        Help::text(format!(
+            "call it as declared: `{function}({})`",
+            written.join(", ")
+        )),
+    )
+}
+
+/// An argument of a built-in function marked with `variable` or given by name, though each is a plain value.
+pub(super) fn marked_built_in_argument(function: &str, argument: Span) -> Diagnostic {
+    Diagnostic::new(
+        ErrorCode::L0504,
+        format!("the arguments of `{function}` are plain values"),
+        Label::new(argument, "marked or named here"),
+        Help::text("pass the text itself, with no `variable` and no name before it"),
     )
 }
 

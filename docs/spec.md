@@ -438,6 +438,10 @@ function main(view[string] arguments) returns unsigned8
 | Function | Does |
 |---|---|
 | `print(string text)` | Writes the text and a line break to standard output, as one whole line. The values in the text are computed first, so a call among them that prints writes its own line before this one. |
+| `read_file(string path) returns string fails FileError` | The whole file at `path`, as text. |
+| `write_file(string path, string text) fails FileError` | Makes `text` the whole file at `path`, making the file if it is missing. |
+| `read_line() returns string fails FileError` | The next line of standard input, without its line break, `\n` or `\r\n`. The last line needs no line break; after it comes `EndOfInput`. |
+| `read_input() returns string fails FileError` | Everything standard input still holds, as text; empty once nothing is left. |
 | `range(start, end)` | The integers from `start` up to `end`, without `end`. It is only used in a `for` loop for now. |
 | `length(items)` | The number of elements of an array, a list, a stack or a view, or of bytes in a `string`, as an `integer64`. An array's length is part of its type, so it is known while compiling. |
 | `array(value)` | An array with every element set to `value`. Its type, and so its length, comes from the place it goes: a declared type, a parameter, or a function's return type (`L0412`). |
@@ -455,6 +459,30 @@ function main(view[string] arguments) returns unsigned8
 | `integer8(value)` to `integer64(value)` | Converts an integer to that signed type |
 | `unsigned8(value)` to `unsigned64(value)` | Converts an integer to that unsigned type |
 
+The four functions that read and write fail with `FileError`, a choice the language declares: `NoSuchFile` when nothing is at the path, `NoPermission` when the program may not read or write it, `NotText` when the bytes are not UTF-8, `EndOfInput` when standard input has nothing left, and `SystemError` for anything else the system reports, such as a full disk or a directory where a file was expected. The text they read lands on a data stack like any returned text (Section 4.5). Reading standard input first writes out what the program printed, so a question shows before the program waits for its answer.
+
+```lymra
+function main() fails string
+    print("What is your name?")
+    constant name = try read_line() else fail "no name was given"
+    try write_file("greeting.txt", "hello {name}") else fail "cannot write greeting.txt"
+    match read_file("greeting.txt")
+        case Success(value)
+            print(value)
+        case Failure(error)
+            match error
+                case NoSuchFile
+                    print("the file is gone")
+                case NoPermission
+                    print("the file cannot be read")
+                case NotText
+                    print("the file is not text")
+                case EndOfInput
+                    print("nothing was read")
+                case SystemError
+                    print("the system failed")
+```
+
 Calling an integer type converts a value to it. A conversion stops the program if the value does not fit the target type. When the value is known while compiling, a value that does not fit is error `L0404` instead. `boolean` and `string` convert nothing: compare a number to get a `boolean`, and interpolate it to get text.
 
 Later phases add these, and until then the compiler rejects each with `L0309`:
@@ -463,7 +491,7 @@ Later phases add these, and until then the compiler rejects each with `L0309`:
 |---|---|---|
 | `filter(items) with name`, `sort(variable items) with left, right` | The elements the block accepts; the elements in the block's order (Section 7.7) | 3 |
 
-The names of built-in functions and types cannot be declared again (`L0207`). No binding or function can be called `print`, `length`, `wrapping_add`, `integer32`, `boolean`, `array` or `float64`.
+The names of built-in functions and types cannot be declared again (`L0207`). No binding or function can be called `print`, `length`, `wrapping_add`, `integer32`, `boolean`, `array` or `float64`, and no type or variant `FileError`, `NoSuchFile`, `NoPermission`, `NotText`, `EndOfInput` or `SystemError`.
 
 ## 6. Control flow
 
@@ -736,7 +764,6 @@ The checks are integer overflow, division by zero, a conversion whose value does
 | O6 | Literal syntax for `array` and `list` values | `[1, 2, 3]` |
 | O7 | Bitwise operations | Functions with whole-word names such as `bit_and` and `shift_left`, not symbols |
 | O8 | Calling C: the syntax and rules of `external` declarations | `external function hypot(float64 x, float64 y) returns float64` |
-| O12 | Reading files and standard input. Every program in the memory model study had to take its input from constants. | Built-in functions that fail with a built-in choice (Section 8) |
 | O11 | Removing the overflow checks that stay. The compiler removes every check its interval analysis proves can never fail, with `while` loops worked out to a fixed point and what parameters receive and calls return carried across the program. Measured in `bench/results.md`: four of the six benchmarks keep no check and, built with GCC, run within 1% of C's time. The checks that stay guard values no interval bounds, such as a Collatz chain or a sum of recursive results; a check against a constant compares the other operand with a limit, so the C compiler keeps the arithmetic plain, and `collatz` built with GCC takes 1.12 times C's time. | Relations between variables, such as a result that grows with an argument, would bound some of the rest. Worth it once a real program needs one |
 
 ## 13. Where speed comes from

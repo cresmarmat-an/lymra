@@ -28,6 +28,7 @@ mod pools;
 mod roots;
 mod scope;
 mod statements;
+mod system;
 mod values;
 mod views;
 mod walk;
@@ -45,12 +46,17 @@ use crate::ir::{self, ChoiceType, ConstantId, FunctionId, IntegerType, Program, 
 use crate::similarity;
 use crate::source::{SourceFile, Span};
 use scope::{FunctionScope, LocalKind};
+use system::BuiltInChoice;
 
 type CheckResult<T> = Result<T, ErrorReported>;
 
 /// The built-in functions the compiler implements.
-const BUILT_IN_FUNCTIONS: [&str; 13] = [
+const BUILT_IN_FUNCTIONS: [&str; 17] = [
     "print",
+    "read_file",
+    "write_file",
+    "read_input",
+    "read_line",
     "range",
     "length",
     "push",
@@ -76,14 +82,24 @@ enum BuiltIn {
     Function,
     /// A type. Calling an integer type, as in `integer32(count)`, converts a value to it.
     Type,
+    /// A variant of a choice the language declares, such as `NoSuchFile`.
+    Variant,
 }
 
 impl BuiltIn {
     fn of(name: &str) -> Option<BuiltIn> {
+        let choice = BuiltInChoice::ALL
+            .into_iter()
+            .find(|choice| choice.names(name));
         if BUILT_IN_FUNCTIONS.contains(&name) {
             Some(BuiltIn::Function)
-        } else if IntegerType::from_name(name).is_some() || OTHER_TYPE_NAMES.contains(&name) {
+        } else if IntegerType::from_name(name).is_some()
+            || OTHER_TYPE_NAMES.contains(&name)
+            || choice.is_some_and(|choice| choice.name() == name)
+        {
             Some(BuiltIn::Type)
+        } else if choice.is_some() {
+            Some(BuiltIn::Variant)
         } else {
             None
         }
@@ -93,6 +109,7 @@ impl BuiltIn {
         match self {
             BuiltIn::Function => "function",
             BuiltIn::Type => "type",
+            BuiltIn::Variant => "variant",
         }
     }
 }
@@ -209,6 +226,8 @@ enum TypeState {
 enum DeclaredType<'src, 'ast> {
     Record(&'ast ast::TypeDeclaration<'src>),
     Choice(&'ast ast::ChoiceDeclaration<'src>),
+    /// A choice the language declares itself, written nowhere in the program.
+    BuiltIn(BuiltInChoice),
 }
 
 impl<'src> DeclaredType<'src, '_> {
@@ -216,6 +235,10 @@ impl<'src> DeclaredType<'src, '_> {
         match self {
             Self::Record(declaration) => declaration.name,
             Self::Choice(declaration) => declaration.name,
+            Self::BuiltIn(choice) => Name {
+                text: choice.name(),
+                span: Span::empty(0),
+            },
         }
     }
 }
@@ -312,16 +335,18 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 .get(id)
                 .map(|entry| entry.declaration.name.span),
             Global::Constant(id) => self.constants.get(id).map(|entry| entry.binding.name.span),
-            Global::Type(id) => self
-                .types
-                .get(id)
-                .map(|entry| entry.declaration.name().span),
+            Global::Type(id) => match self.types.get(id)?.declaration {
+                DeclaredType::BuiltIn(_) => None,
+                declaration @ (DeclaredType::Record(_) | DeclaredType::Choice(_)) => {
+                    Some(declaration.name().span)
+                }
+            },
             Global::Variant { choice, variant } => match self.types.get(choice)?.declaration {
                 DeclaredType::Choice(declaration) => declaration
                     .variants
                     .get(variant)
                     .map(|variant| variant.name.span),
-                DeclaredType::Record(_) => None,
+                DeclaredType::Record(_) | DeclaredType::BuiltIn(_) => None,
             },
         }
     }

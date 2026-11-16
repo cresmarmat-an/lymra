@@ -73,7 +73,7 @@ Two contradictions came up as well. Section 4.4 says `push` returns a reference 
 | The top of a stack without popping it | document_tree | `top(items)` returns a copy of the top element |
 | An array with every element the same | life | `array(value)`, its size taken from the declared type |
 | A map | word_count | Not in 0.1; a table over fixed-size slots works today, and a built-in map waits for generics (O2) |
-| Reading files and standard input | every program, which use constants instead | Open question O12 |
+| Reading files and standard input | every program, which use constants instead | Open question O12, since settled: `read_file`, `write_file`, `read_line` and `read_input`, which fail with `FileError` (section 5.1) |
 
 ## Decisions
 

@@ -1,0 +1,60 @@
+error[L0207]: `FileError` is the name of a built-in type
+ --> tests/check/files.lym:8:8
+  |
+8 | choice FileError
+  |        ^^^^^^^^^ this name is taken
+  |
+help: choose another name
+
+error[L0207]: `NoSuchFile` is the name of a built-in variant
+  --> tests/check/files.lym:13:5
+   |
+13 |     NoSuchFile
+   |     ^^^^^^^^^^ this name is taken
+   |
+help: choose another name
+
+error[L0501]: `read_file` takes 1 argument, but 0 were given
+  --> tests/check/files.lym:18:37
+   |
+18 |     constant missing = try read_file() else fail "no path"
+   |                                     ^^ these are the arguments
+   |
+help: call it as declared: `read_file(string path)`
+
+error[L0501]: `read_line` takes no arguments, but 1 was given
+  --> tests/check/files.lym:19:35
+   |
+19 |     constant extra = try read_line("prompt") else fail "no line"
+   |                                   ^^^^^^^^^^ these are the arguments
+   |
+help: call it as declared: `read_line()`
+
+error[L0504]: the arguments of `read_file` are plain values
+  --> tests/check/files.lym:20:37
+   |
+20 |     constant marked = try read_file(variable path) else fail "marked"
+   |                                     ^^^^^^^^^^^^^ marked or named here
+   |
+help: pass the text itself, with no `variable` and no name before it
+
+error[L0402]: expected a `string`, found a number
+  --> tests/check/files.lym:21:37
+   |
+21 |     constant number = try read_file(42) else fail "number"
+   |                                     ^^ this is a number
+   |
+help: write a `string` here
+
+error[L0505]: `write_file` can fail, and nothing handles its result
+  --> tests/check/files.lym:22:5
+   |
+22 |     write_file(path, "text")
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^ a failure here would go unnoticed
+   |
+help: pass the failure on with `try`, or handle both cases with `match`
+   |
+22 |     try write_file(path, "text")
+
+found 7 errors in tests/check/files.lym
+run `lymra explain L0207` to read why a rule exists and how to fix it

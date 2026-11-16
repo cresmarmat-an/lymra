@@ -295,7 +295,8 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             None => match BuiltIn::of(name) {
                 Some(BuiltIn::Function) => Err(self.report(errors::function_as_value(name, span))),
                 Some(BuiltIn::Type) => Err(self.report(errors::type_as_value(name, span))),
-                None => match Feature::future_function(name) {
+                // The variants of built-in choices are visible to every program, so they are found above.
+                Some(BuiltIn::Variant) | None => match Feature::future_function(name) {
                     Some(feature) => Err(self.report(feature.diagnostic(span))),
                     None => Err(self.report_unknown_name(name, span)),
                 },
@@ -827,6 +828,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             "bytes" => return self.check_bytes(call, span),
             "length" => return self.check_length(call, span),
             _ => {}
+        }
+        if let Some(operation) = ir::SystemOperation::from_function(name) {
+            return self.check_system(operation, call, span);
         }
         if let Some(operator) = ir::WrappingOperator::from_function(name) {
             return self.check_wrapping(operator, call, span, hint);

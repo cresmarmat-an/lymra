@@ -83,6 +83,11 @@ pub(super) fn each_expr<'a>(expr: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
                 each_expr(part, visit);
             }
         }
+        ExprKind::System { arguments, .. } => {
+            for argument in arguments {
+                each_expr(argument, visit);
+            }
+        }
         ExprKind::Negate { operand, .. }
         | ExprKind::Not(operand)
         | ExprKind::Convert { operand, .. }

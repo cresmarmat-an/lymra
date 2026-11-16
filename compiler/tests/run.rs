@@ -4,9 +4,11 @@
  * Every `.lym` file under `tests/run` and in `examples`, and the programs of
  * the memory model study that the compiler can build so far, is checked,
  * turned into C, compiled with each C compiler on this machine with all
- * warnings as errors, and run, with the arguments in a `.arguments` file
- * beside it, one on each line, if it has one. Its exit status, output and
- * error output have to match the `.run` file recorded for it.
+ * warnings as errors, and run in a directory of its own, where it can write
+ * files. It gets the arguments in a `.arguments` file beside it, one on each
+ * line, and reads a `.input` file beside it as its standard input, where it
+ * has them. Its exit status, output and error output have to match the
+ * `.run` file recorded for it.
  *
  * Each program is built twice: with every runtime check, and with the checks
  * the optimizer proves unnecessary removed. Every build, with every compiler,
@@ -15,9 +17,10 @@
 
 mod common;
 
+use std::fs::File;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, PoisonError};
 
@@ -141,8 +144,16 @@ fn run_case(case: &Case, compilers: &[Compiler]) -> Result<String, String> {
         compiler
             .compile(c_source, &executable, optimized.optimize, Warnings::Strict)
             .map_err(|error| format!("{} with {label}:\n{error}", case.name))?;
+        let input = match case.source.with_extension("input") {
+            path if path.exists() => Stdio::from(
+                File::open(&path).map_err(|error| format!("{}: {error}", path.display()))?,
+            ),
+            _ => Stdio::null(),
+        };
         let output = Command::new(&executable)
             .args(&case.arguments)
+            .current_dir(workspace.path())
+            .stdin(input)
             .output()
             .map_err(|error| format!("{}: cannot run the program: {error}", case.name))?;
         let result = describe_run(output.status.code(), &output.stdout, &output.stderr);

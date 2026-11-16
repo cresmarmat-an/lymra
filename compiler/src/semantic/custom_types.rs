@@ -41,6 +41,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                     Type::Custom(Arc::new(custom))
                 }
                 DeclaredType::Choice(declaration) => checker.resolve_choice(declaration)?,
+                DeclaredType::BuiltIn(choice) => choice.ty(),
             };
             checker.fits_on_stack(ty, declaration.name().span)
         });

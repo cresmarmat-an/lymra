@@ -17,9 +17,9 @@ use super::{
     Generator, INDENT, Release, Storage, Writer, c_syntax, data_stack, local_access, releases_of,
 };
 use crate::ir::{
-    Argument, ArithmeticOperator, Attempt, Call, ComparisonOperator, Expr, ExprKind, Extent,
-    FAILURE_VARIANT, FieldValue, FloatType, Function, IntegerType, LogicOperator, PrintPart,
-    SUCCESS_VARIANT, Sequence, TextForm, Type, Value,
+    Argument, ArithmeticOperator, Attempt, Call, ChoiceType, ComparisonOperator, Expr, ExprKind,
+    Extent, FAILURE_VARIANT, FieldValue, FloatType, Function, IntegerType, LogicOperator,
+    PrintPart, SUCCESS_VARIANT, Sequence, SystemOperation, TextForm, Type, Value,
 };
 use crate::source::Span;
 
@@ -168,9 +168,15 @@ impl Generator<'_, '_> {
             ExprKind::EmptyList | ExprKind::Text(_) => {
                 self.stored_temporary(function, expr, writer)
             }
-            ExprKind::Call(_) if Storage::of(&expr.ty) != Storage::None => {
+            ExprKind::Call(_) | ExprKind::System { .. }
+                if Storage::of(&expr.ty) != Storage::None =>
+            {
                 self.stored_temporary(function, expr, writer)
             }
+            ExprKind::System {
+                operation,
+                arguments,
+            } => self.system(function, *operation, arguments, None, expr, writer),
             ExprKind::Call(call) => self.call(function, call, &[], writer),
             ExprKind::Try(attempt) => {
                 let result = self.attempt(function, attempt, writer);
@@ -463,6 +469,17 @@ impl Generator<'_, '_> {
         match &value.kind {
             ExprKind::EmptyList => format!("{}({joined})", list_function(&ty, "start")),
             ExprKind::Call(call) => self.call(function, call, stacks, writer),
+            ExprKind::System {
+                operation,
+                arguments,
+            } => self.system(
+                function,
+                *operation,
+                arguments,
+                Some(&joined),
+                value,
+                writer,
+            ),
             ExprKind::Text(parts) => self.build_text(function, parts, &joined, value.span, writer),
             _ => {
                 let source = self.expr(function, value, writer);
@@ -806,6 +823,88 @@ impl Generator<'_, '_> {
         writer.depth -= 1;
         writer.line("}");
         result
+    }
+
+    /**
+     * A call into the operating system, which `call` is: its arguments,
+     * computed in order, go to a runtime function, which gives a code below
+     * 0 when it succeeds and otherwise the position of the `FileError`
+     * variant. Text it reads goes on `stack`. Returns the C of the result.
+     */
+    fn system(
+        &mut self,
+        function: &Function<'_>,
+        operation: SystemOperation,
+        arguments: &[Expr],
+        stack: Option<&str>,
+        call: &Expr,
+        writer: &mut Writer,
+    ) -> String {
+        let last_effect = arguments.iter().rposition(Expr::has_effects);
+        let mut values = Vec::with_capacity(arguments.len());
+        for (position, argument) in arguments.iter().enumerate() {
+            let code = self.expr(function, argument, writer);
+            let hoist = last_effect.is_some_and(|last| position < last) && argument.has_effects();
+            values.push(if hoist {
+                self.temporary(&argument.ty, &code, writer)
+            } else {
+                code
+            });
+        }
+        let text = self.helper("text");
+        let destination = stack.unwrap_or_default();
+        // The checker gave each operation as many arguments as it has parameters.
+        let argument = |position: usize| values.get(position).cloned().unwrap_or_default();
+        // Text that is read can fill its data stack, where the error points; writing takes no data stack.
+        let runtime_call = match operation {
+            SystemOperation::ReadFile => format!(
+                "lymra_read_file({}, {destination}, &{text}, {})",
+                argument(0),
+                self.site(call.span)
+            ),
+            SystemOperation::ReadInput => format!(
+                "lymra_read_input({destination}, &{text}, {})",
+                self.site(call.span)
+            ),
+            SystemOperation::ReadLine => format!(
+                "lymra_read_line({destination}, &{text}, {})",
+                self.site(call.span)
+            ),
+            SystemOperation::WriteFile => {
+                format!("lymra_write_file({}, {})", argument(0), argument(1))
+            }
+        };
+        if operation.gives_text() {
+            writer.line(&format!("lymra_string {text};"));
+        }
+        let code = self.helper("code");
+        writer.line(&format!("const int {code} = {runtime_call};"));
+        let result = self.types.name(&call.ty);
+        let success = if operation.gives_text() {
+            format!(
+                "(({result}){{ .{} = {SUCCESS_VARIANT}, .{} = {{ .{} = {{ .{} = {text} }} }} }})",
+                c_syntax::TAG,
+                c_syntax::VARIANTS,
+                c_syntax::variant_name(SUCCESS_VARIANT),
+                c_syntax::field_name(0)
+            )
+        } else {
+            format!("(({result}){{ .{} = {SUCCESS_VARIANT} }})", c_syntax::TAG)
+        };
+        let error = call.ty.as_result().and_then(ChoiceType::failure_type);
+        let error_type = error.map_or_else(String::new, |error| self.types.name(error));
+        let tag_type = match error {
+            Some(Type::Choice(choice)) => c_syntax::integer_type(choice.tag_type()),
+            _ => "uint8_t",
+        };
+        let failure = format!(
+            "(({result}){{ .{tag} = {FAILURE_VARIANT}, .{} = {{ .{} = {{ .{} = (({error_type}){{ .{tag} = ({tag_type}){code} }}) }} }} }})",
+            c_syntax::VARIANTS,
+            c_syntax::variant_name(FAILURE_VARIANT),
+            c_syntax::field_name(0),
+            tag = c_syntax::TAG,
+        );
+        format!("({code} < 0 ? {success} : {failure})")
     }
 
     /**

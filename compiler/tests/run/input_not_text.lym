@@ -1,0 +1,21 @@
+#[
+    Standard input whose bytes are not UTF-8 gives `NotText`, which the
+    program handles like any other failure.
+]#
+
+function main()
+    match read_line()
+        case Success(value)
+            print("read {value}")
+        case Failure(error)
+            match error
+                case NotText
+                    print("the input is not UTF-8 text")
+                case NoSuchFile
+                    print("no such file")
+                case NoPermission
+                    print("no permission")
+                case EndOfInput
+                    print("no input")
+                case SystemError
+                    print("the system failed")

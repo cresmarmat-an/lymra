@@ -525,6 +525,7 @@ impl<'function> Analyzer<'function> {
             | ExprKind::Slot { .. }
             | ExprKind::Text(_)
             | ExprKind::Try(_)
+            | ExprKind::System { .. }
             | ExprKind::EmptyList
             | ExprKind::Construct(_)
             | ExprKind::Variant { .. }
@@ -651,6 +652,11 @@ impl<'function> Analyzer<'function> {
                 self.remove_checks(&mut attempt.result, bounds);
                 if let Some(fallback) = &mut attempt.fallback {
                     self.remove_checks(fallback, bounds);
+                }
+            }
+            ExprKind::System { arguments, .. } => {
+                for argument in arguments {
+                    self.remove_checks(argument, bounds);
                 }
             }
         }

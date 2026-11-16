@@ -853,5 +853,10 @@ fn expr_reads(function: &Function<'_>, expr: &Expr, read: &mut Live) {
                 expr_reads(function, part, read);
             }
         }
+        ExprKind::System { arguments, .. } => {
+            for argument in arguments {
+                expr_reads(function, argument, read);
+            }
+        }
     }
 }

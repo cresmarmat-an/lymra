@@ -44,7 +44,7 @@ error[L0413]: `Rect` has no field `hight`
   --> tests/check/choices.lym:21:26
    |
 21 |         case Rect(width, hight)
-   |                          ^^^^^ not a field of this type
+   |                          ^^^^^ not a field of this variant
    |
 help: did you mean `height`?
    |

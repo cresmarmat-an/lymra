@@ -390,6 +390,68 @@ pub enum ExprKind {
     },
     /// `try call`: the value of a `Success`; on a `Failure`, the function fails at once (spec 8).
     Try(Box<Attempt>),
+    /**
+     * A call into the operating system: reading or writing a file, or
+     * reading standard input. The arguments are computed in order, and the
+     * result's `Failure` holds a `FileError`.
+     */
+    System {
+        operation: SystemOperation,
+        arguments: Vec<Expr>,
+    },
+}
+
+/// What a call into the operating system does (spec 5.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SystemOperation {
+    /// `read_file(path)`: the whole file, as text.
+    ReadFile,
+    /// `write_file(path, text)`: the text becomes the whole file, which is made if it is missing.
+    WriteFile,
+    /// `read_input()`: everything standard input still holds, as text.
+    ReadInput,
+    /// `read_line()`: the next line of standard input, without its line break.
+    ReadLine,
+}
+
+impl SystemOperation {
+    /// The operation a built-in function's name stands for.
+    pub fn from_function(name: &str) -> Option<Self> {
+        match name {
+            "read_file" => Some(Self::ReadFile),
+            "write_file" => Some(Self::WriteFile),
+            "read_input" => Some(Self::ReadInput),
+            "read_line" => Some(Self::ReadLine),
+            _ => None,
+        }
+    }
+
+    /// The name of the built-in function, as a program writes it.
+    pub const fn function(self) -> &'static str {
+        match self {
+            Self::ReadFile => "read_file",
+            Self::WriteFile => "write_file",
+            Self::ReadInput => "read_input",
+            Self::ReadLine => "read_line",
+        }
+    }
+
+    /// The names of its parameters, each a `string`.
+    pub const fn parameters(self) -> &'static [&'static str] {
+        match self {
+            Self::ReadFile => &["path"],
+            Self::WriteFile => &["path", "text"],
+            Self::ReadInput | Self::ReadLine => &[],
+        }
+    }
+
+    /// Whether a `Success` holds the text that was read; writing gives nothing back.
+    pub const fn gives_text(self) -> bool {
+        match self {
+            Self::ReadFile | Self::ReadInput | Self::ReadLine => true,
+            Self::WriteFile => false,
+        }
+    }
 }
 
 /**
@@ -475,6 +537,9 @@ impl Expr {
                 Argument::Value(value) => value.mentions(local),
             }),
             ExprKind::Try(attempt) => attempt.parts().any(|part| part.mentions(local)),
+            ExprKind::System { arguments, .. } => {
+                arguments.iter().any(|argument| argument.mentions(local))
+            }
         }
     }
 
@@ -489,7 +554,7 @@ impl Expr {
             | ExprKind::Local(_)
             | ExprKind::Constant(_)
             | ExprKind::EmptyList => false,
-            ExprKind::Call(_) | ExprKind::Try(_) => true,
+            ExprKind::Call(_) | ExprKind::Try(_) | ExprKind::System { .. } => true,
             ExprKind::Not(operand)
             | ExprKind::Fill(operand)
             | ExprKind::Length(operand)

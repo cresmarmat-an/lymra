@@ -330,6 +330,11 @@ pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
                 collect_references(part, changed);
             }
         }
+        ExprKind::System { arguments, .. } => {
+            for argument in arguments {
+                collect_references(argument, changed);
+            }
+        }
         ExprKind::Text(parts) => {
             for value in text_values(parts) {
                 collect_references(value, changed);
@@ -392,6 +397,11 @@ pub(super) fn collect_calls<'expr>(expr: &'expr Expr, calls: &mut Vec<&'expr Cal
         ExprKind::Try(attempt) => {
             for part in attempt.parts() {
                 collect_calls(part, calls);
+            }
+        }
+        ExprKind::System { arguments, .. } => {
+            for argument in arguments {
+                collect_calls(argument, calls);
             }
         }
         ExprKind::Call(call) => {

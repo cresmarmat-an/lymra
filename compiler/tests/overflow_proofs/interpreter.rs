@@ -545,6 +545,13 @@ impl Interpreter<'_, '_> {
                     .attempt(attempt, slots)?
                     .ok_or_else(|| Stop::Unsound("a `try` without a value".to_owned()));
             }
+            // The generator writes no file or input operations, which would reach outside the program.
+            ExprKind::System { operation, .. } => {
+                return Err(Stop::Unsound(format!(
+                    "a call to `{}`, which the interpreter does not run",
+                    operation.function()
+                )));
+            }
             ExprKind::Index {
                 array,
                 index,

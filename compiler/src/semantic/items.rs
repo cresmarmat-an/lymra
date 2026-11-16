@@ -1,6 +1,7 @@
 //! Top-level declarations, the types they name, and the constants computed from them.
 
 use super::features::Feature;
+use super::system::BuiltInChoice;
 use super::{
     BuiltIn, CheckResult, Checker, ConstantEntry, ConstantState, DISCARD, DeclaredType, Definition,
     FunctionEntry, Global, Parameter, TypeEntry, TypeId, TypeState, errors,
@@ -19,6 +20,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
      * signatures, so declarations may appear in any order in the file.
      */
     pub(super) fn collect_items(&mut self, items: &'ast [ast::Item<'src>]) {
+        self.declare_built_in_choices();
         for item in items {
             let public = item.visibility == Visibility::Public;
             match &item.kind {
@@ -83,6 +85,27 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         });
         self.declare_global(declaration.name(), Global::Type(id));
         id
+    }
+
+    /// Makes the choices the language declares, and their variants, visible to the whole program.
+    fn declare_built_in_choices(&mut self) {
+        for choice in BuiltInChoice::ALL {
+            let id = self.types.len();
+            self.types.push(TypeEntry {
+                declaration: DeclaredType::BuiltIn(choice),
+                state: TypeState::Done(choice.ty()),
+            });
+            self.globals.insert(choice.name(), Global::Type(id));
+            for (variant, &name) in choice.variants().iter().enumerate() {
+                self.globals.insert(
+                    name,
+                    Global::Variant {
+                        choice: id,
+                        variant,
+                    },
+                );
+            }
+        }
     }
 
     fn declare_global(&mut self, name: Name<'src>, global: Global) {
@@ -377,6 +400,7 @@ fn runtime_part(expr: &ir::Expr) -> Span {
         | ir::ExprKind::Insert { .. }
         | ir::ExprKind::Text(_)
         | ir::ExprKind::Try(_)
+        | ir::ExprKind::System { .. }
         | ir::ExprKind::Construct(_)
         | ir::ExprKind::Variant { .. } => expr.span,
     }
