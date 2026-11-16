@@ -124,6 +124,7 @@ impl<'src> Parser<'src, '_> {
     fn parse_prefix(&mut self) -> ParseResult<Expr<'src>> {
         let token = self.current();
         let (operator, operand) = match token.kind {
+            TokenKind::Keyword(Keyword::Try) => return self.parse_try(),
             TokenKind::Keyword(Keyword::Not) => {
                 self.advance();
                 (
@@ -142,6 +143,37 @@ impl<'src> Parser<'src, '_> {
             kind: ExprKind::Unary {
                 operator,
                 operand: Box::new(operand),
+            },
+            span,
+        })
+    }
+
+    /**
+     * `try call`, where the call is everything up to the first operator, and
+     * `try call else fail value`, where the value runs to the end of the
+     * expression (spec 8).
+     */
+    fn parse_try(&mut self) -> ParseResult<Expr<'src>> {
+        let keyword = self.advance();
+        let attempt = self.nested(Self::parse_postfix)?;
+        let mut span = keyword.span.to(attempt.span);
+        let fallback = if self.eat_keyword(Keyword::Else) {
+            if !self.eat_keyword(Keyword::Fail) {
+                let help = Help::text(
+                    "write `fail` and what to fail with after `else`, as in `try read(path) else fail \"cannot read\"`",
+                );
+                return Err(self.unexpected("`fail`", help));
+            }
+            let value = self.nested(|parser| parser.parse_binary(0))?;
+            span = span.to(value.span);
+            Some(Box::new(value))
+        } else {
+            None
+        };
+        Ok(Expr {
+            kind: ExprKind::Try {
+                attempt: Box::new(attempt),
+                fallback,
             },
             span,
         })

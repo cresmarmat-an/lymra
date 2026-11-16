@@ -1,0 +1,138 @@
+#[
+    `try` in every place a value can stand: a `while` condition, both
+    sides of `and`, the bounds of a `range`, the value of a `match`, a
+    text, a `push`, an element and a binding that gets new text. Failures
+    leave loops that hold lists, and a failure deep in a recursion frees
+    the text of every call it leaves.
+]#
+
+choice Sign
+    Negative
+    Positive
+
+function positive(integer64 value) returns integer64 fails string
+    if value < 0
+        fail "{value} is negative"
+    return value
+
+function sign(integer64 value) returns Sign fails string
+    if value == 0
+        fail "zero has no sign"
+    if value < 0
+        return Negative
+    return Positive
+
+function next_below(integer64 value, integer64 limit) returns integer64 fails string
+    if value >= limit
+        fail "{value} reached {limit}"
+    return value + 1
+
+function sum_until(integer64 limit) returns integer64 fails string
+    variable integer64 value = 0
+    variable integer64 total = 0
+    while try next_below(value, 100) < limit
+        value = value + 1
+        total = total + value
+    return total
+
+function both_positive(integer64 left, integer64 right) returns boolean fails string
+    return try positive(left) > 0 and try positive(right) > 0
+
+function collect(integer64 count) returns integer64 fails string
+    variable list[integer64] values = list()
+    variable list[string] names = list()
+    for index in range(0, try positive(count))
+        push(variable values, try positive(3 - index))
+        push(variable names, "item {index}")
+    return length(values) + length(names)
+
+function deep(integer64 depth, string trail) returns string fails string
+    variable string mine = "{trail}/{depth}"
+    if depth == 0
+        fail "bottom of {mine}"
+    mine = try deep(depth - 1, mine)
+    return mine
+
+function signs() returns string fails string
+    variable text = ""
+    for value in range(-1, 2)
+        match try sign(value)
+            case Negative
+                text = "{text}-"
+            case Positive
+                text = "{text}+"
+    return text
+
+function fill(variable array[integer64, 3] slots) fails string
+    for index in range(0, 3)
+        slots[index] = try positive(index * 10)
+
+function greet(string name) returns string fails string
+    if length(name) > 20
+        fail "{name} is too long"
+    return "hi {name}"
+
+function rename(string name) returns string fails string
+    variable text = "{name}"
+    text = try greet(text)
+    text = "{try greet(text)}!"
+    print("{try positive(length(text))} letters")
+    return text
+
+function main()
+    match sum_until(5)
+        case Success(value)
+            print("sum {value}")
+        case Failure(error)
+            print(error)
+    match sum_until(200)
+        case Success(value)
+            print("sum {value}")
+        case Failure(error)
+            print(error)
+    match both_positive(3, 4)
+        case Success(value)
+            print("both {value}")
+        case Failure(error)
+            print(error)
+    match both_positive(3, -4)
+        case Success(value)
+            print("both {value}")
+        case Failure(error)
+            print(error)
+    match both_positive(-3, -4)
+        case Success(value)
+            print("both {value}")
+        case Failure(error)
+            print(error)
+    match collect(2)
+        case Success(value)
+            print("collected {value}")
+        case Failure(error)
+            print(error)
+    match collect(5)
+        case Success(value)
+            print("collected {value}")
+        case Failure(error)
+            print(error)
+    match deep(3, "root")
+        case Success(value)
+            print(value)
+        case Failure(error)
+            print(error)
+    match signs()
+        case Success(value)
+            print(value)
+        case Failure(error)
+            print(error)
+    variable array[integer64, 3] slots = array(0)
+    match fill(variable slots)
+        case Success
+            print("{slots[0]} {slots[1]} {slots[2]}")
+        case Failure(error)
+            print(error)
+    match rename("ana")
+        case Success(value)
+            print(value)
+        case Failure(error)
+            print(error)

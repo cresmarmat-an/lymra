@@ -144,6 +144,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 self.check_field(object, *field, expr.span)
             }
             ast::ExprKind::Index { object, index } => self.check_index(object, index, expr.span),
+            ast::ExprKind::Try { attempt, fallback } => {
+                self.check_try(attempt, fallback.as_deref(), expr.span)
+            }
         }
     }
 
@@ -967,7 +970,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         };
         let declaration = entry.declaration;
         let parameters = entry.parameters.clone();
-        let return_type = entry.return_type.clone();
+        let return_type = entry.call_type();
 
         if call.arguments.len() != parameters.len() {
             self.check_arguments_for_errors(&call.arguments);

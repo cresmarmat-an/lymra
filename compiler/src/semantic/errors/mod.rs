@@ -4,6 +4,7 @@ mod arrays;
 mod choices;
 mod custom_types;
 mod cycles;
+mod failures;
 mod floats;
 mod lists;
 mod pools;
@@ -24,6 +25,10 @@ pub(super) use custom_types::{
     compound_constant, field_given_twice, missing_fields, no_fields, unknown_field, unnamed_field,
 };
 pub(super) use cycles::{Declared, Dependency, cycle};
+pub(super) use failures::{
+    fail_without_fails, failure_type_not_allowed, fallback_inside_expression, main_fails_with,
+    try_needs_failing_call, try_without_fails, try_wrong_failure, unhandled_failure,
+};
 pub(super) use floats::{conversion_never_fits, float_remainder, float_too_large, float_too_small};
 pub(super) use lists::{
     Change, Collection, changed_below_newer, empty_list_arguments, empty_list_into,

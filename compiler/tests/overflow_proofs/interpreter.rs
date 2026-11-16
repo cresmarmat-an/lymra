@@ -6,9 +6,9 @@
 use std::fmt::Write as _;
 
 use lymra::ir::{
-    Argument, ArithmeticOperator, Block, Call, ComparisonOperator, Expr, ExprKind, FieldValue,
-    FunctionId, IntegerType, LocalId, LogicOperator, PlaceStep, PrintPart, Program, Statement,
-    Type, Value,
+    Argument, ArithmeticOperator, Attempt, Block, Call, ComparisonOperator, Expr, ExprKind,
+    FAILURE_VARIANT, FieldValue, FunctionId, IntegerType, LocalId, LogicOperator, PlaceStep,
+    PrintPart, Program, SUCCESS_VARIANT, Statement, Type, Value,
 };
 use lymra::source::Span;
 
@@ -54,6 +54,10 @@ pub fn run(
         Ok(_) => Ending::Finished,
         Err(Stop::Ended(ending)) => ending,
         Err(Stop::Unsound(problem)) => return Err(problem),
+        // A function catches the failures of its own `try`s and returns them.
+        Err(Stop::Failed(result)) => {
+            return Err(format!("a failure {result:?} left a function"));
+        }
     };
     Ok(Outcome {
         ending,
@@ -99,6 +103,8 @@ enum Stop {
     Ended(Ending),
     /// An operation without a check failed.
     Unsound(String),
+    /// A `try` whose call failed ends the function it is in with this result.
+    Failed(Slot),
 }
 
 type Eval<T> = Result<T, Stop>;
@@ -138,9 +144,11 @@ impl Interpreter<'_, '_> {
         for (&parameter, argument) in definition.parameters.iter().zip(arguments) {
             slots[parameter] = argument;
         }
-        let result = match self.block(&definition.body, &mut slots)? {
-            Flow::Return(value) => value,
-            Flow::Next | Flow::Break | Flow::Continue => None,
+        let result = match self.block(&definition.body, &mut slots) {
+            Ok(Flow::Return(value)) => value,
+            Ok(Flow::Next | Flow::Break | Flow::Continue) => None,
+            Err(Stop::Failed(result)) => Some(result),
+            Err(stop) => return Err(stop),
         };
         let parameters = definition
             .parameters
@@ -326,6 +334,9 @@ impl Interpreter<'_, '_> {
                 };
                 return Ok(Flow::Return(value));
             }
+            Statement::Try(attempt) => {
+                self.attempt(attempt, slots)?;
+            }
             Statement::Break => return Ok(Flow::Break),
             Statement::Continue => return Ok(Flow::Continue),
             Statement::Assert { condition } => {
@@ -335,6 +346,33 @@ impl Interpreter<'_, '_> {
             }
         }
         Ok(Flow::Next)
+    }
+
+    /// `try call`: the value of a `Success`, or a stop that fails the function with the error or the fallback.
+    fn attempt(&mut self, attempt: &Attempt, slots: &mut [Slot]) -> Eval<Option<Slot>> {
+        match self.expr(&attempt.result, slots)? {
+            Slot::Variant {
+                variant: SUCCESS_VARIANT,
+                fields,
+            } => Ok(fields.into_iter().next()),
+            Slot::Variant {
+                variant: FAILURE_VARIANT,
+                fields,
+            } => {
+                let error = match &attempt.fallback {
+                    Some(fallback) => self.expr(fallback, slots)?,
+                    None => fields
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| Stop::Unsound("a failure without its error".to_owned()))?,
+                };
+                Err(Stop::Failed(Slot::Variant {
+                    variant: FAILURE_VARIANT,
+                    fields: vec![error],
+                }))
+            }
+            other => Err(Stop::Unsound(format!("a `try` on {other:?}"))),
+        }
     }
 
     /// Computes and checks the steps of an assignment's target, from `local` inward, in order.
@@ -502,6 +540,11 @@ impl Interpreter<'_, '_> {
                 return Ok(Slot::Boolean(self.condition(right, slots)?));
             }
             ExprKind::Call(call) => return Ok(self.call_expr(call, slots)?.unwrap_or(Slot::Unset)),
+            ExprKind::Try(attempt) => {
+                return self
+                    .attempt(attempt, slots)?
+                    .ok_or_else(|| Stop::Unsound("a `try` without a value".to_owned()));
+            }
             ExprKind::Index {
                 array,
                 index,

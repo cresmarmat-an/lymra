@@ -53,7 +53,8 @@ pub fn walk_statement<'src>(visitor: &mut impl Visitor<'src>, statement: &Statem
         }
         StatementKind::Expression(expr)
         | StatementKind::Assert(expr)
-        | StatementKind::Return(Some(expr)) => {
+        | StatementKind::Return(Some(expr))
+        | StatementKind::Fail(expr) => {
             visitor.visit_expr(expr);
         }
         StatementKind::If(statement) => {
@@ -116,6 +117,12 @@ pub fn walk_expr<'src>(visitor: &mut impl Visitor<'src>, expr: &Expr<'src>) {
         ExprKind::Index { object, index } => {
             visitor.visit_expr(object);
             visitor.visit_expr(index);
+        }
+        ExprKind::Try { attempt, fallback } => {
+            visitor.visit_expr(attempt);
+            if let Some(fallback) = fallback {
+                visitor.visit_expr(fallback);
+            }
         }
     }
 }

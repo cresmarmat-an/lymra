@@ -190,7 +190,15 @@ impl<'src> Parser<'src, '_> {
         }
         let (parameters, closing_paren) = self.parse_parameters()?;
         let return_type = self.parse_return_type()?;
-        let header_end = return_type.as_ref().map_or(closing_paren, |ty| ty.span);
+        let fails = if self.eat_keyword(Keyword::Fails) {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+        let header_end = fails
+            .as_ref()
+            .or(return_type.as_ref())
+            .map_or(closing_paren, |ty| ty.span);
         let body = self.parse_block(keyword.span.to(header_end))?;
         let span = keyword.span.to(body.span);
         Ok((
@@ -198,6 +206,7 @@ impl<'src> Parser<'src, '_> {
                 name,
                 parameters,
                 return_type,
+                fails,
                 body,
             }),
             span,

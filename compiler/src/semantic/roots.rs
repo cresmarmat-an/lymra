@@ -607,8 +607,10 @@ impl Checks<'_, '_, '_> {
                 live.extend(read);
                 live
             }
+            // A `try` that fails leaves the function, where nothing is read any more.
             Statement::Discard(_)
             | Statement::Call(_)
+            | Statement::Try(_)
             | Statement::Push { .. }
             | Statement::Remove { .. }
             | Statement::Print(_)
@@ -767,6 +769,7 @@ fn statement_reads(function: &Function<'_>, statement: &Statement, read: &mut Li
             values.push(start);
             values.push(end);
         }
+        Statement::Try(attempt) => values.extend(attempt.parts()),
         Statement::Return(None) | Statement::Break | Statement::Continue => {}
     }
     for value in values {
@@ -843,6 +846,11 @@ fn expr_reads(function: &Function<'_>, expr: &Expr, read: &mut Live) {
         ExprKind::Text(parts) => {
             for value in text_values(parts) {
                 expr_reads(function, value, read);
+            }
+        }
+        ExprKind::Try(attempt) => {
+            for part in attempt.parts() {
+                expr_reads(function, part, read);
             }
         }
     }

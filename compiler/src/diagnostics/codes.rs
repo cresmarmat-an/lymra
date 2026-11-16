@@ -113,6 +113,11 @@ error_codes! {
     L0704 => "value changed while a newer value sits above it",
     L0705 => "handle used with another pool",
     L0706 => "pool of values without one fixed size",
+    L0801 => "failure the function cannot fail with",
+    L0802 => "type a function cannot fail with",
+    L0803 => "`try` without a call that can fail",
+    L0804 => "`main` failing with something other than text",
+    L0805 => "`try` with `else fail` inside an expression",
 }
 
 impl ErrorCode {

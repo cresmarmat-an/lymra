@@ -39,6 +39,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         Ok(Type::Choice(Arc::new(ChoiceType {
             name: declaration.name.text.to_owned(),
             variants,
+            result: false,
         })))
     }
 

@@ -122,6 +122,11 @@ impl CheckCount {
                     self.block(&case.body);
                 }
             }
+            Statement::Try(attempt) => {
+                for part in attempt.parts() {
+                    self.expr(part);
+                }
+            }
             Statement::Return(None) | Statement::Break | Statement::Continue => {}
         }
     }
@@ -185,6 +190,11 @@ impl CheckCount {
                 self.expr(right);
             }
             ExprKind::Call(call) => self.arguments(call),
+            ExprKind::Try(attempt) => {
+                for part in attempt.parts() {
+                    self.expr(part);
+                }
+            }
             ExprKind::Text(parts) => {
                 for part in parts {
                     if let PrintPart::Value { value, .. } = part {

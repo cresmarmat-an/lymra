@@ -88,6 +88,8 @@ pub struct Function<'src> {
     pub name: Name<'src>,
     pub parameters: Vec<Parameter<'src>>,
     pub return_type: Option<TypeExpr<'src>>,
+    /// The type after `fails`: what the function can fail with (spec 8).
+    pub fails: Option<TypeExpr<'src>>,
     pub body: Block<'src>,
 }
 
@@ -194,6 +196,8 @@ pub enum StatementKind<'src> {
         arms: Vec<MatchArm<'src>>,
     },
     Return(Option<Expr<'src>>),
+    /// `fail value`: ends the function with a failure (spec 8).
+    Fail(Expr<'src>),
     Break,
     Continue,
     Assert(Expr<'src>),
@@ -273,6 +277,11 @@ pub enum ExprKind<'src> {
     Index {
         object: Box<Expr<'src>>,
         index: Box<Expr<'src>>,
+    },
+    /// `try call`, or `try call else fail value` with the value to fail with instead (spec 8).
+    Try {
+        attempt: Box<Expr<'src>>,
+        fallback: Option<Box<Expr<'src>>>,
     },
 }
 

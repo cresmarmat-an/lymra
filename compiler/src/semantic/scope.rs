@@ -63,6 +63,10 @@ pub(super) struct FunctionScope<'src> {
     pub function_name: Name<'src>,
     /// The declared return type, `Ok(None)` for none, or `Err` when it could not be resolved.
     pub return_type: Result<Option<Type>, ErrorReported>,
+    /// What the function can fail with, `Ok(None)` when it cannot fail (spec 8).
+    pub fails: Result<Option<Type>, ErrorReported>,
+    /// What its calls give when it can fail: a `Success` or a `Failure`.
+    pub result: Option<Type>,
     locals: Vec<Local<'src>>,
     /// Names visible at the current point. A name is never declared twice, so nothing is hidden.
     visible: HashMap<&'src str, LocalId>,
@@ -75,10 +79,14 @@ impl<'src> FunctionScope<'src> {
     pub fn new(
         function_name: Name<'src>,
         return_type: Result<Option<Type>, ErrorReported>,
+        fails: Result<Option<Type>, ErrorReported>,
+        result: Option<Type>,
     ) -> Self {
         Self {
             function_name,
             return_type,
+            fails,
+            result,
             locals: Vec::new(),
             visible: HashMap::new(),
             blocks: vec![Vec::new()],

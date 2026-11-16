@@ -1,0 +1,67 @@
+#[
+    Errors about functions that fail: `fail` or `try` in a function that
+    cannot fail with that error (L0801), a type a function cannot fail
+    with (L0802), `try` before something that cannot fail (L0803), `main`
+    failing with something other than text (L0804), `else fail` inside an
+    expression (L0805), a result nothing handles (L0505), a failure of
+    the wrong type (L0402), a match that misses a case of a result (L0401),
+    and a function that can fail returning a list, which comes later
+    (L0309).
+]#
+
+choice ParseError
+    Empty
+
+function parse(string text) returns integer64 fails ParseError
+    if length(text) == 0
+        fail Empty
+    return length(text)
+
+function save(string text) fails ParseError
+    if length(text) == 0
+        fail Empty
+
+function no_fails(string text) returns integer64
+    if length(text) == 0
+        fail Empty
+    return 1
+
+function passes_without_fails(string text) returns integer64
+    return try parse(text)
+
+function passes_other_failure(string text) returns integer64 fails string
+    return try parse(text)
+
+function grows(integer64 count) returns integer64 fails list[integer64]
+    return count
+
+function returns_list(integer64 _) returns list[integer64] fails string
+    return list()
+
+function needs_call(integer64 count) returns integer64 fails ParseError
+    return try count
+
+function cannot_fail(integer64 count) returns integer64 fails ParseError
+    return try length("{count}")
+
+function nested_fallback(string text) returns integer64 fails string
+    return 1 + try parse(text) else fail "bad"
+
+function forgets(string text) fails ParseError
+    parse(text)
+    save(text)
+    constant length_of = try save(text)
+    print("{length_of}")
+
+function wrong_error(string text) returns integer64 fails ParseError
+    if length(text) == 0
+        fail "empty"
+    return 1
+
+function half_handled(string text)
+    match parse(text)
+        case Success(value)
+            print("{value}")
+
+function main() fails ParseError
+    print("{try parse("12")}")

@@ -14,6 +14,8 @@ pub(super) enum Feature {
     NestedGrowable,
     /// A view inside another value, or a view of views.
     NestedView,
+    /// A function that can fail and returns a list or a view, which its result would hold.
+    FailingGrowableOrView,
     ForEach,
     RangeValues,
     CodeArguments,
@@ -40,6 +42,9 @@ impl Feature {
             Self::NamedArguments => "named arguments are",
             Self::NestedGrowable => "lists inside other values are",
             Self::NestedView => "views inside other values are",
+            Self::FailingGrowableOrView => {
+                return "a function that can fail cannot return a list or a view yet".to_owned();
+            }
             Self::ForEach => {
                 return "`for` cannot loop over the characters of a text yet".to_owned();
             }
@@ -59,6 +64,7 @@ impl Feature {
             Self::Packed
             | Self::NestedGrowable
             | Self::NestedView
+            | Self::FailingGrowableOrView
             | Self::ForEach
             | Self::RangeValues
             | Self::CodeArguments => 3,
@@ -72,6 +78,9 @@ impl Feature {
         match self {
             Self::ForEach => {
                 "loop over `bytes(text)` to go over its bytes, or write this part another way for now"
+            }
+            Self::FailingGrowableOrView => {
+                "let the caller pass the list with `variable` for the function to fill, and return nothing"
             }
             Self::Packed
             | Self::NamedArguments

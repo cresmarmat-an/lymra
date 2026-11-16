@@ -10,14 +10,16 @@
  * of the others never shows.
  */
 
+use super::statements::is_static_text;
 use super::text_types::{TextWalk, text_function};
 use super::types::{fill_function, list_function};
 use super::{
     Generator, INDENT, Release, Storage, Writer, c_syntax, data_stack, local_access, releases_of,
 };
 use crate::ir::{
-    Argument, ArithmeticOperator, Call, ComparisonOperator, Expr, ExprKind, Extent, FieldValue,
-    FloatType, Function, IntegerType, LogicOperator, PrintPart, Sequence, TextForm, Type, Value,
+    Argument, ArithmeticOperator, Attempt, Call, ComparisonOperator, Expr, ExprKind, Extent,
+    FAILURE_VARIANT, FieldValue, FloatType, Function, IntegerType, LogicOperator, PrintPart,
+    SUCCESS_VARIANT, Sequence, TextForm, Type, Value,
 };
 use crate::source::Span;
 
@@ -56,6 +58,16 @@ pub(super) fn indexed_noun(ty: &Type) -> &'static str {
 }
 
 /// Whether `expr` stands for storage C can take the address of: a local, or an element or a field inside one.
+/// The C for the one field of the variant at `variant` of the result named `result`: a `Success`'s value or a `Failure`'s error.
+fn result_payload(result: &str, variant: usize) -> String {
+    format!(
+        "{result}.{}.{}.{}",
+        c_syntax::VARIANTS,
+        c_syntax::variant_name(variant),
+        c_syntax::field_name(0)
+    )
+}
+
 pub(super) fn is_addressable(expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::Local(_) => true,
@@ -160,6 +172,10 @@ impl Generator<'_, '_> {
                 self.stored_temporary(function, expr, writer)
             }
             ExprKind::Call(call) => self.call(function, call, &[], writer),
+            ExprKind::Try(attempt) => {
+                let result = self.attempt(function, attempt, writer);
+                result_payload(&result, SUCCESS_VARIANT)
+            }
             ExprKind::Convert { operand, checked } => {
                 self.convert(function, operand, expr, *checked, writer)
             }
@@ -787,6 +803,60 @@ impl Generator<'_, '_> {
         writer.line(&format!("{INDENT}{result} = {right};"));
         writer.depth += 1;
         Self::release(writer, &built);
+        writer.depth -= 1;
+        writer.line("}");
+        result
+    }
+
+    /**
+     * `try call`. The call's result is kept, and on a `Failure` the function
+     * fails at once, freeing what it built as a `return` does, with the
+     * call's error or with the fallback, which is computed only then.
+     * Returns the C name of the result, whose `Success` goes on.
+     */
+    pub(super) fn attempt(
+        &mut self,
+        function: &Function<'_>,
+        attempt: &Attempt,
+        writer: &mut Writer,
+    ) -> String {
+        let code = self.expr(function, &attempt.result, writer);
+        // A result kept on data stacks was given a name where it was built.
+        let result = if Storage::of(&attempt.result.ty) == Storage::None {
+            self.temporary(&attempt.result.ty, &code, writer)
+        } else {
+            code
+        };
+        writer.line(&format!(
+            "if ({result}.{} == {FAILURE_VARIANT}) {{",
+            c_syntax::TAG
+        ));
+        writer.depth += 1;
+        // What the fallback builds exists only on this way out, which frees it.
+        let earlier = self.pending.len();
+        let (error, stays) = match &attempt.fallback {
+            Some(fallback) => (
+                self.expr(function, fallback, writer),
+                is_static_text(fallback),
+            ),
+            None => (result_payload(&result, FAILURE_VARIANT), false),
+        };
+        let returns = self.types.name(&attempt.returns);
+        let failure = format!(
+            "(({returns}){{ .{} = {FAILURE_VARIANT}, .{} = {{ .{} = {{ .{} = {error} }} }} }})",
+            c_syntax::TAG,
+            c_syntax::VARIANTS,
+            c_syntax::variant_name(FAILURE_VARIANT),
+            c_syntax::field_name(0)
+        );
+        self.return_value(
+            &attempt.returns,
+            &failure,
+            stays,
+            attempt.result.span,
+            writer,
+        );
+        self.pending.truncate(earlier);
         writer.depth -= 1;
         writer.line("}");
         result

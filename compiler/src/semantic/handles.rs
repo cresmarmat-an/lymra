@@ -221,6 +221,8 @@ impl<'a, 'src> Analysis<'a, 'src> {
                 .iter()
                 .flat_map(|&passed| self.mapped(call, passed))
                 .collect(),
+            // Only a `Success` goes on, and an error holds no handles.
+            ExprKind::Try(attempt) => self.sources_of(&attempt.result),
             ExprKind::Literal(_)
             | ExprKind::Constant(_)
             | ExprKind::Negate { .. }

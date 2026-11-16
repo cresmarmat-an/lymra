@@ -1,0 +1,120 @@
+error[L0801]: `fail` ends a function that can fail, but `no_fails` cannot fail
+  --> tests/check/failures.lym:26:9
+   |
+26 |         fail Empty
+   |         ^^^^ this would end `no_fails` with a `ParseError`
+   |
+help: add `fails ParseError` to the declaration of `no_fails`, after its parameters and its return type
+
+error[L0801]: `try` passes a failure on, but `passes_without_fails` cannot fail
+  --> tests/check/failures.lym:30:12
+   |
+30 |     return try parse(text)
+   |            ^^^ on a failure this would end `passes_without_fails` with a `ParseError`
+   |
+help: add `fails ParseError` to the declaration of `passes_without_fails`, or handle both cases here with `match`
+
+error[L0801]: `try` would pass on a `ParseError`, but `passes_other_failure` fails with a `string`
+  --> tests/check/failures.lym:33:12
+   |
+33 |     return try parse(text)
+   |            ^^^ a failure never changes type by itself
+   |
+help: fail with a `string` of your own: `try call else fail value`, or handle both cases with `match`
+
+error[L0802]: a function cannot fail with a `list[integer64]`
+  --> tests/check/failures.lym:35:57
+   |
+35 | function grows(integer64 count) returns integer64 fails list[integer64]
+   |                                                         ^^^^^^^^^^^^^^^ a failure is a value that does not grow and holds no view or handle
+   |
+help: fail with a choice or a declared type made of numbers, booleans and text, as in `fails ParseError`
+
+error[L0309]: a function that can fail cannot return a list or a view yet
+  --> tests/check/failures.lym:38:44
+   |
+38 | function returns_list(integer64 _) returns list[integer64] fails string
+   |                                            ^^^^^^^^^^^^^^^ the compiler adds this in roadmap phase 3
+   |
+help: let the caller pass the list with `variable` for the function to fill, and return nothing
+
+error[L0803]: `try` needs a call to a function that can fail
+  --> tests/check/failures.lym:42:16
+   |
+42 |     return try count
+   |                ^^^^^ this is not a call
+   |
+help: remove `try`, or put it right before a call to a function declared with `fails`
+
+error[L0803]: `try` needs a call to a function that can fail
+  --> tests/check/failures.lym:45:16
+   |
+45 |     return try length("{count}")
+   |                ^^^^^^^^^^^^^^^^^ `length` cannot fail
+   |
+help: remove `try`, or put it right before a call to a function declared with `fails`
+
+error[L0805]: `try` with `else fail` has to be the whole value of its statement
+  --> tests/check/failures.lym:48:16
+   |
+48 |     return 1 + try parse(text) else fail "bad"
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is part of a larger expression
+   |
+help: give it a statement of its own, as in `constant value = try read(path) else fail "cannot read"`, and use `value` here
+
+error[L0505]: `parse` can fail, and nothing handles its result
+  --> tests/check/failures.lym:51:5
+   |
+51 |     parse(text)
+   |     ^^^^^^^^^^^ a failure here would go unnoticed
+   |
+help: pass the failure on with `try` and discard the value on purpose, or handle both cases with `match`
+   |
+51 |     constant _ = try parse(text)
+
+error[L0505]: `save` can fail, and nothing handles its result
+  --> tests/check/failures.lym:52:5
+   |
+52 |     save(text)
+   |     ^^^^^^^^^^ a failure here would go unnoticed
+   |
+help: pass the failure on with `try`, or handle both cases with `match`
+   |
+52 |     try save(text)
+
+error[L0402]: `save` returns nothing, so this call has no value
+  --> tests/check/failures.lym:53:26
+   |
+53 |     constant length_of = try save(text)
+   |                          ^^^^^^^^^^^^^^ used as a value here
+   |
+help: call `save` on a line of its own, or give it a return type with `returns`
+
+error[L0402]: expected a `ParseError`, found a `string`
+  --> tests/check/failures.lym:58:14
+   |
+58 |         fail "empty"
+   |              ^^^^^^^ this is a `string`
+   |
+help: Lymra never converts a value to another type by itself; use a value of the expected type
+
+error[L0401]: a `match` handles every variant of `integer64 fails ParseError`; `Failure` is not handled
+  --> tests/check/failures.lym:62:5
+   |
+62 |     match parse(text)
+   |     ^^^^^^^^^^^^^^^^^ this leaves out a variant
+   |
+help: add `case Failure(error)`
+
+error[L0804]: `main` can only fail with text
+  --> tests/check/failures.lym:66:23
+   |
+66 | function main() fails ParseError
+   |                       ^^^^^^^^^^ a `ParseError` can't be written after `error: `
+   |
+help: declare `main` with `fails string`, and turn other failures into text with `try call else fail "what went wrong"`
+   |
+66 | function main() fails string
+
+found 14 errors in tests/check/failures.lym
+run `lymra explain L0801` to read why a rule exists and how to fix it

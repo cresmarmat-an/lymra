@@ -28,6 +28,8 @@ pub(super) struct CTypes {
     views: HashMap<Arc<ViewType>, String>,
     /// The declared types and choices defined so far, by name, which is unique in a program.
     customs: HashMap<String, String>,
+    /// How many result types are defined so far, which numbers their C names.
+    results: usize,
     /// The structs, and the fill functions of arrays, in the order C needs them.
     definitions: Vec<String>,
     /// Whether a float type has been named, so the program uses floats.
@@ -118,7 +120,13 @@ impl CTypes {
                 c_syntax::VARIANTS
             )
         };
-        let name = c_syntax::choice_name(&choice.name);
+        // A result is named for its types, as in `integer64 fails ParseError`, which is no C name.
+        let name = if choice.result {
+            self.results += 1;
+            c_syntax::result_name(self.results)
+        } else {
+            c_syntax::choice_name(&choice.name)
+        };
         self.definitions.push(format!(
             "/* {} */\ntypedef struct {{\n{INDENT}{tag} {};{payload}\n}} {name};",
             choice.name,

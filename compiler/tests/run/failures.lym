@@ -1,0 +1,106 @@
+#[
+    Functions that fail: `fail` ends one with an error, `try` passes the
+    error of a call on, `try call else fail value` fails with another
+    error instead, and `match` takes a result apart. Errors can hold text,
+    a failure can leave from inside loops and conditions, and the text a
+    function built before it failed is freed on the way out.
+]#
+
+choice ReadError
+    Missing(string name)
+    Empty
+
+type Creature
+    integer64 health
+
+function lookup(string name) returns string fails ReadError
+    if name == "ana"
+        return "Ana Lima"
+    if length(name) == 0
+        fail Empty
+    fail Missing(name = "{name}?")
+
+function shout(string name) returns string fails ReadError
+    constant full = try lookup(name)
+    variable loud = "{full}"
+    loud = "{loud}!"
+    return loud
+
+function first_found(list[string] names) returns string fails ReadError
+    for name in names
+        constant built = "seen {name}"
+        if name == "ana" and length(try lookup(name)) > 3
+            return "{built}: {try shout(name)}"
+    fail Empty
+
+function count_down(integer64 from) returns integer64 fails string
+    if from < 0
+        fail "below zero at {from}"
+    if from == 0
+        return 0
+    return 1 + try count_down(from - 1)
+
+function check(integer64 value) fails string
+    if value % 2 == 1
+        fail "{value} is odd"
+
+function check_all(integer64 count) fails string
+    variable integer64 index = 0
+    while index < count
+        try check(index * 2)
+        index = index + 1
+    try check(count) else fail "the count {count} is odd"
+
+function strongest(pool[Creature] creatures, list[handle[Creature]] handles) returns handle[Creature] fails string
+    if length(handles) == 0
+        fail "no creatures"
+    variable best = handles[0]
+    for each in handles
+        if creatures[each].health > creatures[best].health
+            best = each
+    return best
+
+function describe(string name)
+    match shout(name)
+        case Success(value)
+            print("found {value}")
+        case Failure(error)
+            match error
+                case Missing(name = wanted)
+                    print("missing {wanted}")
+                case Empty
+                    print("no name")
+
+function main() fails string
+    describe("ana")
+    describe("bo")
+    describe("")
+    variable list[string] names = list()
+    push(variable names, "cy")
+    push(variable names, "ana")
+    match first_found(names)
+        case Success(value)
+            print(value)
+        case Failure
+            print("none found")
+    print("{try count_down(5)}")
+    constant below = count_down(-2)
+    match below
+        case Success(value)
+            print("{value}")
+        case Failure(error)
+            print(error)
+    try check_all(4)
+    match check_all(3)
+        case Success
+            print("all even")
+        case Failure(error)
+            print(error)
+    variable pool[Creature] creatures = pool()
+    variable list[handle[Creature]] handles = list()
+    push(variable handles, insert(variable creatures, Creature(health = 3)))
+    push(variable handles, insert(variable creatures, Creature(health = 9)))
+    constant best = try strongest(creatures, handles)
+    print("strongest has {creatures[best].health}")
+    constant name = try lookup("ana") else fail "no ana"
+    print(name)

@@ -46,6 +46,7 @@ pub(super) fn statement_exprs(statement: &Statement) -> Vec<&Expr> {
             .collect(),
         Statement::If { branches, .. } => branches.iter().map(|branch| &branch.condition).collect(),
         Statement::ForRange { start, end, .. } => vec![start, end],
+        Statement::Try(attempt) => attempt.parts().collect(),
         Statement::Return(None) | Statement::Break | Statement::Continue => Vec::new(),
     }
 }
@@ -75,6 +76,11 @@ pub(super) fn each_expr<'a>(expr: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
         ExprKind::Text(parts) => {
             for value in text_values(parts) {
                 each_expr(value, visit);
+            }
+        }
+        ExprKind::Try(attempt) => {
+            for part in attempt.parts() {
+                each_expr(part, visit);
             }
         }
         ExprKind::Negate { operand, .. }

@@ -10,8 +10,9 @@
 mod types;
 
 pub use types::{
-    ArrayType, ChoiceType, CustomType, FieldType, FloatType, HandleTarget, HandleType, IntegerType,
-    Layout, ListType, PoolType, Sequence, Type, Value, ViewType,
+    ArrayType, ChoiceType, CustomType, FAILURE_VARIANT, FieldType, FloatType, HandleTarget,
+    HandleType, IntegerType, Layout, ListType, PoolType, SUCCESS_VARIANT, Sequence, Type, Value,
+    ViewType,
 };
 
 use crate::ast::OptimizeMode;
@@ -139,6 +140,8 @@ pub enum Statement {
         cases: Vec<Case>,
     },
     Return(Option<Expr>),
+    /// `try call` on its own, for a function that returns nothing: on a `Failure`, the function fails at once.
+    Try(Attempt),
     Break,
     Continue,
     Assert {
@@ -385,6 +388,31 @@ pub enum ExprKind {
         variant: usize,
         fields: Vec<FieldValue>,
     },
+    /// `try call`: the value of a `Success`; on a `Failure`, the function fails at once (spec 8).
+    Try(Box<Attempt>),
+}
+
+/**
+ * `try call` or `try call else fail value`. The call is computed first. On
+ * a `Success` its value goes on; on a `Failure` the function that holds the
+ * `try` fails with the call's error, or with the fallback, which is computed
+ * only then, and frees what it built, as a `return` does.
+ */
+#[derive(Clone, Debug)]
+pub struct Attempt {
+    /// A call to a function that can fail, of a result type.
+    pub result: Expr,
+    /// The value to fail with in place of the call's error, given with `else fail`.
+    pub fallback: Option<Expr>,
+    /// What the function that holds the `try` returns: a result, whose `Failure` ends it when the call fails.
+    pub returns: Type,
+}
+
+impl Attempt {
+    /// The expressions the attempt computes: the call, then the fallback, if any.
+    pub fn parts(&self) -> impl Iterator<Item = &Expr> {
+        std::iter::once(&self.result).chain(&self.fallback)
+    }
 }
 
 /// The value given for one field in a construction.
@@ -446,6 +474,7 @@ impl Expr {
                 Argument::Reference { local: id, .. } => *id == local,
                 Argument::Value(value) => value.mentions(local),
             }),
+            ExprKind::Try(attempt) => attempt.parts().any(|part| part.mentions(local)),
         }
     }
 
@@ -460,7 +489,7 @@ impl Expr {
             | ExprKind::Local(_)
             | ExprKind::Constant(_)
             | ExprKind::EmptyList => false,
-            ExprKind::Call(_) => true,
+            ExprKind::Call(_) | ExprKind::Try(_) => true,
             ExprKind::Not(operand)
             | ExprKind::Fill(operand)
             | ExprKind::Length(operand)

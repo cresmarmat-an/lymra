@@ -73,3 +73,8 @@ From 04 on, they are the chapter of the [specification](../spec.md) the rule com
 | [L0704](L0704.md) | value changed while a newer value sits above it |
 | [L0705](L0705.md) | handle used with another pool |
 | [L0706](L0706.md) | pool of values without one fixed size |
+| [L0801](L0801.md) | failure the function cannot fail with |
+| [L0802](L0802.md) | type a function cannot fail with |
+| [L0803](L0803.md) | `try` without a call that can fail |
+| [L0804](L0804.md) | `main` failing with something other than text |
+| [L0805](L0805.md) | `try` with `else fail` inside an expression |

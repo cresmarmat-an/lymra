@@ -105,6 +105,9 @@
 /* The exit status of a program whose output could not be written. 74 is EX_IOERR in sysexits.h. */
 #define LYMRA_OUTPUT_ERROR_STATUS 74
 
+/* The exit status of a program whose `main` failed (spec 8). */
+#define LYMRA_FAILURE_STATUS 1
+
 /* Immutable text: a pointer into static data and a length in bytes. */
 typedef struct {
     const char *data;
@@ -221,9 +224,8 @@ LYMRA_UNUSED static size_t lymra_write_some(lymra_stream stream, const char *dat
 #endif
 }
 
-/* Writes an error message to standard error, as much of it as the system takes. */
-LYMRA_UNUSED static void lymra_write_error(const char *text) {
-    size_t length = strlen(text);
+/* Writes `length` bytes of an error message to standard error, as much of it as the system takes. */
+LYMRA_UNUSED static void lymra_write_error_bytes(const char *text, size_t length) {
     while (length > 0) {
         size_t taken = lymra_write_some(LYMRA_STANDARD_ERROR, text, length);
         if (taken == 0) {
@@ -232,6 +234,11 @@ LYMRA_UNUSED static void lymra_write_error(const char *text) {
         text += taken;
         length -= taken;
     }
+}
+
+/* Writes an error message to standard error, as much of it as the system takes. */
+LYMRA_UNUSED static void lymra_write_error(const char *text) {
+    lymra_write_error_bytes(text, strlen(text));
 }
 
 /*
@@ -1440,6 +1447,23 @@ LYMRA_UNUSED LYMRA_NO_INLINE static void lymra_start(void) {
 }
 
 /* Writes the waiting output when `main` returns, and reports if any of it could not be written. */
+/*
+ * Ends the program after its `main` failed with `message`: every line it
+ * printed goes out first, then the message after `error: `, with exit status
+ * 1. Output that could not be written ends it as `lymra_finish` does.
+ */
+LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_main_failed(lymra_string message) {
+    lymra_flush();
+    if (lymra_output_failed) {
+        lymra_write_error("error: the output could not be written\n");
+        exit(LYMRA_OUTPUT_ERROR_STATUS);
+    }
+    lymra_write_error("error: ");
+    lymra_write_error_bytes(message.data, message.length);
+    lymra_write_error("\n");
+    exit(LYMRA_FAILURE_STATUS);
+}
+
 LYMRA_UNUSED static inline int lymra_finish(void) {
     lymra_flush();
     if (lymra_output_failed) {

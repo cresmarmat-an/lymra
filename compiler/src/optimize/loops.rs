@@ -253,6 +253,11 @@ fn collect_statement(
                 collect_block(&case.body, assigned, changed, declared);
             }
         }
+        Statement::Try(attempt) => {
+            for part in attempt.parts() {
+                collect_references(part, changed);
+            }
+        }
         Statement::Return(None) | Statement::Break | Statement::Continue => {}
     }
 }
@@ -320,6 +325,11 @@ pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
             collect_references(right, changed);
         }
         ExprKind::Call(call) => collect_call_references(&call.arguments, changed),
+        ExprKind::Try(attempt) => {
+            for part in attempt.parts() {
+                collect_references(part, changed);
+            }
+        }
         ExprKind::Text(parts) => {
             for value in text_values(parts) {
                 collect_references(value, changed);
@@ -377,6 +387,11 @@ pub(super) fn collect_calls<'expr>(expr: &'expr Expr, calls: &mut Vec<&'expr Cal
         ExprKind::Text(parts) => {
             for value in text_values(parts) {
                 collect_calls(value, calls);
+            }
+        }
+        ExprKind::Try(attempt) => {
+            for part in attempt.parts() {
+                collect_calls(part, calls);
             }
         }
         ExprKind::Call(call) => {

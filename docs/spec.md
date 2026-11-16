@@ -90,7 +90,7 @@ All keywords are whole English words: `variable`, not `var`; `function`, not `fn
 ```
 variable constant function returns return type choice packed use public
 if else while for in break continue match case and or not
-true false external assert with
+true false external assert with fails fail try
 ```
 
 The same rule holds for every name the language defines. The built-in types are `integer64` and `boolean`, not `i64` and `bool`, and the built-in functions are `length` and `print`, not `len`. A name that needs two words joins them with `_`, as in `wrapping_add`.
@@ -602,14 +602,61 @@ A normal reference is a full 8-byte address. A `link[T, unsigned32]` stores the 
 - When it isn't, as in `pending = list()`, the old value is freed first and the new one is built where it was, with no copy.
 - No reference into the old value can still be used at that point (`L0703`).
 
-## 8. Errors (open)
+## 8. Errors
 
-Lymra has no exceptions and no stack unwinding. 0.1 hasn't settled the design for recoverable errors. The candidates:
+Lymra has no exceptions and no stack unwinding. A function that can fail says so in its declaration, a failure is a value, and every call to such a function handles the failure or passes it on where the reader can see it.
 
-1. **`result[T, E]` plus a `try` operator.** Familiar from Rust. Every function in the call chain changes its return type and every call needs `try`.
-2. **Return from an outer call.** `return error from load` ends the innermost active call of `load` with `error`, however many calls deep the current function is. The functions in between keep their plain signatures. The compiler checks that every call to the failing function happens inside a call to `load`, so nothing goes uncaught. It's implemented as a hidden flag each frame checks on return, not as an unwinder.
+```lymra
+choice ParseError
+    Empty
+    TooLong
+    NotADigit(integer64 position)
 
-Option 2 removes the boilerplate that makes people skip error handling. It is also new, so it needs real programs written in it before it gets locked in. Section 12 tracks this.
+function digits(string text) returns integer64 fails ParseError
+    if length(text) == 0
+        fail Empty
+    variable integer64 value = 0
+    variable integer64 position = 0
+    for byte in bytes(text)
+        if byte < 48 or byte > 57
+            fail NotADigit(position = position)
+        if position == 18
+            fail TooLong
+        value = value * 10 + integer64(byte - 48)
+        position = position + 1
+    return value
+
+function sum(string left, string right) returns integer64 fails ParseError
+    return try digits(left) + try digits(right)
+
+function main() fails string
+    match sum("12", "3x")
+        case Success(value)
+            print("{value}")
+        case Failure(error)
+            match error
+                case NotADigit(position)
+                    print("not a digit at {position}")
+                case Empty
+                    print("nothing to add")
+                case TooLong
+                    print("too many digits")
+    constant total = try sum("4", "5") else fail "could not add 4 and 5"
+    print("{total}")
+```
+
+- **`fails` names what can go wrong.** `fails ParseError` after the parameters and the `returns` type says the function can fail with a value of that type. The value is anything that does not grow and holds no view or handle: a number, a `boolean`, text, or an array, a declared type or a choice made of them (`L0802`). In 0.1 a function that can fail returns a value of that kind too; one that returns a list comes with lists inside other values.
+- **`fail value` ends the function with a failure,** as `return` ends it with a value, and frees what the function built. The value has the type after `fails` (`L0402`), and `fail` in a function that cannot fail is error `L0801`.
+- **A call gives a result.** A call to a function that can fail gives `Success`, with the field `value` that the function returned, or `Failure`, with the field `error` that it failed with. A function that returns nothing gives `Success` with no field. A result is used in one of three ways:
+  - `match` handles both cases. `case Success(value)` and `case Failure(error)` bind the fields as for any choice (Section 4.7), and a match covers both (`L0401`).
+  - `try call` gives the value of a `Success`. On a `Failure` the function the `try` is in fails at once with the same error, freeing what it built, and nothing after the `try` runs. That function has to fail with the same type, since a value never changes type by itself (`L0801`). `try` applies to the call right after it, which has to be a call to a function that can fail (`L0803`), and can stand wherever a value can. The parts of an expression run from left to right (Section 4.1), so in `try digits(left) + try digits(right)`, `right` is never read when `left` fails.
+  - `try call else fail value` gives the value of a `Success` and fails with `value` on a `Failure`, which turns another function's error into this function's. It is the whole value of its statement: a declaration, an assignment, a `return` or a statement of its own (`L0805`).
+- **No failure goes unnoticed.** A result can be kept in a binding and matched later, but a result that is never used is error `L0505`, as for any value.
+- **`main` can fail with text.** `function main() fails string` ends the program by writing `error: ` and the text to standard error, after every line it printed, with exit status 1 (`L0804` for any other type).
+
+A result is a choice: a tag beside the value or the error, returned like any other value. Checking it after a call is one comparison and a branch the processor predicts, and there are no unwinding tables, no hidden flags and no allocation.
+
+**Why not exceptions:** an exception can leave any call, so a reader cannot tell which lines a function can stop at, and every language with exceptions has had to add `finally`, destructors or `using` to free what was built on the way. Lymra frees on every exit already, and a `try` marks each place a function can end early. **Why not a return from an outer call**, which would let the functions in between keep plain signatures: a reader of one of them could not see that a call ends it, which is the hidden control flow `L0508` exists to rule out.
 
 ## 9. Concurrency (planned, not in 0.1)
 
@@ -672,14 +719,13 @@ The checks are integer overflow, division by zero, a conversion whose value does
 
 | ID | Question | Current lean |
 |---|---|---|
-| O1 | Recoverable error handling | Prototype both options in Section 8, then pick using real programs |
 | O2 | Generics syntax for user functions | `function first[Item](view[Item] items) returns Item` |
 | O3 | `match` on `packed` values: can a case bind a reference into the payload? | Yes, read-only |
 | O6 | Literal syntax for `array` and `list` values | `[1, 2, 3]` |
 | O7 | Bitwise operations | Functions with whole-word names such as `bit_and` and `shift_left`, not symbols |
 | O8 | Calling C: the syntax and rules of `external` declarations | `external function hypot(float64 x, float64 y) returns float64` |
 | O10 | Reading the command line and choosing an exit status | Parameters of `main` and a `returns` type, once the needed types exist |
-| O12 | Reading files and standard input. Every program in the memory model study had to take its input from constants. | Functions in a standard module, settled together with O1, since reading can fail |
+| O12 | Reading files and standard input. Every program in the memory model study had to take its input from constants. | Built-in functions that fail with a built-in choice (Section 8) |
 | O11 | Removing the overflow checks that stay. The compiler removes every check its interval analysis proves can never fail, with `while` loops worked out to a fixed point and what parameters receive and calls return carried across the program. Measured in `bench/results.md`: four of the six benchmarks keep no check and, built with GCC, run within 1% of C's time. The checks that stay guard values no interval bounds, such as a Collatz chain or a sum of recursive results; a check against a constant compares the other operand with a limit, so the C compiler keeps the arithmetic plain, and `collatz` built with GCC takes 1.12 times C's time. | Relations between variables, such as a result that grows with an argument, would bound some of the rest. Worth it once a real program needs one |
 
 ## 13. Where speed comes from

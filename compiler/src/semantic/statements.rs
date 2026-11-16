@@ -49,7 +49,8 @@ impl Checked {
     }
 }
 
-fn keyword_span(start: u32, keyword: Keyword) -> Span {
+/// The span of `keyword`, written starting at `start`.
+pub(super) fn keyword_span(start: u32, keyword: Keyword) -> Span {
     Span::new(start, start + keyword.as_str().len() as u32)
 }
 
@@ -86,6 +87,13 @@ impl<'src, 'ast> Checker<'src, 'ast> {
 
     fn check_statement(&mut self, statement: &ast::Statement<'src>) -> Checked {
         self.check_evaluation_order(statement);
+        self.whole_value = match &statement.kind {
+            ast::StatementKind::Binding(binding) => Some(binding.value.span),
+            ast::StatementKind::Assignment { value, .. }
+            | ast::StatementKind::Expression(value)
+            | ast::StatementKind::Return(Some(value)) => Some(value.span),
+            _ => None,
+        };
         let span = statement.span;
         match &statement.kind {
             ast::StatementKind::Binding(binding) => {
@@ -114,6 +122,10 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             }
             ast::StatementKind::Return(value) => Checked {
                 statement: self.check_return(value.as_ref(), span).ok(),
+                falls_through: false,
+            },
+            ast::StatementKind::Fail(value) => Checked {
+                statement: self.check_fail(value, span).ok(),
                 falls_through: false,
             },
             ast::StatementKind::Break => self.jump(Keyword::Break, span),
@@ -145,7 +157,8 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             }
             ast::StatementKind::Expression(expr)
             | ast::StatementKind::Assert(expr)
-            | ast::StatementKind::Return(Some(expr)) => self.report_order_conflict(&[expr]),
+            | ast::StatementKind::Return(Some(expr))
+            | ast::StatementKind::Fail(expr) => self.report_order_conflict(&[expr]),
             ast::StatementKind::If(statement) => {
                 for branch in &statement.branches {
                     self.report_order_conflict(&[&branch.condition]);
@@ -305,11 +318,22 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         if let ast::ExprKind::Call(call) = &expr.kind {
             return match self.check_call(call, expr.span, None)? {
                 CheckedCall::Effect { statement, .. } => Ok(statement),
-                CheckedCall::Value(_) => {
+                CheckedCall::Value(value) => {
                     let function = self.text(call.callee.span);
-                    Err(self.report(errors::unused_result(function, span)))
+                    let error = match value.ty.as_result() {
+                        Some(result) => errors::unhandled_failure(
+                            function,
+                            result.success_type().is_some(),
+                            span,
+                        ),
+                        None => errors::unused_result(function, span),
+                    };
+                    Err(self.report(error))
                 }
             };
+        }
+        if let ast::ExprKind::Try { attempt, fallback } = &expr.kind {
+            return self.check_try_statement(attempt, fallback.as_deref(), expr.span);
         }
         self.check_expr_with_hint(expr, None)?;
         let help = match &expr.kind {
@@ -513,7 +537,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         match (value, scope.return_type.clone()) {
             (Some(value), Ok(Some(ty))) => {
                 let value = self.check_expr(value, Some(&ty))?;
-                Ok(ir::Statement::Return(Some(value)))
+                Ok(ir::Statement::Return(self.returned(Some(value), span)))
             }
             (Some(value), Ok(None)) => {
                 self.check_for_errors(value);
@@ -525,7 +549,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             (None, Ok(Some(ty))) => {
                 Err(self.report(errors::return_without_value(function, &ty, keyword)))
             }
-            (None, Ok(None)) => Ok(ir::Statement::Return(None)),
+            (None, Ok(None)) => Ok(ir::Statement::Return(self.returned(None, span))),
             (value, Err(ErrorReported)) => {
                 if let Some(value) = value {
                     self.check_for_errors(value);

@@ -17,6 +17,7 @@ mod data_stacks;
 mod errors;
 mod evaluation_order;
 mod expressions;
+mod failures;
 mod features;
 mod floats;
 mod handles;
@@ -36,10 +37,11 @@ mod wrapping;
 mod tests;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::ast::{self, Name, OptimizeMode};
 use crate::diagnostics::{Diagnostic, ErrorReported, Help};
-use crate::ir::{self, ConstantId, FunctionId, IntegerType, Program, Type, Value};
+use crate::ir::{self, ChoiceType, ConstantId, FunctionId, IntegerType, Program, Type, Value};
 use crate::similarity;
 use crate::source::{SourceFile, Span};
 use scope::{FunctionScope, LocalKind};
@@ -170,6 +172,19 @@ struct FunctionEntry<'src, 'ast> {
     declaration: &'ast ast::Function<'src>,
     parameters: Vec<Parameter<'src>>,
     return_type: CheckResult<Option<Type>>,
+    /// What the function can fail with, after `fails`, or `Ok(None)` for a function that cannot fail.
+    fails: CheckResult<Option<Type>>,
+}
+
+impl FunctionEntry<'_, '_> {
+    /// What a call gives: what the function returns, or for one that can fail, its result (spec 8).
+    fn call_type(&self) -> CheckResult<Option<Type>> {
+        let returns = self.return_type.clone()?;
+        Ok(match self.fails.clone()? {
+            Some(error) => Some(Type::Choice(Arc::new(ChoiceType::result(returns, error)))),
+            None => returns,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -236,6 +251,8 @@ struct Checker<'src, 'ast> {
     prove_bounds: bool,
     /// The function whose body is being checked. `None` while top-level constants are computed.
     scope: Option<FunctionScope<'src>>,
+    /// The value of the statement being checked, where a `try` may have `else fail` (spec 8).
+    whole_value: Option<Span>,
 }
 
 impl<'src, 'ast> Checker<'src, 'ast> {
@@ -252,6 +269,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             optimize: None,
             prove_bounds: false,
             scope: None,
+            whole_value: None,
         }
     }
 
@@ -448,7 +466,18 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         let declaration = entry.declaration;
         let parameters = entry.parameters.clone();
         let return_type = entry.return_type.clone();
-        self.scope = Some(FunctionScope::new(declaration.name, return_type.clone()));
+        let fails = entry.fails.clone();
+        let call_type = entry.call_type();
+        let result = match (&fails, &call_type) {
+            (Ok(Some(_)), Ok(Some(result))) => Some(result.clone()),
+            _ => None,
+        };
+        self.scope = Some(FunctionScope::new(
+            declaration.name,
+            return_type.clone(),
+            fails,
+            result.clone(),
+        ));
 
         let mut parameter_ids = Vec::new();
         let mut parameters_failed = false;
@@ -464,7 +493,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             }
         }
 
-        let (body, falls_through) = self.check_block(&declaration.body);
+        let (mut body, falls_through) = self.check_block(&declaration.body);
         if let Ok(Some(return_type)) = &return_type {
             if falls_through {
                 let error = errors::missing_return(
@@ -474,6 +503,12 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                 );
                 self.report(error);
             }
+        }
+        // A function that can fail and returns nothing succeeds when it reaches its end.
+        if let (Ok(None), Some(result), true) = (&return_type, &result, falls_through) {
+            let end = Span::empty(declaration.body.span.end);
+            let success = failures::success(None, result, end);
+            body.statements.push(ir::Statement::Return(Some(success)));
         }
 
         let closed = self
@@ -489,7 +524,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         Ok(ir::Function {
             name: declaration.name.text,
             parameters: parameter_ids,
-            return_type: return_type?,
+            return_type: call_type?,
             locals: scope.into_locals()?,
             body,
         })

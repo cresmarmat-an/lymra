@@ -100,6 +100,7 @@ impl<'src> Parser<'src, '_> {
             Keyword::For => self.parse_for(),
             Keyword::Match => self.parse_match(),
             Keyword::Return => self.parse_return(),
+            Keyword::Fail => self.parse_fail(),
             Keyword::Assert => self.parse_assert(),
             Keyword::Break => self.parse_word_statement(StatementKind::Break),
             Keyword::Continue => self.parse_word_statement(StatementKind::Continue),
@@ -417,6 +418,21 @@ impl<'src> Parser<'src, '_> {
         Ok(Statement {
             span: keyword.span.to(value.span),
             kind: StatementKind::Return(Some(value)),
+        })
+    }
+
+    fn parse_fail(&mut self) -> ParseResult<Statement<'src>> {
+        let keyword = self.advance();
+        if self.at_statement_end() {
+            let help =
+                Help::text("write what the function fails with after `fail`, as in `fail Missing`");
+            return Err(self.unexpected("the error to fail with", help));
+        }
+        let (value, end) = self.parse_value()?;
+        self.finish_statement(end)?;
+        Ok(Statement {
+            span: keyword.span.to(value.span),
+            kind: StatementKind::Fail(value),
         })
     }
 

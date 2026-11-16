@@ -179,9 +179,72 @@ pub struct ChoiceType {
     pub name: String,
     /// At least one, in the order the declaration lists them.
     pub variants: Vec<CustomType>,
+    /// Whether the compiler made it for the results of functions that can fail, rather than a declaration.
+    pub result: bool,
 }
 
+/// The variant of a result that holds what the function returned, in the field `value`.
+const SUCCESS: &str = "Success";
+/// The variant of a result that holds what the function failed with, in the field `error`.
+const FAILURE: &str = "Failure";
+/// The position of `Success` among a result's variants.
+pub const SUCCESS_VARIANT: usize = 0;
+/// The position of `Failure` among a result's variants.
+pub const FAILURE_VARIANT: usize = 1;
+
 impl ChoiceType {
+    /**
+     * What a call to a function that can fail gives (spec 8): `Success`,
+     * with the field `value` unless the function returns nothing, or
+     * `Failure`, with the field `error`. It is named the way the declaration
+     * writes it, as in `integer64 fails ParseError`, which no declared type
+     * can be called, so two functions with the same types share it.
+     */
+    pub fn result(value: Option<Type>, error: Type) -> Self {
+        let name = match &value {
+            Some(value) => format!("{value} fails {error}"),
+            None => format!("fails {error}"),
+        };
+        let success = CustomType {
+            name: SUCCESS.to_owned(),
+            fields: value
+                .map(|ty| FieldType {
+                    name: "value".to_owned(),
+                    ty,
+                })
+                .into_iter()
+                .collect(),
+        };
+        let failure = CustomType {
+            name: FAILURE.to_owned(),
+            fields: vec![FieldType {
+                name: "error".to_owned(),
+                ty: error,
+            }],
+        };
+        Self {
+            name,
+            variants: vec![success, failure],
+            result: true,
+        }
+    }
+
+    /// What a `Success` of this result holds, or `None` when the function returns nothing.
+    pub fn success_type(&self) -> Option<&Type> {
+        self.variants
+            .get(SUCCESS_VARIANT)
+            .and_then(|success| success.fields.first())
+            .map(|field| &field.ty)
+    }
+
+    /// What a `Failure` of this result holds.
+    pub fn failure_type(&self) -> Option<&Type> {
+        self.variants
+            .get(FAILURE_VARIANT)
+            .and_then(|failure| failure.fields.first())
+            .map(|field| &field.ty)
+    }
+
     /// The position and the fields of the variant called `name`.
     pub fn variant(&self, name: &str) -> Option<(usize, &CustomType)> {
         self.variants
@@ -421,6 +484,24 @@ impl Type {
             | Self::Custom(_)
             | Self::Choice(_)
             | Self::List(_)
+            | Self::Pool(_)
+            | Self::Handle(_) => None,
+        }
+    }
+
+    /// The result this type is, when it is what a call to a function that can fail gives (spec 8).
+    pub fn as_result(&self) -> Option<&ChoiceType> {
+        match self {
+            Self::Choice(choice) if choice.result => Some(choice),
+            Self::Integer(_)
+            | Self::Float(_)
+            | Self::Boolean
+            | Self::String
+            | Self::Array(_)
+            | Self::Custom(_)
+            | Self::Choice(_)
+            | Self::List(_)
+            | Self::View(_)
             | Self::Pool(_)
             | Self::Handle(_) => None,
         }
@@ -739,6 +820,7 @@ mod tests {
             Type::Choice(Arc::new(ChoiceType {
                 name: "Shape".to_owned(),
                 variants,
+                result: false,
             }))
         };
         let wide = Type::Integer(IntegerType::Integer64);
@@ -762,6 +844,7 @@ mod tests {
             variants: (0..300)
                 .map(|index| variant(&format!("V{index}"), vec![]))
                 .collect(),
+            result: false,
         };
         assert_eq!(many.tag_type(), IntegerType::Unsigned16);
     }

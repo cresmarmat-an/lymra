@@ -18,6 +18,7 @@ use crate::ir::{
     Block, Branch, Case, Expr, ExprKind, Extent, FloatType, Function, LocalId, Place, PlaceStep,
     PrintPart, Statement, TextForm, Type,
 };
+use crate::source::Span;
 
 impl Generator<'_, '_> {
     pub(super) fn block_contents(
@@ -207,6 +208,9 @@ impl Generator<'_, '_> {
             } => self.for_each(function, *variable, array, *length, body, writer),
             Statement::Match { value, cases } => self.match_cases(function, value, cases, writer),
             Statement::Return(value) => self.return_statement(function, value.as_ref(), writer),
+            Statement::Try(attempt) => {
+                self.attempt(function, attempt, writer);
+            }
             Statement::Break => {
                 Self::release(writer, &self.loop_lists());
                 writer.line("break;");
@@ -438,47 +442,67 @@ impl Generator<'_, '_> {
             writer.line("return;");
             return;
         };
-        match Storage::of(&value.ty) {
-            Storage::None => self.return_fixed(function, value, writer),
-            // Text the program itself keeps outlives every call, so it goes back as it is.
-            Storage::Text if is_static_text(value) => self.return_fixed(function, value, writer),
-            Storage::Text => self.return_text(function, value, writer),
-            storage @ (Storage::Elements | Storage::ElementsAndText) => {
-                self.return_list(function, value, storage, writer);
-            }
+        if let ExprKind::Text(parts) = &value.kind {
+            self.return_built_text(function, parts, value, writer);
+        } else {
+            let code = self.expr(function, value, writer);
+            self.return_value(&value.ty, &code, is_static_text(value), value.span, writer);
         }
         self.pending.clear();
     }
 
-    /// Returns `value`, which keeps nothing on a data stack, or only text the program itself keeps.
-    fn return_fixed(&mut self, function: &Function<'_>, value: &Expr, writer: &mut Writer) {
-        let code = self.expr(function, value, writer);
+    /**
+     * Returns `code`, a value of type `ty` that the function computed, once
+     * everything the function has open is freed. `stays` says the value
+     * holds no text but what the program itself keeps, which outlives every
+     * call, so it goes back as it is.
+     */
+    pub(super) fn return_value(
+        &mut self,
+        ty: &Type,
+        code: &str,
+        stays: bool,
+        span: Span,
+        writer: &mut Writer,
+    ) {
+        match Storage::of(ty) {
+            Storage::None => self.return_fixed(ty, code, writer),
+            Storage::Text if stays => self.return_fixed(ty, code, writer),
+            Storage::Text => self.return_text(ty, code, span, writer),
+            storage @ (Storage::Elements | Storage::ElementsAndText) => {
+                self.return_list(ty, storage, code, span, writer);
+            }
+        }
+    }
+
+    /// Returns `code`, which keeps nothing on a data stack.
+    fn return_fixed(&mut self, ty: &Type, code: &str, writer: &mut Writer) {
         let open = self.open_lists();
         if open.is_empty() {
             writer.line(&format!("return {code};"));
             return;
         }
-        let result = self.temporary(&value.ty, &code, writer);
+        let result = self.temporary(ty, code, writer);
         Self::release(writer, &open);
         writer.line(&format!("return {result};"));
     }
 
     /**
-     * Returns `value`, a list or a stack, moved to the top of the stacks the
+     * Returns `code`, a list or a stack, moved to the top of the stacks the
      * caller named. Freeing leaves the bytes in place, and the move copies
      * them like `memmove`, so it works even where the result lay on those
      * same stacks.
      */
     fn return_list(
         &mut self,
-        function: &Function<'_>,
-        value: &Expr,
+        ty: &Type,
         storage: Storage,
+        code: &str,
+        span: Span,
         writer: &mut Writer,
     ) {
-        let code = self.expr(function, value, writer);
         let open = self.open_lists();
-        let ty = self.types.name(&value.ty);
+        let ty = self.types.name(ty);
         let result = self.helper("result");
         writer.line(&format!("const {ty} {result} = {code};"));
         // Dropped first and settled after the move, so AddressSanitizer lets the move read what was freed.
@@ -489,7 +513,7 @@ impl Generator<'_, '_> {
                 release.start
             ));
         }
-        let site = self.site(value.span);
+        let site = self.site(span);
         let moved = self.helper("moved");
         writer.line(&format!(
             "const {ty} {moved} = {}({}, {result}, {site});",
@@ -506,37 +530,58 @@ impl Generator<'_, '_> {
     }
 
     /**
-     * Returns `value`, which holds text. Its pieces can lie anywhere, even in
+     * Returns `code`, which holds text. Its pieces can lie anywhere, even in
      * what the function frees, so they go onto a stack the function keeps
      * for that before anything is freed, and from there onto the caller's.
-     * Text built in the `return` itself is built right on that stack, and
-     * text that nothing frees goes straight to the caller.
+     * Text that nothing frees goes straight to the caller.
      */
-    fn return_text(&mut self, function: &Function<'_>, value: &Expr, writer: &mut Writer) {
-        let ty = self.types.name(&value.ty);
+    fn return_text(&mut self, ty: &Type, code: &str, span: Span, writer: &mut Writer) {
+        let own = text_function(&mut self.types, ty, TextWalk::Own);
+        let site = self.site(span);
+        let c_type = self.types.name(ty);
+        let result = self.helper("result");
+        writer.line(&format!("{c_type} {result} = {code};"));
+        let kept = if self.open_lists().is_empty() {
+            None
+        } else {
+            let (stack, keep) = self.keep_return_stack(writer);
+            writer.line(&format!("{own}(&{result}, {stack}, {site});"));
+            Some((stack, keep))
+        };
+        self.finish_text_return(&own, &result, kept, &site, writer);
+    }
+
+    /// Returns text built from `parts` in the `return` itself, right on the stack the function keeps for the text it returns.
+    fn return_built_text(
+        &mut self,
+        function: &Function<'_>,
+        parts: &[PrintPart],
+        value: &Expr,
+        writer: &mut Writer,
+    ) {
         let own = text_function(&mut self.types, &value.ty, TextWalk::Own);
         let site = self.site(value.span);
+        let c_type = self.types.name(&value.ty);
         let result = self.helper("result");
-        let built_here = match &value.kind {
-            ExprKind::Text(parts) => Some(parts),
-            _ => None,
-        };
-        let kept = if let Some(parts) = built_here {
-            let (stack, keep) = self.keep_return_stack(writer);
-            let code = self.build_text(function, parts, &stack, value.span, writer);
-            writer.line(&format!("{ty} {result} = {code};"));
-            Some((stack, keep))
-        } else {
-            let code = self.expr(function, value, writer);
-            writer.line(&format!("{ty} {result} = {code};"));
-            if self.open_lists().is_empty() {
-                None
-            } else {
-                let (stack, keep) = self.keep_return_stack(writer);
-                writer.line(&format!("{own}(&{result}, {stack}, {site});"));
-                Some((stack, keep))
-            }
-        };
+        let (stack, keep) = self.keep_return_stack(writer);
+        let code = self.build_text(function, parts, &stack, value.span, writer);
+        writer.line(&format!("{c_type} {result} = {code};"));
+        self.finish_text_return(&own, &result, Some((stack, keep)), &site, writer);
+    }
+
+    /**
+     * Ends a text `return`: frees what the function has open, copies the
+     * text in `result` to the caller's stack with `own`, and gives back the
+     * stack it was `kept` on, if any.
+     */
+    fn finish_text_return(
+        &mut self,
+        own: &str,
+        result: &str,
+        kept: Option<(String, String)>,
+        site: &str,
+        writer: &mut Writer,
+    ) {
         Self::release(writer, &self.open_lists());
         writer.line(&format!("{own}(&{result}, {DESTINATION}, {site});"));
         if let Some((stack, keep)) = kept {
@@ -1011,7 +1056,7 @@ fn reads_old_value(function: &Function<'_>, target: LocalId, value: &Expr) -> bo
 }
 
 /// Whether `value` holds only text the program itself keeps, so a constant that holds it needs no data stack.
-fn is_static_text(value: &Expr) -> bool {
+pub(super) fn is_static_text(value: &Expr) -> bool {
     match &value.kind {
         ExprKind::Literal(_) | ExprKind::Constant(_) => true,
         ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => fields

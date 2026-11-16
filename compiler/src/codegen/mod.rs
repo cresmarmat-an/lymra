@@ -27,7 +27,7 @@ mod types;
 use std::collections::HashMap;
 
 use crate::diagnostics::render_location;
-use crate::ir::{Function, LocalId, Program, Statement, Type};
+use crate::ir::{FAILURE_VARIANT, Function, LocalId, Program, Statement, Type};
 use crate::source::{SourceFile, Span};
 use types::CTypes;
 
@@ -67,6 +67,10 @@ pub fn generate(program: &Program<'_>, source: &SourceFile) -> String {
         .map(|function| format!("{};", generator.signature(function)))
         .collect();
     let constants = generator.constants();
+    let entry_point = program
+        .main
+        .and_then(|id| program.functions.get(id))
+        .map(|main| generator.entry_point(main));
 
     let mut output = String::new();
     let file_name = source.name().replace("*/", "* /");
@@ -103,11 +107,7 @@ pub fn generate(program: &Program<'_>, source: &SourceFile) -> String {
     section(&mut output, "Constants", &constants);
     section(&mut output, "Prototypes", &prototypes);
     section(&mut output, "Functions", &[functions.join("\n\n")]);
-    if let Some(main) = program.main.and_then(|id| program.functions.get(id)) {
-        let entry_point = format!(
-            "int main(void) {{\n{INDENT}lymra_start();\n{INDENT}{}();\n{INDENT}return lymra_finish();\n}}",
-            c_syntax::function_name(main.name)
-        );
+    if let Some(entry_point) = entry_point {
         section(&mut output, "Entry point", &[entry_point]);
     }
     output
@@ -252,6 +252,40 @@ struct Scope {
 }
 
 impl Generator<'_, '_> {
+    /**
+     * The C `main`: it starts the runtime, runs the program's `main` and
+     * ends with the exit status the runtime chose. A `main` that can fail
+     * gives a result; on a `Failure` the runtime writes its text and ends
+     * with status 1 (spec 8).
+     */
+    fn entry_point(&mut self, main: &Function<'_>) -> String {
+        let name = c_syntax::function_name(main.name);
+        let run = match &main.return_type {
+            None => format!("{INDENT}{name}();"),
+            Some(result) => {
+                let c_type = self.types.name(result);
+                let destinations: Vec<String> = destination_names(Storage::of(result))
+                    .iter()
+                    .map(|_| data_stack(self.new_data_stack()))
+                    .collect();
+                format!(
+                    "{INDENT}const {c_type} result = {name}({});\n\
+                     {INDENT}if (result.{tag} == {FAILURE_VARIANT}) {{\n\
+                     {INDENT}{INDENT}lymra_main_failed(result.{variants}.{failure}.{error});\n\
+                     {INDENT}}}",
+                    destinations.join(", "),
+                    tag = c_syntax::TAG,
+                    variants = c_syntax::VARIANTS,
+                    failure = c_syntax::variant_name(FAILURE_VARIANT),
+                    error = c_syntax::field_name(0),
+                )
+            }
+        };
+        format!(
+            "int main(void) {{\n{INDENT}lymra_start();\n{run}\n{INDENT}return lymra_finish();\n}}"
+        )
+    }
+
     fn function(&mut self, function: &Function<'_>) -> String {
         self.scopes.clear();
         self.pending.clear();

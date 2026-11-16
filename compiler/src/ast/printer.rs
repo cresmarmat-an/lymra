@@ -70,11 +70,16 @@ impl Printer {
             .return_type
             .as_ref()
             .map(|ty| format!(" returns {}", type_text(ty)));
+        let fails = function
+            .fails
+            .as_ref()
+            .map(|ty| format!(" fails {}", type_text(ty)));
         let header = format!(
-            "{visibility}function {}({}){}",
+            "{visibility}function {}({}){}{}",
             function.name.text,
             parameters.join(", "),
-            returns.unwrap_or_default()
+            returns.unwrap_or_default(),
+            fails.unwrap_or_default()
         );
         self.line(&header);
         self.block(&function.body);
@@ -138,6 +143,7 @@ impl Printer {
             }
             StatementKind::Return(Some(value)) => self.value_line("return", value),
             StatementKind::Return(None) => self.line("return"),
+            StatementKind::Fail(value) => self.value_line("fail", value),
             StatementKind::Break => self.line("break"),
             StatementKind::Continue => self.line("continue"),
             StatementKind::Assert(condition) => {
@@ -308,6 +314,14 @@ fn expr_text(expr: &Expr<'_>) -> String {
         ExprKind::Index { object, index } => {
             format!("(index {} {})", expr_text(object), expr_text(index))
         }
+        ExprKind::Try { attempt, fallback } => match fallback {
+            Some(fallback) => format!(
+                "(try {} else fail {})",
+                expr_text(attempt),
+                expr_text(fallback)
+            ),
+            None => format!("(try {})", expr_text(attempt)),
+        },
     }
 }
 

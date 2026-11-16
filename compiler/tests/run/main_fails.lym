@@ -1,0 +1,19 @@
+#[
+    A `main` that fails ends the program after everything it printed,
+    with `error: ` and its text on standard error and exit status 1.
+]#
+
+choice ReadError
+    Missing(string name)
+
+function lookup(string name) returns string fails ReadError
+    if name == "ana"
+        return "Ana Lima"
+    fail Missing(name = name)
+
+function main() fails string
+    print("looking")
+    constant found = try lookup("ana") else fail "no ana"
+    print(found)
+    constant missing = try lookup("zed") else fail "could not find {length("zed")} letters"
+    print(missing)

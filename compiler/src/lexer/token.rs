@@ -126,6 +126,7 @@ impl Keyword {
                 | Self::Match
                 | Self::Case
                 | Self::Return
+                | Self::Fail
                 | Self::Break
                 | Self::Continue
                 | Self::Assert
@@ -161,6 +162,9 @@ keywords! {
     External => "external",
     Assert => "assert",
     With => "with",
+    Fails => "fails",
+    Fail => "fail",
+    Try => "try",
 }
 
 #[cfg(test)]

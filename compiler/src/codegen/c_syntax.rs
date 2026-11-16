@@ -58,6 +58,11 @@ pub(super) fn choice_name(name: &str) -> String {
     format!("choice_{name}")
 }
 
+/// The C name of the result type numbered `number`, which no declared choice can share.
+pub(super) fn result_name(number: usize) -> String {
+    format!("result_{number}")
+}
+
 /// The member of a choice's struct that says which variant the value holds.
 pub(super) const TAG: &str = "tag";
 

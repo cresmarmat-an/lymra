@@ -524,6 +524,7 @@ impl<'function> Analyzer<'function> {
             | ExprKind::Insert { .. }
             | ExprKind::Slot { .. }
             | ExprKind::Text(_)
+            | ExprKind::Try(_)
             | ExprKind::EmptyList
             | ExprKind::Construct(_)
             | ExprKind::Variant { .. }
@@ -644,6 +645,12 @@ impl<'function> Analyzer<'function> {
                     if let PrintPart::Value { value, .. } = part {
                         self.remove_checks(value, bounds);
                     }
+                }
+            }
+            ExprKind::Try(attempt) => {
+                self.remove_checks(&mut attempt.result, bounds);
+                if let Some(fallback) = &mut attempt.fallback {
+                    self.remove_checks(fallback, bounds);
                 }
             }
         }
@@ -788,6 +795,13 @@ impl<'function> Analyzer<'function> {
             | Statement::Push { value, .. }
             | Statement::Remove { handle: value, .. } => {
                 self.evaluate(value, bounds, changes, mode);
+            }
+            // On a failure the function ends there, so only the way on carries bounds.
+            Statement::Try(attempt) => {
+                self.evaluate(&mut attempt.result, bounds, changes, mode);
+                if let Some(fallback) = &mut attempt.fallback {
+                    self.evaluate(fallback, bounds, changes, mode);
+                }
             }
             Statement::Call(call) => {
                 if mode == Mode::Remove {

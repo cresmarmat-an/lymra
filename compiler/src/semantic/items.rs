@@ -52,6 +52,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
                         declaration,
                         parameters: Vec::new(),
                         return_type: Ok(None),
+                        fails: Ok(None),
                     });
                     self.declare_global(declaration.name, Global::Function(id));
                 }
@@ -128,15 +129,24 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             None => Ok(None),
         };
 
+        let fails = self.resolve_failure(declaration, &return_type);
+
         let is_entry_point = declaration.name.text == ENTRY_POINT;
         if is_entry_point
             && (!declaration.parameters.is_empty() || declaration.return_type.is_some())
         {
             self.report(errors::main_form(declaration.name.span));
         }
+        if let (true, Ok(Some(error)), Some(written)) = (is_entry_point, &fails, &declaration.fails)
+        {
+            if *error != Type::String {
+                self.report(errors::main_fails_with(error, written.span));
+            }
+        }
         if let Some(entry) = self.functions.get_mut(id) {
             entry.parameters = parameters;
             entry.return_type = return_type;
+            entry.fails = fails;
         }
     }
 
@@ -343,6 +353,7 @@ fn runtime_part(expr: &ir::Expr) -> Span {
         | ir::ExprKind::Top(_)
         | ir::ExprKind::Insert { .. }
         | ir::ExprKind::Text(_)
+        | ir::ExprKind::Try(_)
         | ir::ExprKind::Construct(_)
         | ir::ExprKind::Variant { .. } => expr.span,
     }
