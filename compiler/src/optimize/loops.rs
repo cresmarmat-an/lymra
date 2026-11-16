@@ -312,6 +312,7 @@ pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
         | ExprKind::Compare { left, right, .. }
         | ExprKind::Logic { left, right, .. }
         | ExprKind::Wrapping { left, right, .. }
+        | ExprKind::Bits { left, right, .. }
         | ExprKind::Index {
             array: left,
             index: right,
@@ -377,6 +378,7 @@ pub(super) fn collect_calls<'expr>(expr: &'expr Expr, calls: &mut Vec<&'expr Cal
         | ExprKind::Compare { left, right, .. }
         | ExprKind::Logic { left, right, .. }
         | ExprKind::Wrapping { left, right, .. }
+        | ExprKind::Bits { left, right, .. }
         | ExprKind::Index {
             array: left,
             index: right,

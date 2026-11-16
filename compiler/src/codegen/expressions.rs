@@ -18,8 +18,8 @@ use super::{
     strips,
 };
 use crate::ir::{
-    Argument, ArithmeticOperator, Attempt, Call, ChoiceType, ComparisonOperator, Expr, ExprKind,
-    Extent, FAILURE_VARIANT, FieldValue, FloatType, Function, IntegerType, LogicOperator,
+    Argument, ArithmeticOperator, Attempt, BitOperator, Call, ChoiceType, ComparisonOperator, Expr,
+    ExprKind, Extent, FAILURE_VARIANT, FieldValue, FloatType, Function, IntegerType, LogicOperator,
     PrintPart, SUCCESS_VARIANT, Sequence, SystemOperation, TextForm, Type, Value,
 };
 use crate::source::Span;
@@ -164,6 +164,12 @@ impl Generator<'_, '_> {
                     operator.arithmetic().symbol()
                 )
             }
+            ExprKind::Bits {
+                operator,
+                left,
+                right,
+                checked,
+            } => self.bits(function, *operator, (left, right), *checked, expr, writer),
             ExprKind::Logic {
                 operator,
                 left,
@@ -763,6 +769,48 @@ impl Generator<'_, '_> {
             "{}(&({stored}), {handle}, {site})",
             list_function(&pool_type, "find")
         )
+    }
+
+    /**
+     * The C for a bit operation `expr` on `operands`, left first. Bits combine
+     * in 64 unsigned bits, which C defines for every value, and the low bits
+     * are read back as the type, as wrapping arithmetic does. A shift goes
+     * through the runtime, which checks its count when `checked` says the
+     * optimizer could not prove it.
+     */
+    fn bits(
+        &mut self,
+        function: &Function<'_>,
+        operator: BitOperator,
+        (left, right): (&Expr, &Expr),
+        checked: bool,
+        expr: &Expr,
+        writer: &mut Writer,
+    ) -> String {
+        let (left, right) = self.pair(function, left, right, writer);
+        let ty = &expr.ty;
+        let symbol = match operator {
+            BitOperator::And => "&",
+            BitOperator::Or => "|",
+            BitOperator::Xor => "^",
+            BitOperator::ShiftLeft | BitOperator::ShiftRight => {
+                let direction = if operator == BitOperator::ShiftLeft {
+                    "left"
+                } else {
+                    "right"
+                };
+                let count = if checked {
+                    let site = self.site(expr.span);
+                    format!("lymra_shift_count_{ty}((int64_t)({right}), {site})")
+                } else {
+                    format!("(unsigned)({right})")
+                };
+                return format!("lymra_shift_{direction}_{ty}({left}, {count})");
+            }
+        };
+        let name = self.types.name(ty);
+        let bits = ty.as_integer().map_or(64, IntegerType::bits);
+        format!("(({name})(uint{bits}_t)((uint64_t)({left}) {symbol} (uint64_t)({right})))")
     }
 
     /**

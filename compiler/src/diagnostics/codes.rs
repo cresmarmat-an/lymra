@@ -97,6 +97,7 @@ error_codes! {
     L0413 => "unknown field",
     L0414 => "field not given once by name",
     L0415 => "type contains itself",
+    L0416 => "shift count outside the bits of its value",
     L0501 => "wrong number of arguments",
     L0502 => "function can end without returning a value",
     L0503 => "`return` does not match the function",

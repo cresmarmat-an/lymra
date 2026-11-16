@@ -1,0 +1,75 @@
+error[L0402]: the two sides of `bit_and` have different types
+ --> tests/check/bits.lym:4:28
+  |
+4 |     print("{bit_and(small, large)}")
+  |                            ^^^^^ this is an `integer64`
+  |                     ----- this is an `integer8`
+  |
+help: convert one side, for example with `integer8(...)`; the program stops if the value does not fit
+
+error[L0405]: `bit_or` works on the bits of integers, but this is a `boolean`
+ --> tests/check/bits.lym:5:20
+  |
+5 |     print("{bit_or(true, 1)}")
+  |                    ^^^^ not an integer
+  |
+help: for booleans, use `and`, `or` and `not`
+
+error[L0405]: `bit_xor` works on the bits of integers, but this is a `float64`
+ --> tests/check/bits.lym:6:21
+  |
+6 |     print("{bit_xor(1.5, 2)}")
+  |                     ^^^ not an integer
+  |
+help: convert it to an integer type first, as in `integer64(value)`
+
+error[L0501]: `bit_not` takes 1 argument, but 2 were given
+ --> tests/check/bits.lym:7:20
+  |
+7 |     print("{bit_not(1, 2)}")
+  |                    ^^^^^^ it takes the number whose bits it flips
+  |
+help: write `bit_not(value)`
+
+error[L0501]: `shift_left` takes 2 arguments, but 1 was given
+ --> tests/check/bits.lym:8:23
+  |
+8 |     print("{shift_left(large)}")
+  |                       ^^^^^^^ it takes the number to shift and how many bits to shift it by
+  |
+help: write `shift_left(value, count)`
+
+error[L0416]: `shift_left` can shift an `integer64` by 0 to 63 bits, not 64
+ --> tests/check/bits.lym:9:31
+  |
+9 |     print("{shift_left(large, 64)}")
+  |                               ^^ outside the bits of the value
+  |
+help: shift by a count from 0 to 63; a value with every bit shifted out would be written as 0, or as -1 for a negative value shifted right
+
+error[L0416]: `shift_right` can shift an `integer8` by 0 to 7 bits, not -1
+  --> tests/check/bits.lym:10:32
+   |
+10 |     print("{shift_right(small, -1)}")
+   |                                ^^ outside the bits of the value
+   |
+help: shift by a count from 0 to 7; a value with every bit shifted out would be written as 0, or as -1 for a negative value shifted right
+
+error[L0416]: `shift_right` can shift an `integer8` by 0 to 7 bits, not 8
+  --> tests/check/bits.lym:11:32
+   |
+11 |     print("{shift_right(small, 8)}")
+   |                                ^ outside the bits of the value
+   |
+help: shift by a count from 0 to 7; a value with every bit shifted out would be written as 0, or as -1 for a negative value shifted right
+
+error[L0207]: `bit_and` is the name of a built-in function
+  --> tests/check/bits.lym:12:14
+   |
+12 |     constant bit_and = 3
+   |              ^^^^^^^ this name is taken
+   |
+help: choose another name
+
+found 9 errors in tests/check/bits.lym
+run `lymra explain L0402` to read why a rule exists and how to fix it

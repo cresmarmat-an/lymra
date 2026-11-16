@@ -45,6 +45,8 @@ struct CheckCount {
     checked: usize,
     /// The indexes into lists among the checked operations.
     list_indexes_checked: usize,
+    /// The shifts among the checked operations, whose counts are checked.
+    shifts_checked: usize,
 }
 
 impl CheckCount {
@@ -149,6 +151,20 @@ impl CheckCount {
                 self.operation(*checked);
                 self.expr(operand);
             }
+            // Only a shift can fail, so only shifts count among the operations a check guards.
+            ExprKind::Bits {
+                operator,
+                left,
+                right,
+                checked,
+            } => {
+                if operator.is_shift() {
+                    self.operation(*checked);
+                    self.shifts_checked += usize::from(*checked);
+                }
+                self.expr(left);
+                self.expr(right);
+            }
             ExprKind::Index {
                 array,
                 index,
@@ -244,6 +260,9 @@ struct Totals {
     programs: usize,
     operations: usize,
     removed: usize,
+    /// The checks of shift counts the optimizer removed, and those it kept.
+    shift_checks_removed: usize,
+    shift_checks_kept: usize,
 }
 
 impl Totals {
@@ -310,6 +329,8 @@ fn compare_runs(
     totals.programs += 1;
     totals.operations += after.operations;
     totals.removed += before.checked - after.checked;
+    totals.shift_checks_removed += before.shifts_checked - after.shifts_checked;
+    totals.shift_checks_kept += after.shifts_checked;
 }
 
 /// Compares the checked and optimized runs of a program's `main`. Returns false when the checker rejects the program.
@@ -363,6 +384,16 @@ fn removed_checks_never_fail_in_whole_programs() {
         check_main(&generator::program(&mut random), &mut totals);
     }
     totals.assert_meaningful(PROGRAMS);
+    assert!(
+        totals.shift_checks_removed > 0 && totals.shift_checks_kept > 0,
+        "the programs proved {} shift counts and kept {} checked, so they test too little of shifts",
+        totals.shift_checks_removed,
+        totals.shift_checks_kept
+    );
+    println!(
+        "{} shift count checks removed, {} kept",
+        totals.shift_checks_removed, totals.shift_checks_kept
+    );
 }
 
 #[test]

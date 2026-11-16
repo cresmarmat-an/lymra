@@ -108,6 +108,7 @@ pub fn each_expr<'a>(expr: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
         | ExprKind::Compare { left, right, .. }
         | ExprKind::Logic { left, right, .. }
         | ExprKind::Wrapping { left, right, .. }
+        | ExprKind::Bits { left, right, .. }
         | ExprKind::Index {
             array: left,
             index: right,

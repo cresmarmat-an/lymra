@@ -577,6 +577,28 @@ impl Interpreter<'_, '_> {
                     ty.ok_or_else(|| Stop::Unsound("wrapping without an integer type".to_owned()))?;
                 return Ok(Slot::Integer(operator.apply(left, right, ty)));
             }
+            ExprKind::Bits {
+                operator,
+                left,
+                right,
+                checked,
+            } => {
+                let left = self.integer(left, slots)?;
+                let right = self.integer(right, slots)?;
+                let ty = ty.ok_or_else(|| {
+                    Stop::Unsound("a bit operation without an integer type".to_owned())
+                })?;
+                // Only a shift by a count outside the bits of its value has no result.
+                return match operator.apply(left, right, ty) {
+                    Some(value) => Ok(Slot::Integer(value)),
+                    None if *checked => Err(Stop::Ended(Ending::Trapped)),
+                    None => Err(Stop::Unsound(format!(
+                        "an unchecked shift at {:?} by {right}, outside the bits of `{}`",
+                        expr.span,
+                        ty.name()
+                    ))),
+                };
+            }
             ExprKind::Fill(value) => {
                 let value = self.expr(value, slots)?;
                 let length = expr

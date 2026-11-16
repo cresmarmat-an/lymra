@@ -228,7 +228,7 @@ Integer overflow is a runtime trap in every build mode, including `speed`. If yo
 - Every `+`, `-`, `*`, `/` and `%` on integers is checked. Division by zero is checked too, and so is the one division whose result does not fit, the lowest value of a signed type divided by `-1`.
 - When every value in an operation is known while compiling, the compiler does the check itself: an overflow is error `L0404`, and a division by a value that is always zero is error `L0406`.
 - Otherwise a failed check stops the program with a runtime error (Section 11).
-- The compiler leaves out a check when it can prove the check never fails, from the conditions around the operation, the bounds of `for` loops, and known values. Which checks it can prove only changes how fast a program runs, never what it does (Section 13).
+- The compiler leaves out a check when it can prove the check never fails, from the conditions around the operation, the bounds of `for` loops, masks such as `bit_and(hash, 255)`, and known values. Which checks it can prove only changes how fast a program runs, never what it does (Section 13).
 
 ### 4.3 Size classes
 
@@ -456,6 +456,9 @@ function main(view[string] arguments) returns unsigned8
 | `slice(items, start, end)` | The elements of an array, a list, a stack or a view from `start` up to `end`, without `end`, as a view, with nothing copied. A slice of a `string` is a `string` that shares its bytes; its ends have to fall between characters. Each position is checked as soon as it is computed: the start lies from 0 to the length, the end from the start to the length. |
 | `bytes(text)` | The UTF-8 bytes of a `string`, as a `view[unsigned8]` |
 | `wrapping_add(left, right)`, `wrapping_subtract`, `wrapping_multiply` | Arithmetic that wraps around the type instead of stopping the program: the exact result, keeping only as many low bits as the type has, read as two's complement for a signed type. The operands follow the rules of `+`. |
+| `bit_and(left, right)`, `bit_or`, `bit_xor` | The bits of two integers combined one by one, with the bits of a signed type in two's complement. The operands follow the rules of `+`. They never fail. |
+| `bit_not(value)` | The integer with every bit flipped: `-value - 1` for a signed type, the largest value less `value` for an unsigned one |
+| `shift_left(value, count)`, `shift_right` | The bits of `value` moved up or down by `count`, which can have any integer type. Moving up drops the bits that pass the top of the type and fills in zeros, so it never overflows; moving down fills in copies of the sign bit for a signed type, rounding toward minus infinity, and zeros for an unsigned one. The count has to be at least 0 and less than the bits of the value's type: one known while compiling that is not is error `L0416`, and any other stops the program when it is not. |
 | `integer8(value)` to `integer64(value)` | Converts an integer to that signed type |
 | `unsigned8(value)` to `unsigned64(value)` | Converts an integer to that unsigned type |
 
@@ -491,7 +494,7 @@ Later phases add these, and until then the compiler rejects each with `L0309`:
 |---|---|---|
 | `filter(items) with name`, `sort(variable items) with left, right` | The elements the block accepts; the elements in the block's order (Section 7.7) | 3 |
 
-The names of built-in functions and types cannot be declared again (`L0207`). No binding or function can be called `print`, `length`, `wrapping_add`, `integer32`, `boolean`, `array` or `float64`, and no type or variant `FileError`, `NoSuchFile`, `NoPermission`, `NotText`, `EndOfInput` or `SystemError`.
+The names of built-in functions and types cannot be declared again (`L0207`). No binding or function can be called `print`, `length`, `wrapping_add`, `bit_and`, `integer32`, `boolean`, `array` or `float64`, and no type or variant `FileError`, `NoSuchFile`, `NoPermission`, `NotText`, `EndOfInput` or `SystemError`.
 
 ## 6. Control flow
 
@@ -753,7 +756,7 @@ error: integer overflow
   |                 ^^^^^^^^^
 ```
 
-The checks are integer overflow, division by zero, a conversion whose value does not fit, an index outside its array or list, a list or a text that outgrows its data stack, and `assert`. Calls that nest too deeply, as in recursion that never reaches its end, stop the program the same way with `error: stack overflow`, without a location: on POSIX systems and on Windows a handler catches the overflow when the stack runs out, so calls cost nothing extra for the check. Every program gets a stack of 8 MiB on Windows as well, the default of Linux and macOS, and the arrays of every call in progress share it. Where the C compiler can, a function with a large frame touches its stack a page at a time, so it cannot step over the guard page that ends the stack. Before the error, the program writes every line it printed. A line appears whole or not at all, so a program that stops in the middle of a `print` leaves no half line behind. Output is UTF-8 text with `\n` line breaks on every system; a Windows console, and a terminal that runs programs in a pseudo console, such as Windows Terminal, show it as the same characters. Output that cannot be written, for example to a full disk, ends the program with exit status 74.
+The checks are integer overflow, division by zero, a conversion whose value does not fit, a shift count outside the bits of its value, an index outside its array or list, a list or a text that outgrows its data stack, and `assert`. Calls that nest too deeply, as in recursion that never reaches its end, stop the program the same way with `error: stack overflow`, without a location: on POSIX systems and on Windows a handler catches the overflow when the stack runs out, so calls cost nothing extra for the check. Every program gets a stack of 8 MiB on Windows as well, the default of Linux and macOS, and the arrays of every call in progress share it. Where the C compiler can, a function with a large frame touches its stack a page at a time, so it cannot step over the guard page that ends the stack. Before the error, the program writes every line it printed. A line appears whole or not at all, so a program that stops in the middle of a `print` leaves no half line behind. Output is UTF-8 text with `\n` line breaks on every system; a Windows console, and a terminal that runs programs in a pseudo console, such as Windows Terminal, show it as the same characters. Output that cannot be written, for example to a full disk, ends the program with exit status 74.
 
 ## 12. Open questions
 
@@ -762,7 +765,6 @@ The checks are integer overflow, division by zero, a conversion whose value does
 | O2 | Generics syntax for user functions | `function first[Item](view[Item] items) returns Item` |
 | O3 | `match` on `packed` values: can a case bind a reference into the payload? | Yes, read-only |
 | O6 | Literal syntax for `array` and `list` values | `[1, 2, 3]` |
-| O7 | Bitwise operations | Functions with whole-word names such as `bit_and` and `shift_left`, not symbols |
 | O8 | Calling C: the syntax and rules of `external` declarations | `external function hypot(float64 x, float64 y) returns float64` |
 | O11 | Removing the overflow checks that stay. The compiler removes every check its interval analysis proves can never fail, with `while` loops worked out to a fixed point and what parameters receive and calls return carried across the program. Measured in `bench/results.md`: four of the seven benchmarks keep no check; built with GCC, the two whose loops stay as written take 0.96 to 1.04 times C's time across runs, and the other two finish in a millisecond, one through a formula the C compiler finds and one through a loop run in blocks of turns (section 13). The checks that stay guard values no interval bounds, such as a Collatz chain or a sum of recursive results; a check against a constant compares the other operand with a limit, so the C compiler keeps the arithmetic plain, and `collatz` takes 1.04 to 1.14 times C's time built with GCC, and 1.69 times built with Clang, level with Rust with overflow checks. | Relations between variables, such as a result that grows with an argument, would bound some of the rest. Worth it once a real program needs one |
 

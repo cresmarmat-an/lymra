@@ -339,6 +339,11 @@ impl Writer {
                 format!("{name} % {}", self.length)
             }
             3 => self.random.below(self.length).to_string(),
+            // A mask with no bit beyond the last index keeps any value inside the array.
+            4 if self.length > 1 => {
+                let name = self.random.pick(&self.variables).clone();
+                format!("bit_and({name}, {})", self.length - 1)
+            }
             _ => self.random.pick(&self.variables).clone(),
         }
     }
@@ -356,11 +361,40 @@ impl Writer {
                     .pick(&["wrapping_add", "wrapping_subtract", "wrapping_multiply"]);
             return format!("{function}({left}, {right})");
         }
+        if self.random.chance(15) {
+            return self.bit_operation(&left, &right);
+        }
         let operator = *self.random.pick(&["+", "-", "*", "/", "%", "+", "-"]);
         if self.ty.is_signed() && self.random.chance(10) {
             return format!("-({left} {operator} {right})");
         }
         format!("({left} {operator} {right})")
+    }
+
+    /**
+     * A bit operation: one that combines the bits of two values, `bit_not`,
+     * or a shift by a count that is a number inside the bits, a value masked
+     * into them, which the optimizer can prove, or a variable that can fall
+     * outside them and stop the program. A count written out is always
+     * inside the bits, since one outside would be an error while compiling.
+     */
+    fn bit_operation(&mut self, left: &str, right: &str) -> String {
+        let bits = self.ty.bits();
+        match self.random.below(8) {
+            0 => format!("bit_and({left}, {right})"),
+            1 => format!("bit_or({left}, {right})"),
+            2 => format!("bit_xor({left}, {right})"),
+            3 => format!("bit_not({left})"),
+            _ => {
+                let shift = *self.random.pick(&["shift_left", "shift_right"]);
+                let count = match self.random.below(4) {
+                    0 | 1 => self.random.below(bits as usize).to_string(),
+                    2 => format!("bit_and({right}, {})", bits - 1),
+                    _ => self.random.pick(&self.variables).clone(),
+                };
+                format!("{shift}({left}, {count})")
+            }
+        }
     }
 
     fn condition(&mut self) -> String {

@@ -1,6 +1,7 @@
 //! The wording of every error the semantic checker reports.
 
 mod arrays;
+mod bits;
 mod choices;
 mod custom_types;
 mod cycles;
@@ -17,6 +18,7 @@ pub(super) use arrays::{
     negative_length, no_length, not_indexable, not_iterable, part_reference, sized_scalar,
     too_large_for_stack,
 };
+pub(super) use bits::{bit_operand_type, bits_argument_count, shift_count_out_of_range};
 pub(super) use choices::{
     Stranger, choice_called, field_name_taken, fieldless_variant_called, match_needs_choice,
     missing_cases, not_a_variant, unknown_case_field, variant_handled_twice,

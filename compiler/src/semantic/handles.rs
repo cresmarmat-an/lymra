@@ -233,6 +233,7 @@ impl<'a, 'src> Analysis<'a, 'src> {
             | ExprKind::Logic { .. }
             | ExprKind::Convert { .. }
             | ExprKind::Wrapping { .. }
+            | ExprKind::Bits { .. }
             | ExprKind::EmptyList
             | ExprKind::Bytes(_)
             | ExprKind::Text(_)

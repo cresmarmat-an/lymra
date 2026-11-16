@@ -327,6 +327,20 @@ pub enum ExprKind {
         left: Box<Expr>,
         right: Box<Expr>,
     },
+    /**
+     * `bit_and(left, right)` and the like, and the shifts, as in
+     * `shift_left(value, count)`: operations on the bits of the left value,
+     * whose type the result has. `bit_not(value)` is `bit_xor` with every
+     * bit set.
+     */
+    Bits {
+        operator: BitOperator,
+        left: Box<Expr>,
+        /// The other value whose bits combine with the left one's, or the count of a shift, which can have any integer type.
+        right: Box<Expr>,
+        /// For a shift, whether the count can fall outside the bits of the value, which has to be checked when the program runs.
+        checked: bool,
+    },
     /// `items[index]`, an element of an array or a list.
     Index {
         array: Box<Expr>,
@@ -524,6 +538,7 @@ impl Expr {
             | ExprKind::Compare { left, right, .. }
             | ExprKind::Logic { left, right, .. }
             | ExprKind::Wrapping { left, right, .. }
+            | ExprKind::Bits { left, right, .. }
             | ExprKind::Index {
                 array: left,
                 index: right,
@@ -586,6 +601,12 @@ impl Expr {
                 right,
                 checked,
                 ..
+            }
+            | ExprKind::Bits {
+                left,
+                right,
+                checked,
+                ..
             } => *checked || left.has_effects() || right.has_effects(),
             ExprKind::Compare { left, right, .. }
             | ExprKind::Logic { left, right, .. }
@@ -635,6 +656,72 @@ impl ArithmeticOperator {
             Self::Divide => "/",
             Self::Remainder => "%",
         }
+    }
+}
+
+/// The operations on the bits of an integer: three that combine two values bit by bit, and the two shifts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BitOperator {
+    And,
+    Or,
+    Xor,
+    /// Moves the bits up by the count, dropping those that pass the top and filling in zeros.
+    ShiftLeft,
+    /// Moves the bits down by the count, filling in copies of the sign bit for a signed type and zeros for an unsigned one.
+    ShiftRight,
+}
+
+impl BitOperator {
+    /// The built-in function that performs it.
+    pub const fn function(self) -> &'static str {
+        match self {
+            Self::And => "bit_and",
+            Self::Or => "bit_or",
+            Self::Xor => "bit_xor",
+            Self::ShiftLeft => "shift_left",
+            Self::ShiftRight => "shift_right",
+        }
+    }
+
+    pub const fn from_function(name: &str) -> Option<Self> {
+        match name.as_bytes() {
+            b"bit_and" => Some(Self::And),
+            b"bit_or" => Some(Self::Or),
+            b"bit_xor" => Some(Self::Xor),
+            b"shift_left" => Some(Self::ShiftLeft),
+            b"shift_right" => Some(Self::ShiftRight),
+            _ => None,
+        }
+    }
+
+    /// Whether the operation is a shift, whose right operand is a count.
+    pub const fn is_shift(self) -> bool {
+        matches!(self, Self::ShiftLeft | Self::ShiftRight)
+    }
+
+    /**
+     * The result for a left value of `ty` and the right one, or `None` for a
+     * shift by a count outside the bits of `ty`, which stops the program.
+     */
+    pub const fn apply(self, left: i128, right: i128, ty: IntegerType) -> Option<i128> {
+        // A value's low 64 bits are its bits as its type holds them, in two's complement for a signed type.
+        let (pattern, other) = (left as u64, right as u64);
+        let bits = match self {
+            Self::And => pattern & other,
+            Self::Or => pattern | other,
+            Self::Xor => pattern ^ other,
+            Self::ShiftLeft | Self::ShiftRight => {
+                if right < 0 || right >= ty.bits() as i128 {
+                    return None;
+                }
+                if let Self::ShiftRight = self {
+                    // Shifting the exact value down rounds toward minus infinity, as an arithmetic shift does.
+                    return Some(left >> right);
+                }
+                pattern << right
+            }
+        };
+        Some(ty.from_bits(bits))
     }
 }
 

@@ -162,7 +162,8 @@ typedef enum {
     LYMRA_OUT_OF_MEMORY,
     LYMRA_EMPTY_STACK,
     LYMRA_STALE_HANDLE,
-    LYMRA_POOL_FULL
+    LYMRA_POOL_FULL,
+    LYMRA_SHIFT_TOO_FAR
 } lymra_trap_kind;
 
 /* Where text goes. The values are the POSIX file descriptors. */
@@ -345,6 +346,7 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
         "the stack is empty",
         "the handle names a value that was removed",
         "the pool is full",
+        "shift count out of range",
     };
     static const char *const helps[] = {
         NULL,
@@ -361,6 +363,8 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
         "taking it out of the list that keeps it\n",
         "help: a pool holds at most 4294967295 values at once; remove the ones that are no longer needed, "
         "or keep them in more than one pool\n",
+        "help: a value can be shifted by at least 0 bits and by fewer bits than it has, such as 0 to 63 for "
+        "an `integer64`; check the count before the shift\n",
     };
     lymra_write_finished();
     lymra_write_error("error: ");
@@ -680,6 +684,48 @@ LYMRA_UNSIGNED_OPERATIONS(unsigned8, uint8_t, UINT8_MAX, LYMRA_UNSIGNED_WIDENED_
 LYMRA_UNSIGNED_OPERATIONS(unsigned16, uint16_t, UINT16_MAX, LYMRA_UNSIGNED_WIDENED_PRODUCT)
 LYMRA_UNSIGNED_OPERATIONS(unsigned32, uint32_t, UINT32_MAX, LYMRA_UNSIGNED_WIDENED_PRODUCT)
 LYMRA_UNSIGNED_OPERATIONS(unsigned64, uint64_t, UINT64_MAX, LYMRA_UNSIGNED_64_PRODUCT)
+
+/*
+ * Shifts. A count lies from 0 to one less than the bits of the value, and
+ * `lymra_shift_count_*` checks that where the optimizer could not prove it,
+ * taking the count as an `int64_t`, where a count too large for one turns
+ * negative and fails too. A shift up computes in 64 unsigned bits, where C
+ * defines every count below 64, and keeps the bits the type holds. A shift
+ * down of a negative value shifts its complement, which is not negative, and
+ * flips the result back, so every compiler fills in copies of the sign bit.
+ */
+#define LYMRA_SHIFT_COUNT(name, width)                                                                         \
+    LYMRA_UNUSED static inline unsigned lymra_shift_count_##name(int64_t count, const char *site) {           \
+        if (count < 0 || count >= (width)) {                                                                   \
+            lymra_trap(LYMRA_SHIFT_TOO_FAR, site);                                                             \
+        }                                                                                                      \
+        return (unsigned)count;                                                                                \
+    }
+#define LYMRA_SIGNED_SHIFTS(name, type, unsigned_type, width)                                                  \
+    LYMRA_SHIFT_COUNT(name, width)                                                                             \
+    LYMRA_UNUSED static inline type lymra_shift_left_##name(type value, unsigned count) {                      \
+        return (type)(unsigned_type)((uint64_t)value << count);                                                \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline type lymra_shift_right_##name(type value, unsigned count) {                     \
+        return value < 0 ? (type)~(~value >> count) : (type)(value >> count);                                  \
+    }
+#define LYMRA_UNSIGNED_SHIFTS(name, type, width)                                                               \
+    LYMRA_SHIFT_COUNT(name, width)                                                                             \
+    LYMRA_UNUSED static inline type lymra_shift_left_##name(type value, unsigned count) {                      \
+        return (type)((uint64_t)value << count);                                                               \
+    }                                                                                                          \
+    LYMRA_UNUSED static inline type lymra_shift_right_##name(type value, unsigned count) {                     \
+        return (type)(value >> count);                                                                         \
+    }
+
+LYMRA_SIGNED_SHIFTS(integer8, int8_t, uint8_t, 8)
+LYMRA_SIGNED_SHIFTS(integer16, int16_t, uint16_t, 16)
+LYMRA_SIGNED_SHIFTS(integer32, int32_t, uint32_t, 32)
+LYMRA_SIGNED_SHIFTS(integer64, int64_t, uint64_t, 64)
+LYMRA_UNSIGNED_SHIFTS(unsigned8, uint8_t, 8)
+LYMRA_UNSIGNED_SHIFTS(unsigned16, uint16_t, 16)
+LYMRA_UNSIGNED_SHIFTS(unsigned32, uint32_t, 32)
+LYMRA_UNSIGNED_SHIFTS(unsigned64, uint64_t, 64)
 
 /* Writes `magnitude` in decimal to standard error, after a minus sign when `negative`. */
 LYMRA_UNUSED static void lymra_write_error_number(uint64_t magnitude, bool negative) {

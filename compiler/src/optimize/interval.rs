@@ -8,7 +8,7 @@
  * an integer type, so it never proves anything false.
  */
 
-use crate::ir::{ArithmeticOperator, IntegerType};
+use crate::ir::{ArithmeticOperator, BitOperator, IntegerType};
 
 /// The integers from `low` to `high`, both included. Never empty.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -227,6 +227,146 @@ impl Interval {
         })
     }
 
+    /**
+     * The values `operator` gives for a left value in this interval, of type
+     * `ty`, and a right one in `other`: the other value whose bits combine
+     * with it, or the count of a shift. Each bound follows from how two's
+     * complement stores a value, the same for every width, and where none
+     * applies the result can be any value of the type.
+     */
+    pub fn bits(self, operator: BitOperator, other: Self, ty: IntegerType) -> Self {
+        let bounded = match operator {
+            BitOperator::And => self.and(other, ty),
+            BitOperator::Or => self.or(other),
+            BitOperator::Xor => self.xor(other, ty),
+            BitOperator::ShiftLeft | BitOperator::ShiftRight => {
+                // A count outside the bits of the type stops the program, so only the others give a value.
+                let counts = other.intersect(Self {
+                    low: 0,
+                    high: i128::from(ty.bits()) - 1,
+                });
+                counts.and_then(|counts| match operator {
+                    BitOperator::ShiftLeft => self.shift_left(counts, ty),
+                    _ => Some(self.shift_right(counts)),
+                })
+            }
+        };
+        bounded.unwrap_or(Self::of_type(ty))
+    }
+
+    /**
+     * Clearing bits lowers a value of either sign, and a value that is not
+     * negative keeps a clear sign bit: so `x & y` lies from 0 up to `x` when
+     * `x` is not negative, and at most at the lower of two negative values.
+     */
+    fn and(self, other: Self, ty: IntegerType) -> Option<Self> {
+        match (Sign::of(self), Sign::of(other)) {
+            (Sign::NotNegative, Sign::NotNegative) => Some(Self {
+                low: 0,
+                high: self.high.min(other.high),
+            }),
+            (Sign::NotNegative, _) => Some(Self {
+                low: 0,
+                high: self.high,
+            }),
+            (_, Sign::NotNegative) => Some(Self {
+                low: 0,
+                high: other.high,
+            }),
+            (Sign::Negative, Sign::Negative) => Some(Self {
+                low: ty.minimum(),
+                high: self.high.min(other.high),
+            }),
+            _ => None,
+        }
+    }
+
+    /**
+     * Setting bits raises a value of either sign, so `x | y` is at least the
+     * higher of the two. Two values that are not negative set no bit above
+     * the highest either has, and a negative value keeps the result negative.
+     */
+    fn or(self, other: Self) -> Option<Self> {
+        match (Sign::of(self), Sign::of(other)) {
+            (Sign::NotNegative, Sign::NotNegative) => Some(Self {
+                low: self.low.max(other.low),
+                high: all_ones_through(self.high.max(other.high)),
+            }),
+            (Sign::Negative, Sign::Negative) => Some(Self {
+                low: self.low.max(other.low),
+                high: -1,
+            }),
+            (Sign::Negative, Sign::NotNegative) => Some(Self {
+                low: self.low,
+                high: -1,
+            }),
+            (Sign::NotNegative, Sign::Negative) => Some(Self {
+                low: other.low,
+                high: -1,
+            }),
+            _ => None,
+        }
+    }
+
+    /**
+     * `x ^ y` has no bit above the highest of two values that are not
+     * negative, and neither has the result for two negative values, which is
+     * the same as for their complements. One of each gives a negative value,
+     * the complement of such a result. With every bit set, as `bit_not` has
+     * it, the result is the exact complement.
+     */
+    fn xor(self, other: Self, ty: IntegerType) -> Option<Self> {
+        let all_ones = Self::exact(ty.from_bits(u64::MAX));
+        if self == all_ones || other == all_ones {
+            let value = if self == all_ones { other } else { self };
+            return Some(Self {
+                low: complement(value.high, ty),
+                high: complement(value.low, ty),
+            });
+        }
+        match (Sign::of(self), Sign::of(other)) {
+            (Sign::NotNegative, Sign::NotNegative) => Some(Self {
+                low: 0,
+                high: all_ones_through(self.high.max(other.high)),
+            }),
+            (Sign::Negative, Sign::Negative) => Some(Self {
+                low: 0,
+                high: all_ones_through((-1 - self.low).max(-1 - other.low)),
+            }),
+            (Sign::Negative, Sign::NotNegative) => Some(Self {
+                low: -1 - all_ones_through((-1 - self.low).max(other.high)),
+                high: -1,
+            }),
+            (Sign::NotNegative, Sign::Negative) => Some(Self {
+                low: -1 - all_ones_through(self.high.max(-1 - other.low)),
+                high: -1,
+            }),
+            _ => None,
+        }
+    }
+
+    /// A shift up by `counts` multiplies by a power of two, while the product fits the type and so loses no bit.
+    fn shift_left(self, counts: Self, ty: IntegerType) -> Option<Self> {
+        let powers = Self {
+            low: 1 << counts.low,
+            high: 1 << counts.high,
+        };
+        Some(self.multiply(powers)).filter(|product| product.fits(ty))
+    }
+
+    /**
+     * A shift down by `counts` divides by a power of two, rounding toward
+     * minus infinity. It is monotonic in the value, and a larger count moves
+     * a value toward 0, or toward -1 for a negative one, so the corners bound
+     * it.
+     */
+    fn shift_right(self, counts: Self) -> Self {
+        Self {
+            low: (self.low >> counts.low).min(self.low >> counts.high),
+            high: (self.high >> counts.low).max(self.high >> counts.high),
+        }
+    }
+
     /// A remainder is smaller in size than the divisor and has the sign of the dividend.
     fn remainder(self, other: Self) -> Option<Self> {
         if other.contains(0) {
@@ -248,12 +388,168 @@ impl Interval {
     }
 }
 
+/// Where the values of an interval lie: all of them not negative, all negative, or some of each.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Sign {
+    NotNegative,
+    Negative,
+    Both,
+}
+
+impl Sign {
+    const fn of(interval: Interval) -> Self {
+        if interval.low >= 0 {
+            Self::NotNegative
+        } else if interval.high < 0 {
+            Self::Negative
+        } else {
+            Self::Both
+        }
+    }
+}
+
+/// The value with every bit set from bit 0 through the highest bit of `value`, which is not negative.
+const fn all_ones_through(value: i128) -> i128 {
+    if value == 0 {
+        0
+    } else {
+        i128::MAX >> (value.leading_zeros() - 1)
+    }
+}
+
+/// `value` with every bit of `ty` flipped: `-value - 1` for a signed type, the largest value less `value` for an unsigned one.
+const fn complement(value: i128, ty: IntegerType) -> i128 {
+    if ty.is_signed() {
+        -1 - value
+    } else {
+        ty.maximum() - value
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn interval(low: i128, high: i128) -> Interval {
         Interval { low, high }
+    }
+
+    /// Values inside `range` worth trying: its ends, the values next to them, and the interesting values inside it.
+    fn samples(range: Interval, interesting: &[i128]) -> Vec<i128> {
+        let mut values: Vec<i128> = [range.low, range.low + 1, range.high - 1, range.high]
+            .into_iter()
+            .chain(interesting.iter().copied())
+            .filter(|value| range.contains(*value))
+            .collect();
+        values.sort_unstable();
+        values.dedup();
+        values
+    }
+
+    /**
+     * Every result of every bit operation on values of an 8-bit type, taken
+     * from many pairs of intervals, lies inside the interval the analysis
+     * gives for that pair. A shift is tried with counts outside the bits
+     * too, which stop the program and so give no result to bound.
+     */
+    #[test]
+    fn bit_operations_stay_inside_their_bounds() {
+        let operators = [
+            BitOperator::And,
+            BitOperator::Or,
+            BitOperator::Xor,
+            BitOperator::ShiftLeft,
+            BitOperator::ShiftRight,
+        ];
+        for ty in [IntegerType::Integer8, IntegerType::Unsigned8] {
+            let interesting: Vec<i128> = [
+                -128, -127, -65, -64, -9, -2, -1, 0, 1, 2, 7, 8, 63, 64, 100, 127, 128, 200, 254,
+                255,
+            ]
+            .into_iter()
+            .filter(|value| ty.contains(*value))
+            .collect();
+            let ranges: Vec<Interval> = interesting
+                .iter()
+                .flat_map(|&low| {
+                    interesting
+                        .iter()
+                        .filter(move |&&high| high >= low)
+                        .map(move |&high| interval(low, high))
+                })
+                .collect();
+            let counts: Vec<Interval> = [(-2, 0), (0, 0), (0, 3), (1, 7), (3, 9), (7, 7), (8, 9)]
+                .into_iter()
+                .map(|(low, high)| interval(low, high))
+                .collect();
+            for operator in operators {
+                let rights = if operator.is_shift() {
+                    &counts
+                } else {
+                    &ranges
+                };
+                for &left in &ranges {
+                    for &right in rights {
+                        let bound = left.bits(operator, right, ty);
+                        for x in samples(left, &interesting) {
+                            for y in samples(right, &interesting) {
+                                if let Some(result) = operator.apply(x, y, ty) {
+                                    assert!(
+                                        bound.contains(result),
+                                        "{operator:?} of {x} in {left:?} and {y} in {right:?} as {ty:?} gives {result}, outside {bound:?}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bit_operations_bound_what_masks_and_shifts_keep() {
+        let any = Interval::of_type(IntegerType::Integer64);
+        // A mask that is not negative bounds any value it is applied to.
+        assert_eq!(
+            any.bits(BitOperator::And, interval(255, 255), IntegerType::Integer64),
+            interval(0, 255)
+        );
+        // `bit_not` is `bit_xor` with every bit set, and flips the bounds exactly.
+        assert_eq!(
+            interval(-3, 10).bits(BitOperator::Xor, interval(-1, -1), IntegerType::Integer64),
+            interval(-11, 2)
+        );
+        assert_eq!(
+            interval(0, 10).bits(BitOperator::Xor, interval(255, 255), IntegerType::Unsigned8),
+            interval(245, 255)
+        );
+        // A shift down by a known count divides, and a shift up that cannot lose a bit multiplies.
+        assert_eq!(
+            any.bits(
+                BitOperator::ShiftRight,
+                interval(56, 56),
+                IntegerType::Integer64
+            ),
+            interval(-128, 127)
+        );
+        assert_eq!(
+            interval(0, 255).bits(
+                BitOperator::ShiftLeft,
+                interval(8, 8),
+                IntegerType::Integer64
+            ),
+            interval(0, 65280)
+        );
+        // A shift up that can push a bit out of the type could give any value of it.
+        assert_eq!(
+            interval(0, 255).bits(
+                BitOperator::ShiftLeft,
+                interval(1, 1),
+                IntegerType::Unsigned8
+            ),
+            Interval::of_type(IntegerType::Unsigned8)
+        );
     }
 
     #[test]

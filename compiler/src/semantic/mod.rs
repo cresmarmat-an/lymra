@@ -10,6 +10,7 @@
  */
 
 mod arrays;
+mod bits;
 mod choices;
 mod custom_types;
 mod cycles;
@@ -51,7 +52,7 @@ use system::BuiltInChoice;
 type CheckResult<T> = Result<T, ErrorReported>;
 
 /// The built-in functions the compiler implements.
-const BUILT_IN_FUNCTIONS: [&str; 17] = [
+const BUILT_IN_FUNCTIONS: [&str; 23] = [
     "print",
     "read_file",
     "write_file",
@@ -69,6 +70,12 @@ const BUILT_IN_FUNCTIONS: [&str; 17] = [
     "wrapping_add",
     "wrapping_subtract",
     "wrapping_multiply",
+    "bit_and",
+    "bit_or",
+    "bit_xor",
+    "bit_not",
+    "shift_left",
+    "shift_right",
 ];
 
 /// Built-in types that are not integers. Calling `array`, `list`, `stack` or `pool` builds one.

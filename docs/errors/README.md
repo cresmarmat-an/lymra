@@ -57,6 +57,7 @@ From 04 on, they are the chapter of the [specification](../spec.md) the rule com
 | [L0413](L0413.md) | unknown field |
 | [L0414](L0414.md) | field not given once by name |
 | [L0415](L0415.md) | type contains itself |
+| [L0416](L0416.md) | shift count outside the bits of its value |
 | [L0501](L0501.md) | wrong number of arguments |
 | [L0502](L0502.md) | function can end without returning a value |
 | [L0503](L0503.md) | `return` does not match the function |

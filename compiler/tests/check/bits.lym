@@ -1,0 +1,12 @@
+function main()
+    constant integer8 small = 1
+    constant integer64 large = 2
+    print("{bit_and(small, large)}")
+    print("{bit_or(true, 1)}")
+    print("{bit_xor(1.5, 2)}")
+    print("{bit_not(1, 2)}")
+    print("{shift_left(large)}")
+    print("{shift_left(large, 64)}")
+    print("{shift_right(small, -1)}")
+    print("{shift_right(small, 8)}")
+    constant bit_and = 3

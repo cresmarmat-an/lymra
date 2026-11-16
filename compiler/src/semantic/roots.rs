@@ -826,6 +826,7 @@ fn expr_reads(function: &Function<'_>, expr: &Expr, read: &mut Live) {
         | ExprKind::Compare { left, right, .. }
         | ExprKind::Logic { left, right, .. }
         | ExprKind::Wrapping { left, right, .. }
+        | ExprKind::Bits { left, right, .. }
         | ExprKind::Index {
             array: left,
             index: right,

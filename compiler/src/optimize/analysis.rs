@@ -480,6 +480,15 @@ impl<'function> Analyzer<'function> {
                 _ => whole_type,
             },
             ExprKind::Convert { operand, .. } => self.range(operand, bounds).unwrap_or(whole_type),
+            ExprKind::Bits {
+                operator,
+                left,
+                right,
+                ..
+            } => match (self.range(left, bounds), self.range(right, bounds)) {
+                (Some(left), Some(right)) => left.bits(*operator, right, ty),
+                _ => whole_type,
+            },
             // A wrapping result is the exact one when that fits the type, and otherwise could be any value of it.
             ExprKind::Wrapping {
                 operator,
@@ -628,6 +637,7 @@ impl<'function> Analyzer<'function> {
             ExprKind::Arithmetic { left, right, .. }
             | ExprKind::Compare { left, right, .. }
             | ExprKind::Wrapping { left, right, .. }
+            | ExprKind::Bits { left, right, .. }
             | ExprKind::Index {
                 array: left,
                 index: right,
@@ -694,6 +704,12 @@ impl<'function> Analyzer<'function> {
             ExprKind::Convert { operand, .. } => self
                 .range(operand, bounds)
                 .is_some_and(|range| range.fits(ty)),
+            // A shift's count has to fall within the bits of the value it shifts, whose type the result has.
+            ExprKind::Bits {
+                operator, right, ..
+            } if operator.is_shift() => self
+                .range(right, bounds)
+                .is_some_and(|counts| counts.low >= 0 && counts.high < i128::from(ty.bits())),
             _ => false,
         };
         if !safe {
@@ -701,7 +717,8 @@ impl<'function> Analyzer<'function> {
         }
         if let ExprKind::Arithmetic { checked, .. }
         | ExprKind::Negate { checked, .. }
-        | ExprKind::Convert { checked, .. } = &mut expr.kind
+        | ExprKind::Convert { checked, .. }
+        | ExprKind::Bits { checked, .. } = &mut expr.kind
         {
             *checked = false;
         }

@@ -1,0 +1,11 @@
+exit status 70
+--- standard output
+8
+-9223372036854775808
+--- standard error
+error: shift count out of range
+ --> tests/run/shift_count.lym:7:12
+  |
+7 |     return shift_left(value, count)
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^
+help: a value can be shifted by at least 0 bits and by fewer bits than it has, such as 0 to 63 for an `integer64`; check the count before the shift

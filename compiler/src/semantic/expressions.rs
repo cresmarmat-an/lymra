@@ -827,6 +827,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             "slice" => return self.check_slice(call, span),
             "bytes" => return self.check_bytes(call, span),
             "length" => return self.check_length(call, span),
+            "bit_not" => return self.check_bit_not(call, span, hint),
             _ => {}
         }
         if let Some(operation) = ir::SystemOperation::from_function(name) {
@@ -834,6 +835,9 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }
         if let Some(operator) = ir::WrappingOperator::from_function(name) {
             return self.check_wrapping(operator, call, span, hint);
+        }
+        if let Some(operator) = ir::BitOperator::from_function(name) {
+            return self.check_bits(operator, call, span, hint);
         }
         self.mark_argument_reads(&call.arguments);
         let callee = call.callee.span;

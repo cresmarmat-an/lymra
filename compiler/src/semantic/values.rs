@@ -137,7 +137,31 @@ pub(super) fn fold_negate(value: i128, ty: IntegerType) -> Result<i128, FoldErro
 
 /// Whether an expression is made only of literals of one kind, so its type comes from its context.
 pub(super) fn is_literal(expr: &ast::Expr<'_>) -> bool {
-    literal_integer(expr).is_some() || is_float_literal(expr)
+    literal_integer(expr).is_some() || is_float_literal(expr) || is_literal_bits(expr)
+}
+
+/**
+ * Whether an expression is a bit function on integer literals, such as
+ * `shift_left(1, 7)`, whose type comes from its context as theirs does. Only
+ * the values whose type the result has count: a shift's count does not.
+ */
+fn is_literal_bits(expr: &ast::Expr<'_>) -> bool {
+    let ast::ExprKind::Call(call) = &expr.kind else {
+        return false;
+    };
+    let ast::ExprKind::Name(name) = call.callee.kind else {
+        return false;
+    };
+    let typed = match name {
+        "bit_and" | "bit_or" | "bit_xor" => call.arguments.len(),
+        "bit_not" | "shift_left" | "shift_right" => 1,
+        _ => return false,
+    };
+    !call.arguments.is_empty()
+        && call.arguments.iter().take(typed).all(|argument| {
+            matches!(&argument.kind, ast::ArgumentKind::Positional(value)
+                if literal_integer(value).is_some() || is_literal_bits(value))
+        })
 }
 
 /// Whether an expression is made only of float literals, `-` and arithmetic other than `%`.

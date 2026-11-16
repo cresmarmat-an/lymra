@@ -1,0 +1,68 @@
+#[
+    Bit functions on every integer type, at the ends of each: they combine
+    bits, flip them and move them, filling a signed value shifted right
+    with copies of its sign bit. The values come in as parameters, so the
+    program computes them; a top-level constant is computed while
+    compiling. A count masked into the bits of its value, like an index
+    masked into its array, needs no check.
+]#
+
+constant unsigned8 high_and_low = bit_or(shift_left(1, 7), 1)
+
+function signed8(integer8 low, integer8 high, integer64 count)
+    print("integer8 {bit_and(low, high)} {bit_or(low, high)} {bit_xor(low, high)} {bit_not(low)} {bit_not(high)}")
+    print("integer8 {shift_left(high, 1)} {shift_left(low, count)} {shift_right(low, count)} {shift_right(low, 7)} {shift_right(high, 7)}")
+
+function unsigned8s(unsigned8 low, unsigned8 high, integer64 count)
+    print("unsigned8 {bit_and(low, high)} {bit_or(low, high)} {bit_xor(low, high)} {bit_not(low)} {bit_not(high)}")
+    print("unsigned8 {shift_left(high, 1)} {shift_left(high, count)} {shift_right(high, count)} {shift_right(high, 7)}")
+
+function signed16(integer16 low, integer16 high, integer64 count)
+    print("integer16 {bit_xor(low, high)} {bit_not(low)} {shift_left(high, 1)} {shift_right(low, count)} {shift_right(low, 15)}")
+
+function unsigned16s(unsigned16 low, unsigned16 high, integer64 count)
+    print("unsigned16 {bit_xor(low, high)} {bit_not(low)} {shift_left(high, 1)} {shift_right(high, count)} {shift_right(high, 15)}")
+
+function signed32(integer32 low, integer32 high, integer64 count)
+    print("integer32 {bit_xor(low, high)} {bit_not(low)} {shift_left(high, 1)} {shift_right(low, count)} {shift_right(low, 31)}")
+
+function unsigned32s(unsigned32 low, unsigned32 high, integer64 count)
+    print("unsigned32 {bit_xor(low, high)} {bit_not(low)} {shift_left(high, 1)} {shift_right(high, count)} {shift_right(high, 31)}")
+
+function signed64(integer64 low, integer64 high, integer64 count)
+    print("integer64 {bit_and(low, high)} {bit_or(low, high)} {bit_xor(low, high)} {bit_not(low)} {bit_not(high)}")
+    print("integer64 {shift_left(high, 1)} {shift_left(low, count)} {shift_right(low, count)} {shift_right(low, 63)} {shift_right(high, 63)}")
+
+function unsigned64s(unsigned64 low, unsigned64 high, integer64 count)
+    print("unsigned64 {bit_and(low, high)} {bit_or(low, high)} {bit_xor(low, high)} {bit_not(low)} {bit_not(high)}")
+    print("unsigned64 {shift_left(high, 1)} {shift_left(high, count)} {shift_right(high, count)} {shift_right(high, 63)}")
+
+function xorshift(unsigned64 state) returns unsigned64
+    variable unsigned64 value = state
+    value = bit_xor(value, shift_left(value, 13))
+    value = bit_xor(value, shift_right(value, 7))
+    value = bit_xor(value, shift_left(value, 17))
+    return value
+
+function masked(integer64 value, integer64 count) returns integer64
+    variable array[integer64, 8] table = array(0)
+    for index in range(0, 8)
+        table[index] = index * index
+    return shift_left(table[bit_and(value, 7)], bit_and(count, 31))
+
+function main()
+    print("constant {high_and_low}")
+    signed8(-128, 127, 3)
+    unsigned8s(0, 255, 3)
+    signed16(-32768, 32767, 9)
+    unsigned16s(0, 65535, 9)
+    signed32(-2147483648, 2147483647, 17)
+    unsigned32s(0, 4294967295, 17)
+    signed64(-9223372036854775808, 9223372036854775807, 33)
+    unsigned64s(0, 18446744073709551615, 33)
+    signed64(-40, 7, 0)
+    variable unsigned64 state = 12345
+    for _ in range(0, 3)
+        state = xorshift(state)
+        print("xorshift {state}")
+    print("masked {masked(13, 2)} {masked(-1, 33)} {masked(9223372036854775807, -1)}")
