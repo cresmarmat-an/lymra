@@ -1,2 +1,5 @@
 # Every text file is checked out with LF line endings on every platform, so recorded outputs match byte for byte.
 * text=auto eol=lf
+
+# Standard input for the run tests is given byte for byte, line breaks and all.
+*.input -text
