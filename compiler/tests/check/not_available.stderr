@@ -22,14 +22,6 @@ error[L0206]: unknown name `make`
    |
 help: declare it before this line with `constant` or `variable`, or check the spelling
 
-error[L0309]: text with interpolation can only be given to `print` for now
-  --> tests/check/not_available.lym:17:21
-   |
-17 |     constant text = "count is {ratio}"
-   |                     ^^^^^^^^^^^^^^^^^^ the compiler adds this in roadmap phase 3
-   |
-help: write this part another way for now; the roadmap in the README lists what each phase adds
-
 error[L0309]: modules are not available yet
   --> tests/check/not_available.lym:19:38
    |
@@ -54,5 +46,5 @@ error[L0309]: `with` blocks are not available yet
    |
 help: write this part another way for now; the roadmap in the README lists what each phase adds
 
-found 7 errors in tests/check/not_available.lym
+found 6 errors in tests/check/not_available.lym
 run `lymra explain L0309` to read why a rule exists and how to fix it

@@ -219,16 +219,7 @@ impl Interpreter<'_, '_> {
             }
             Statement::Print(parts) => {
                 // Every value is computed before the line starts, as in the C the compiler makes.
-                let mut line = String::new();
-                for part in parts {
-                    match part {
-                        PrintPart::Text(text) => line.push_str(text),
-                        PrintPart::Value { value, .. } => {
-                            let value = self.expr(value, slots)?;
-                            let _ = write!(line, "{}", describe(&value));
-                        }
-                    }
-                }
+                let line = self.text(parts, slots)?;
                 self.output.push_str(&line);
                 self.output.push('\n');
             }
@@ -451,6 +442,21 @@ impl Interpreter<'_, '_> {
         }
     }
 
+    /// The text that `parts` make, each value written as `print` writes it.
+    fn text(&mut self, parts: &[PrintPart], slots: &mut [Slot]) -> Eval<String> {
+        let mut text = String::new();
+        for part in parts {
+            match part {
+                PrintPart::Text(literal) => text.push_str(literal),
+                PrintPart::Value { value, .. } => {
+                    let value = self.expr(value, slots)?;
+                    let _ = write!(text, "{}", describe(&value));
+                }
+            }
+        }
+        Ok(text)
+    }
+
     fn condition(&mut self, expr: &Expr, slots: &mut [Slot]) -> Eval<bool> {
         Ok(matches!(self.expr(expr, slots)?, Slot::Boolean(true)))
     }
@@ -531,6 +537,7 @@ impl Interpreter<'_, '_> {
                 return Ok(Slot::Compound(vec![value; length]));
             }
             ExprKind::EmptyList => return Ok(Slot::Compound(Vec::new())),
+            ExprKind::Text(parts) => return Ok(Slot::Text(self.text(parts, slots)?)),
             ExprKind::Pop(stack) => {
                 return match &mut slots[*stack] {
                     Slot::Compound(elements) => elements.pop().ok_or(Stop::Ended(Ending::Trapped)),

@@ -1,0 +1,20 @@
+#[
+    Error L0407. The text of a list's elements lies in the order of its
+    elements, so an element of a list of text can't get new text in place.
+    A part of it that holds no text can change.
+]#
+
+type Score
+    string name
+    integer32 points
+
+function main()
+    variable list[string] names = list()
+    push(variable names, "Ana")
+    names[0] = "Cy"
+    variable list[Score] scores = list()
+    push(variable scores, Score(name = "Bo", points = 1))
+    scores[0].name = "Di"
+    scores[0] = Score(name = "Ed", points = 2)
+    scores[0].points = 2
+    print("{names[0]} {scores[0].name}")

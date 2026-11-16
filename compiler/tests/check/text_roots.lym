@@ -1,0 +1,57 @@
+#[
+    Errors about what reads text built from values. Text can't be replaced,
+    get new text in a part, or go to a function that can give it new text,
+    while a view of its bytes is still used or a `for` loop goes over it or
+    over its bytes (L0703); a view can't show text a statement builds and
+    frees (L0701); and a function that calls itself can't replace a
+    caller's text that its own text sits above (L0704).
+]#
+
+type Score
+    string name
+    integer32 points
+
+function deepen(variable string text, integer64 depth)
+    variable string mine = "{depth}"
+    if depth > 0
+        deepen(variable mine, depth - 1)
+    text = "{text}x"
+    print(mine)
+
+function exclaim(variable string text)
+    text = "{text}!"
+
+function main()
+    variable text = "abc{1}"
+    constant shown = bytes(text)
+    text = "zz{2}"
+    print("{shown[0]} {text}")
+
+    variable score = Score(name = "Eve{3}", points = 3)
+    constant letters = bytes(score.name)
+    score.name = "Fay"
+    print("{letters[0]}")
+
+    constant gone = bytes("built{4}")
+    print("{gone[0]}")
+
+    variable start = "s"
+    deepen(variable start, 2)
+
+    variable word = "w{5}"
+    for byte in bytes(word)
+        word = "{byte}"
+    print(word)
+
+    variable named = Score(name = "Gil{6}", points = 6)
+    for byte in bytes(named.name)
+        named.name = "{byte}"
+
+    variable loud = "hey{7}"
+    constant first = bytes(loud)
+    exclaim(variable loud)
+    print("{first[0]} {loud}")
+
+    variable array[string, 2] slots = array("s{8}")
+    for each in slots
+        slots[0] = "{each}!"

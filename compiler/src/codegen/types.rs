@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::{INDENT, c_syntax};
+use super::{INDENT, c_syntax, text_types};
 use crate::ir::{
     ArrayType, ChoiceType, CustomType, FloatType, ListType, PoolType, Sequence, Type, ViewType,
 };
@@ -32,8 +32,8 @@ pub(super) struct CTypes {
     definitions: Vec<String>,
     /// Whether a float type has been named, so the program uses floats.
     pub uses_floats: bool,
-    /// Whether a list or a pool type has been named, so the program needs the runtime's data stacks.
-    pub uses_lists: bool,
+    /// Whether a list, a pool, or a type that holds text has been named, so the program needs the runtime's data stacks.
+    pub uses_data_stacks: bool,
 }
 
 impl CTypes {
@@ -76,6 +76,10 @@ impl CTypes {
             custom.name
         ));
         self.customs.insert(custom.name.clone(), name.clone());
+        if custom.fields.iter().any(|field| field.ty.holds_text()) {
+            let walks = text_types::custom_walks(self, &name, custom);
+            self.definitions.push(walks);
+        }
         name
     }
 
@@ -121,6 +125,14 @@ impl CTypes {
             c_syntax::TAG
         ));
         self.customs.insert(choice.name.clone(), name.clone());
+        let holds_text = choice
+            .variants
+            .iter()
+            .any(|variant| variant.fields.iter().any(|field| field.ty.holds_text()));
+        if holds_text {
+            let walks = text_types::choice_walks(self, &name, choice);
+            self.definitions.push(walks);
+        }
         name
     }
 
@@ -150,6 +162,10 @@ impl CTypes {
         let name = format!("array_{}", self.arrays.len());
         self.definitions.push(definition(&name, &element, array));
         self.arrays.insert(Arc::clone(array), name.clone());
+        if array.element.holds_text() {
+            let walks = text_types::array_walks(self, &name, array);
+            self.definitions.push(walks);
+        }
         name
     }
 
@@ -159,13 +175,23 @@ impl CTypes {
         }
         let element = self.name(&list.element);
         let name = format!("{}_{}", list.kind.name(), self.lists.len());
-        self.definitions
-            .push(list_definition(&name, &element, &list.element));
-        if list.kind == Sequence::Stack {
-            self.definitions.push(stack_definition(&name, &element));
-        }
         self.lists.insert(Arc::clone(list), name.clone());
-        self.uses_lists = true;
+        self.uses_data_stacks = true;
+        if list.element.holds_text() {
+            let definition = text_types::text_list_definition(self, &name, &element, &list.element);
+            self.definitions.push(definition);
+            if list.kind == Sequence::Stack {
+                let definition =
+                    text_types::text_stack_definition(self, &name, &element, &list.element);
+                self.definitions.push(definition);
+            }
+        } else {
+            self.definitions
+                .push(list_definition(&name, &element, &list.element));
+            if list.kind == Sequence::Stack {
+                self.definitions.push(stack_definition(&name, &element));
+            }
+        }
         name
     }
 
@@ -178,7 +204,7 @@ impl CTypes {
         self.definitions
             .push(pool_definition(&name, &element, &pool.element));
         self.pools.insert(Arc::clone(pool), name.clone());
-        self.uses_lists = true;
+        self.uses_data_stacks = true;
         name
     }
 

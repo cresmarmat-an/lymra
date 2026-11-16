@@ -1,0 +1,85 @@
+#[
+    Lists, stacks, arrays and choices hold text built from values, each
+    keeping its own copy: a list keeps the text of its elements, `pop`
+    hands back an element that keeps its text after the stack frees it, a
+    copy of a list is independent, and a list is replaced whole. A
+    `variable` parameter gives the caller's binding new text.
+]#
+
+type Score
+    string name
+    integer32 points
+
+choice Token
+    Word(string text)
+    Number(integer64 value)
+
+function rename(variable Score score, string suffix)
+    score.name = "{score.name}{suffix}"
+
+function shout(variable string text)
+    text = "{text}!"
+
+function words(integer64 count) returns list[string]
+    variable list[string] made = list()
+    for index in range(0, count)
+        push(variable made, "word{index}")
+    return made
+
+function main()
+    variable list[string] lines = list()
+    for place in range(0, 3)
+        push(variable lines, "{place + 1}. line")
+    for line in lines
+        print(line)
+    print("first: {lines[0]}, count {length(lines)}")
+
+    variable list[Score] scores = list()
+    push(variable scores, Score(name = "Ana", points = 31))
+    push(variable scores, Score(name = "{lines[1]} scorer", points = 47))
+    for score in scores
+        print("{score.name}: {score.points}")
+    scores[0].points = 32
+    print("{scores[0].name} now {scores[0].points}")
+
+    variable stack[string] pending = stack()
+    push(variable pending, "a{1}")
+    push(variable pending, "b{2}")
+    push(variable pending, "static")
+    while length(pending) > 0
+        constant item = pop(variable pending)
+        print("popped {item}")
+
+    variable array[string, 3] names = array("")
+    names[0] = "x{0}"
+    names[1] = "y{1}"
+    names[2] = "{names[0]}{names[1]}"
+    for name in names
+        print("name {name}")
+
+    constant Token token = Word(text = "hi{3}")
+    match token
+        case Word(text)
+            print("word {text}")
+        case Number(value)
+            print("number {value}")
+
+    variable Score mine = Score(name = "me", points = 1)
+    constant points = "{mine.points}?"
+    rename(variable mine, points)
+    rename(variable mine, "!")
+    print(mine.name)
+    variable text = "wow"
+    shout(variable text)
+    shout(variable text)
+    print(text)
+
+    constant many = words(4)
+    print("{many[3]} {length(many)}")
+    variable copy = many
+    push(variable copy, "extra")
+    print("{copy[4]} {length(many)} {length(copy)}")
+    lines = words(2)
+    print("{lines[1]} {length(lines)}")
+    lines = list()
+    print("{length(lines)}")

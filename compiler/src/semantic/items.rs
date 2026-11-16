@@ -342,6 +342,7 @@ fn runtime_part(expr: &ir::Expr) -> Span {
         | ir::ExprKind::Pop(_)
         | ir::ExprKind::Top(_)
         | ir::ExprKind::Insert { .. }
+        | ir::ExprKind::Text(_)
         | ir::ExprKind::Construct(_)
         | ir::ExprKind::Variant { .. } => expr.span,
     }

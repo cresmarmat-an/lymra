@@ -25,7 +25,8 @@ use super::walk::{
 };
 use crate::diagnostics::Diagnostic;
 use crate::ir::{
-    Argument, Block, Call, Expr, ExprKind, Function, FunctionId, LocalId, PlaceStep, Statement,
+    Argument, Block, Call, Expr, ExprKind, Function, FunctionId, LocalId, Place, PlaceStep,
+    Statement, Type,
 };
 use crate::source::Span;
 
@@ -54,9 +55,26 @@ pub(super) fn check(functions: &[Function<'_>]) -> Vec<Diagnostic> {
     diagnostics
 }
 
-/// Whether `local` of `function` holds a list.
+/// Whether `local` of `function` keeps something on a data stack: a list, a stack, a pool, or text.
 fn is_list(function: &Function<'_>, local: LocalId) -> bool {
-    function.locals[local].ty.is_growable()
+    keeps_data_stack(&function.locals[local].ty)
+}
+
+fn keeps_data_stack(ty: &Type) -> bool {
+    ty.is_growable() || (ty.holds_text() && ty.as_view().is_none())
+}
+
+/**
+ * Whether assigning `value` to `target` rewrites what the binding keeps on
+ * its data stack: a whole list, stack, pool or text replaced, or new text in
+ * a part of a binding that holds text, whose text is then gathered again.
+ */
+fn rewrites(function: &Function<'_>, target: &Place, value: &Expr) -> bool {
+    if target.steps.is_empty() {
+        keeps_data_stack(&value.ty)
+    } else {
+        value.ty.holds_text() && is_list(function, target.local)
+    }
 }
 
 /// Which lists reach which `variable` list parameters, and which of those parameters can change.
@@ -143,7 +161,7 @@ impl Edges<'_, '_> {
             match statement {
                 Statement::Push { list, .. } => self.change(*list),
                 Statement::Assign { target, value }
-                    if target.steps.is_empty() && value.ty.is_growable() =>
+                    if rewrites(&self.functions[self.caller], target, value) =>
                 {
                     self.change(target.local);
                 }
@@ -217,12 +235,12 @@ impl Walk<'_, '_> {
                         self.expr(&index.value);
                     }
                 }
-                if !(target.steps.is_empty() && value.ty.is_growable()) {
+                if !rewrites(&self.functions[self.function], target, value) {
                     self.expr(value);
                     return;
                 }
-                // A new list that does not read the old one is built after the old one is freed (spec 7.9).
-                if value.mentions(target.local) {
+                // A new list or text that does not read the old one is built after the old one is freed (spec 7.9).
+                if !target.steps.is_empty() || value.mentions(target.local) {
                     self.expr(value);
                 } else {
                     let live = self.live.clone();
@@ -301,7 +319,11 @@ impl Walk<'_, '_> {
                 change,
                 span,
                 (binding.name, binding.span),
-                Collection::of_type(&binding.ty),
+                if binding.ty.is_growable() {
+                    Collection::of_type(&binding.ty).name()
+                } else {
+                    "text"
+                },
             ));
         }
     }

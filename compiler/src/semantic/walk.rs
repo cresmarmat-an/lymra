@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use crate::ir::{
     Argument, Block, Call, Expr, ExprKind, Function, LocalId, PlaceStep, PrintPart, Statement,
+    text_values,
 };
 use crate::source::Span;
 
@@ -68,6 +69,11 @@ pub(super) fn each_expr<'a>(expr: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
         | ExprKind::Pop(_) => {}
         ExprKind::Call(call) => {
             for value in argument_values(call) {
+                each_expr(value, visit);
+            }
+        }
+        ExprKind::Text(parts) => {
+            for value in text_values(parts) {
                 each_expr(value, visit);
             }
         }

@@ -89,6 +89,7 @@ error_codes! {
     L0404 => "number does not fit its type",
     L0405 => "operator used on the wrong type",
     L0406 => "division by zero",
+    L0407 => "new text in an element of a list",
     L0409 => "array or list type written wrong",
     L0410 => "value too large for the call stack",
     L0411 => "index out of range",
@@ -109,7 +110,7 @@ error_codes! {
     L0701 => "view outlives what it shows",
     L0702 => "stack popped while something still uses it",
     L0703 => "value replaced while something still uses it",
-    L0704 => "list changed while a newer list sits above it",
+    L0704 => "value changed while a newer value sits above it",
     L0705 => "handle used with another pool",
     L0706 => "pool of values without one fixed size",
 }

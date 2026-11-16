@@ -1,8 +1,8 @@
 /*!
  * The runtime's data stacks on their own, with every C compiler: the
  * reservation, memory committed in doubling steps as a value grows, moves
- * between and within stacks, freeing, shrinking, and the two errors a
- * growing value can stop the program with. Built with AddressSanitizer, it
+ * between and within stacks, freeing, shrinking, where text lies, and the
+ * two errors a growing value or new text can stop the program with. Built with AddressSanitizer, it
  * also checks which bytes are marked as freed. Programs only reach these through generated
  * code, which cannot make a stack small enough to fill or put a value under
  * another on purpose, so the harness calls the runtime directly.
@@ -231,6 +231,37 @@ static void fill_up(void) {
     lymra_data_stack_extend(stack, start + LYMRA_COMMIT_STEP, 2 * LYMRA_COMMIT_STEP, "  --> fill.lym:2:1\n");
 }
 
+/* Where text starts and ends on a data stack, and that text the program itself keeps is never copied. */
+static void check_text_ends(void) {
+    lymra_data_stack *stack = &lymra_data_stacks[1];
+    char *start = stack->top;
+    lymra_string kept = {"kept", 4};
+    lymra_text_own(&kept, stack, "kept");
+    require("text the program keeps is not copied", stack->top == start && kept.data[0] == 'k');
+    char *bytes = lymra_data_stack_extend(stack, stack->top, 3, "bytes");
+    memcpy(bytes, "abc", 3);
+    lymra_string copy = {bytes, 3};
+    lymra_text_own(&copy, stack, "copy");
+    require("text on a data stack is copied to its top", copy.data == bytes + 3 && memcmp(copy.data, "abc", 3) == 0);
+    lymra_string empty = {"", 0};
+    require("text ends where its last byte is", lymra_text_highest(&copy, stack, start) == bytes + 6);
+    require("text the program keeps ends on no data stack", lymra_text_highest(&kept, stack, start) == start);
+    require("empty text ends on no data stack", lymra_text_highest(&empty, stack, start) == start);
+    require("text starts where its first byte is", lymra_text_lowest(&copy, stack, NULL) == bytes + 3);
+    lymra_data_stack_release(stack, start);
+}
+
+/* Gives new text to a value that newer text sits above, which the compiler rejects in programs (L0704). */
+static void text_under(void) {
+    lymra_data_stack *stack = &lymra_data_stacks[0];
+    char *start = stack->top;
+    char *bytes = lymra_data_stack_extend(stack, stack->top, 2, "  --> text.lym:1:1\n");
+    memcpy(bytes, "ab", 2);
+    lymra_string older = {bytes, 2};
+    lymra_data_stack_extend(stack, stack->top, 2, "  --> text.lym:2:1\n");
+    lymra_data_stack_require_top(stack, lymra_text_highest(&older, stack, start), "  --> text.lym:3:1\n");
+}
+
 /* Grows a value that a newer value sits above. */
 static void grow_under(void) {
     lymra_data_stack *stack = &lymra_data_stacks[0];
@@ -249,12 +280,17 @@ int main(int argc, char **argv) {
         grow_under();
         return 0;
     }
+    if (argc > 1 && strcmp(argv[1], "text_under") == 0) {
+        text_under();
+        return 0;
+    }
     check_reservation();
     check_growth();
     check_large_request();
     check_places();
     check_top();
     check_shrink();
+    check_text_ends();
     printf("%s: %lu checks, %lu wrong\n", failures == 0 ? "ok" : "failed", checks, failures);
     return failures == 0 ? 0 : 1;
 }
@@ -319,8 +355,14 @@ fn data_stacks_grow_move_and_free() {
         );
         assert_stopped(
             &run(&executable, Some("under")),
-            "error: a list changed while a newer list sat above it on its data stack\n",
+            "error: a value changed while a newer value sat above it on its data stack\n",
             "under.lym:3:1",
+            &compiler.name(),
+        );
+        assert_stopped(
+            &run(&executable, Some("text_under")),
+            "error: a value changed while a newer value sat above it on its data stack\n",
+            "text.lym:3:1",
             &compiler.name(),
         );
         fs::remove_file(&executable).ok();

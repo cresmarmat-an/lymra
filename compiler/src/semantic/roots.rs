@@ -28,13 +28,13 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use super::errors::{self, Freeing, Holder};
+use super::errors::{self, Freeing, Holder, Owner};
 use super::handles::PoolsOfLocals;
 use super::walk::{Blocks, each_expr, statement_blocks, statement_calls, statement_pops};
 use crate::diagnostics::Diagnostic;
 use crate::ir::{
-    Argument, Block, Call, Expr, ExprKind, Function, LocalId, PlaceStep, PrintPart, Sequence,
-    Statement, Type,
+    Argument, Block, Call, Expr, ExprKind, Function, LocalId, Place, PlaceStep, PrintPart,
+    Statement, text_values,
 };
 use crate::source::Span;
 
@@ -96,9 +96,19 @@ fn is_view(function: &Function<'_>, local: LocalId) -> bool {
     function.locals[local].ty.as_view().is_some()
 }
 
-/// Whether replacing `local` frees what it holds: a list, a stack or a pool.
-fn is_growable(function: &Function<'_>, local: LocalId) -> bool {
-    function.locals[local].ty.is_growable()
+/// Whether replacing `local` frees what it holds: a list, a stack, a pool, or text.
+fn frees_on_replace(function: &Function<'_>, local: LocalId) -> bool {
+    let ty = &function.locals[local].ty;
+    ty.is_growable() || (ty.holds_text() && ty.as_view().is_none())
+}
+
+/**
+ * Whether the assignment of `value` to `target` frees what something may
+ * still read: a whole list, stack, pool or text replaced, or new text in a
+ * part of a binding that holds text, which gathers that binding's text again.
+ */
+fn assignment_frees(function: &Function<'_>, target: &Place, value: &Expr) -> bool {
+    frees_on_replace(function, target.local) && (target.steps.is_empty() || value.ty.holds_text())
 }
 
 /// Whether later statements reading `local` matter to these checks: a view, or a value that holds handles.
@@ -215,21 +225,20 @@ impl<'a, 'src> Analysis<'a, 'src> {
         }
     }
 
-    /// The roots of a view made from `expr`: what keeps the elements it would show.
+    /**
+     * The roots of a view made from `expr`: what keeps the elements it would
+     * show, or the bytes of the text it is. Text in the program itself lasts
+     * as long as the program; a binding keeps its own text.
+     */
     fn roots_of(&self, expr: &Expr) -> Roots {
-        // Text values all lie in the program itself so far.
-        if expr.ty == Type::String {
-            return Roots::from([Root::Static]);
-        }
         match &expr.kind {
             ExprKind::Local(local) => self.local_roots(*local),
             ExprKind::Field { object: inner, .. }
             | ExprKind::Index { array: inner, .. }
             | ExprKind::View(inner)
+            | ExprKind::Bytes(inner)
             | ExprKind::Slice { items: inner, .. } => self.roots_of(inner),
-            ExprKind::Bytes(_) | ExprKind::Literal(_) | ExprKind::Constant(_) => {
-                Roots::from([Root::Static])
-            }
+            ExprKind::Literal(_) | ExprKind::Constant(_) => Roots::from([Root::Static]),
             ExprKind::Call(call) if expr.ty.as_view().is_some() => self.summaries[call.function]
                 .returns
                 .iter()
@@ -280,8 +289,8 @@ impl<'a, 'src> Analysis<'a, 'src> {
                     let returned = self.positions_of(&self.roots_of(value));
                     summary.returns.extend(returned);
                 }
-                Statement::Assign { target, .. }
-                    if target.steps.is_empty() && is_growable(self.function, target.local) =>
+                Statement::Assign { target, value }
+                    if assignment_frees(self.function, target, value) =>
                 {
                     summary
                         .replaces
@@ -525,9 +534,14 @@ impl Checks<'_, '_, '_> {
                 live.extend(read);
                 live
             }
-            Statement::Assign { target, .. } => {
-                if target.steps.is_empty() && is_growable(self.function(), target.local) {
-                    self.freed(target.local, Freeing::Assigned(target.span), &after);
+            Statement::Assign { target, value } => {
+                if assignment_frees(self.function(), target, value) {
+                    let how = if target.steps.is_empty() {
+                        Freeing::Assigned(target.span)
+                    } else {
+                        Freeing::NewTextInPart(target.span)
+                    };
+                    self.freed(target.local, how, &after);
                 }
                 let mut live = after;
                 if target.steps.is_empty() {
@@ -639,20 +653,24 @@ impl Checks<'_, '_, '_> {
         head
     }
 
-    /// Reports `list`, which frees elements as `how` says, if a `for` loop goes over it or a view of it is in use.
-    fn freed(&mut self, list: LocalId, how: Freeing<'_>, in_use: &Live) {
+    /**
+     * Reports `local`, a list, a stack, a pool or a value that holds text,
+     * which frees what it keeps as `how` says, if a `for` loop goes over it
+     * or a view of it is in use.
+     */
+    fn freed(&mut self, local: LocalId, how: Freeing<'_>, in_use: &Live) {
         if !self.report {
             return;
         }
-        let root = Root::Local(list);
-        let kind = self.function().locals[list]
-            .ty
-            .as_list()
-            .map_or(Sequence::List, |list| list.kind);
-        if self.function().locals[list].ty.as_pool().is_some() {
-            self.pool_freed(list, how, in_use);
+        let ty = &self.function().locals[local].ty;
+        if ty.as_pool().is_some() {
+            self.pool_freed(local, how, in_use);
             return;
         }
+        let owner = ty
+            .as_list()
+            .map_or(Owner::Text, |list| Owner::Sequence(list.kind));
+        let root = Root::Local(local);
         let looped = self
             .iterated
             .iter()
@@ -660,7 +678,7 @@ impl Checks<'_, '_, '_> {
             .find(|iterated| iterated.roots.contains(&root));
         if let Some(iterated) = looped {
             let diagnostic =
-                errors::freed_while_iterated(self.name(list), kind, how, iterated.span);
+                errors::freed_while_iterated(self.name(local), owner, how, iterated.span);
             self.diagnostics.push(diagnostic);
             return;
         }
@@ -673,7 +691,7 @@ impl Checks<'_, '_, '_> {
         if let Some(view) = viewing {
             let declared = self.function().locals[view].span;
             let diagnostic =
-                errors::freed_while_viewed(self.name(list), kind, self.name(view), how, declared);
+                errors::freed_while_viewed(self.name(local), owner, self.name(view), how, declared);
             self.diagnostics.push(diagnostic);
         }
     }
@@ -822,5 +840,10 @@ fn expr_reads(function: &Function<'_>, expr: &Expr, read: &mut Live) {
             expr_reads(function, end, read);
         }
         ExprKind::Call(call) => call_reads(function, call, read),
+        ExprKind::Text(parts) => {
+            for value in text_values(parts) {
+                expr_reads(function, value, read);
+            }
+        }
     }
 }

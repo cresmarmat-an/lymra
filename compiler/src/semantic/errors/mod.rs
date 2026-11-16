@@ -27,9 +27,9 @@ pub(super) use cycles::{Declared, Dependency, cycle};
 pub(super) use floats::{conversion_never_fits, float_remainder, float_too_large, float_too_small};
 pub(super) use lists::{
     Change, Collection, changed_below_newer, empty_list_arguments, empty_list_into,
-    empty_list_without_type, malformed_list_type, negative_index, not_a_stack, pop_needs_variable,
-    push_argument_count, push_needs_variable, push_not_list, pushed_value_marked,
-    stack_argument_count,
+    empty_list_without_type, list_text_replaced, malformed_list_type, negative_index, not_a_stack,
+    pop_needs_variable, push_argument_count, push_needs_variable, push_not_list,
+    pushed_value_marked, stack_argument_count,
 };
 pub(super) use pools::{
     Origin, PoolChange, call_mixes_pools, handle_from_another_pool, handles_escape_call,
@@ -38,7 +38,7 @@ pub(super) use pools::{
     slot_not_handle,
 };
 pub(super) use roots::{
-    Freeing, Holder, freed_while_iterated, freed_while_viewed, pool_replaced_while_handled,
+    Freeing, Holder, Owner, freed_while_iterated, freed_while_viewed, pool_replaced_while_handled,
     returned_view_of_local, returned_view_of_temporary, view_escapes_call, view_of_temporary,
     view_outlives_root,
 };

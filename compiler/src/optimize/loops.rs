@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use super::interval::Interval;
 use crate::ir::{
     Argument, ArithmeticOperator, Block, Call, Expr, ExprKind, LocalId, PlaceStep, PrintPart,
-    Statement,
+    Statement, text_values,
 };
 
 /// How far an iteration has moved a variable from its value at the start of the iteration.
@@ -320,6 +320,11 @@ pub(super) fn collect_references(expr: &Expr, changed: &mut HashSet<LocalId>) {
             collect_references(right, changed);
         }
         ExprKind::Call(call) => collect_call_references(&call.arguments, changed),
+        ExprKind::Text(parts) => {
+            for value in text_values(parts) {
+                collect_references(value, changed);
+            }
+        }
     }
 }
 
@@ -368,6 +373,11 @@ pub(super) fn collect_calls<'expr>(expr: &'expr Expr, calls: &mut Vec<&'expr Cal
         } => {
             collect_calls(left, calls);
             collect_calls(right, calls);
+        }
+        ExprKind::Text(parts) => {
+            for value in text_values(parts) {
+                collect_calls(value, calls);
+            }
         }
         ExprKind::Call(call) => {
             for argument in &call.arguments {

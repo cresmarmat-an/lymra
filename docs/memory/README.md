@@ -2,7 +2,7 @@
 
 Section 7 of the [specification](../spec.md) is the core of Lymra: memory safety without a garbage collector, reference counting or a borrow checker. This study tested the model against programs people actually write before any of it was implemented, while changing it still cost only text.
 
-**Status:** data stacks, lists, stacks, views, pools and the rules that keep them safe (L0701 to L0706) are implemented. Ten of the twelve programs build and run, and the run tests check their output with every C compiler: document_tree, expressions, game_world, life, routes, shapes, statistics, tokens, undo and word_count. The rest wait for lists inside values, text built from values and `with` blocks.
+**Status:** data stacks, lists, stacks, views, pools and the rules that keep them safe (L0701 to L0706) are implemented. Ten of the twelve programs build and run, and the run tests check their output with every C compiler: document_tree, expressions, game_world, life, routes, shapes, statistics, tokens, undo and word_count. The other two wait for lists inside values (orders) and `with` blocks (report).
 
 ## Method
 
@@ -93,9 +93,11 @@ Two contradictions came up as well. Section 4.4 says `push` returns a reference 
 
 **M4. Pools are indexed by handle, and a handle belongs to its pool.** `creatures[handle]` reads or assigns a slot, checking the slot and its generation, and replaces `get`. A handle's root is the pool it came from, like a reference's root, so using it with another pool is error L0705 and keeping it past its pool is L0701. A pool holds fixed-size values (L0706), so every slot has the same size; text goes in a list, and the pool keeps positions into it. This closes H4.
 
-**M5. Replacing a growable value.** `items = new_value` frees the old value and puts the new one in its place. When the new value reads the old one, as in `slots = grown(slots)`, it is built on a second data stack and then moved into place with one copy. When it doesn't, as in `pending = list()`, the old value is freed first and the new one is built in place, with no copy. M3 guarantees no reference sees the old value go.
+**M5. Replacing a growable value.** `items = new_value` frees the old value and puts the new one in its place. When the new value reads the old one, as in `slots = grown(slots)`, it is built right above the old one and then moved down into its place with one copy. When it doesn't, as in `pending = list()`, the old value is freed first and the new one is built in place, with no copy. M3 guarantees no reference sees the old value go.
 
 **M6. Building values in place stays safe and stays fast.** A returned value is built directly in the caller's storage unless the call still reads that storage through an argument; then the compiler builds it in a temporary and copies it (H3). `push` returns nothing; `items[length(items) - 1]` reads the newest element. A value held directly by a binding keeps each of its growable fields on a data stack of its own, so each can grow; placing it inside another value, such as a list, lays it out as one block, which copies it once. Inside a list, a value's growable fields no longer grow.
+
+**M7. Text lies beside the values that hold it.** This came with text built from values, after the study. A value that holds text holds where the text starts and how many bytes it has, and the bytes lie on a data stack that whatever holds the value keeps. Every value of a type then has the same size, so a list of records that hold text is indexed with one read and needs none of M1's positions. A list keeps its elements' text on a second data stack, in the order of its elements, so iterating still streams through memory in order. Storing text copies it, so no two bindings share text, and new text for one frees exactly its own. New text in an element of a list is L0407: it would land after the text of the last element, out of order, and the old text would stay behind until the list is freed.
 
 ## What the changes cost
 
@@ -106,7 +108,8 @@ Two contradictions came up as well. Section 4.4 says `push` returns a reference 
 | M4 | The same two checks per access that pools always had |
 | M5 | One copy of the new value, only when it is built from the old one |
 | M6 | One copy when a value with growable fields goes into another value, which the spec's in-order building needed anyway |
+| M7 | 16 bytes per text in a value on a 64-bit system, and one copy of a text each time it is stored, unless it was built where it is stored or the program itself holds it |
 
 ## Spec changes
 
-The spec now carries every rule above: section 4.1 (D3), 4.4 and 4.5 (M1, M6), 4.7 (L0408), 5 (M6), 5.1 (the new operations), 7.2 (D2), 7.4 (M3), 7.5 (M2), 7.6 (M4), a new 7.9 (M5), 9 (D1) and 12 (O5 settled, O12 added).
+The spec now carries every rule above: section 4.1 (D3), 4.4 and 4.5 (M6, and M7, which took the place of M1), 4.7 (L0408), 5 (M6), 5.1 (the new operations), 7.2 (D2), 7.4 (M3), 7.5 (M2), 7.6 (M4), a new 7.9 (M5), 9 (D1) and 12 (O5 settled, O12 added).

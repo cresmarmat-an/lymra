@@ -351,6 +351,12 @@ pub enum ExprKind {
     },
     /// `bytes(text)`: the bytes of a text as a `view[unsigned8]`.
     Bytes(Box<Expr>),
+    /**
+     * Text built from its parts, in order: literal text, and values written
+     * as `print` writes them. The parts are computed first, then the text
+     * is built on a data stack.
+     */
+    Text(Vec<PrintPart>),
     /// `pop(variable stack)`: takes the top element off a stack and gives it. An empty stack stops the program.
     Pop(LocalId),
     /// `top(stack)`: the top element of a stack, left where it is. An empty stack stops the program.
@@ -389,6 +395,14 @@ pub struct FieldValue {
     pub value: Expr,
 }
 
+/// The values among the parts of a text or a `print`.
+pub fn text_values(parts: &[PrintPart]) -> impl Iterator<Item = &Expr> {
+    parts.iter().filter_map(|part| match part {
+        PrintPart::Value { value, .. } => Some(value),
+        PrintPart::Text(_) => None,
+    })
+}
+
 impl Expr {
     /// Whether the expression reads `local` or passes it to a call.
     pub fn mentions(&self, local: LocalId) -> bool {
@@ -408,6 +422,7 @@ impl Expr {
             } => operand.mentions(local),
             ExprKind::Pop(stack) => *stack == local,
             ExprKind::Insert { pool, value } => *pool == local || value.mentions(local),
+            ExprKind::Text(parts) => text_values(parts).any(|value| value.mentions(local)),
             ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
                 fields.iter().any(|field| field.value.mentions(local))
             }
@@ -456,14 +471,15 @@ impl Expr {
             } => operand.has_effects(),
             /*
              * A slice whose positions fall outside its items stops the
-             * program, and so do an empty stack, a stale handle and a pool
-             * that has no room left.
+             * program, and so do an empty stack, a stale handle, and a pool
+             * or text that has no room left.
              */
             ExprKind::Slice { .. }
             | ExprKind::Pop(_)
             | ExprKind::Top(_)
             | ExprKind::Insert { .. }
-            | ExprKind::Slot { .. } => true,
+            | ExprKind::Slot { .. }
+            | ExprKind::Text(_) => true,
             ExprKind::Construct(fields) | ExprKind::Variant { fields, .. } => {
                 fields.iter().any(|field| field.value.has_effects())
             }

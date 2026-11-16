@@ -4,11 +4,13 @@ use crate::diagnostics::{Diagnostic, ErrorCode, Help, Label};
 use crate::ir::Sequence;
 use crate::source::Span;
 
-/// How a list frees elements that a view or a `for` loop may still read, where L0702 or L0703 points.
+/// How a value frees what a view or a `for` loop may still read, where L0702 or L0703 points.
 #[derive(Clone, Copy, Debug)]
 pub(in crate::semantic) enum Freeing<'a> {
     /// Assigned a whole new value; the span is the target as written.
     Assigned(Span),
+    /// Given new text in a part, which rewrites all of its text; the span is the target as written.
+    NewTextInPart(Span),
     /// Passed with `variable` to the function named, which can replace it; the span is the argument as written.
     PassedToReplace(Span, &'a str),
     /// Popped; the span is the `pop` call.
@@ -20,7 +22,9 @@ pub(in crate::semantic) enum Freeing<'a> {
 impl Freeing<'_> {
     fn code(self) -> ErrorCode {
         match self {
-            Self::Assigned(_) | Self::PassedToReplace(..) => ErrorCode::L0703,
+            Self::Assigned(_) | Self::NewTextInPart(_) | Self::PassedToReplace(..) => {
+                ErrorCode::L0703
+            }
             Self::Popped(_) | Self::PassedToPop(..) => ErrorCode::L0702,
         }
     }
@@ -28,60 +32,95 @@ impl Freeing<'_> {
     fn span(self) -> Span {
         match self {
             Self::Assigned(span)
+            | Self::NewTextInPart(span)
             | Self::PassedToReplace(span, _)
             | Self::Popped(span)
             | Self::PassedToPop(span, _) => span,
         }
     }
 
-    /// What the error says `list` cannot be: "replaced", "popped", or passed on.
+    /// What the error says the value cannot be: "replaced", "popped", or passed on.
     fn verb(self) -> &'static str {
         match self {
             Self::Assigned(_) => "replaced",
+            Self::NewTextInPart(_) => "given new text",
             Self::Popped(_) => "popped",
             Self::PassedToReplace(..) | Self::PassedToPop(..) => "passed with `variable`",
         }
     }
 }
 
-/// A list or a stack, as `kind` says, that frees elements as `how` says while a `for` loop goes over it, or over a view of it, named at `iterable`.
+/// What keeps the elements that a view or a `for` loop reads, which picks the words of L0702 and L0703.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::semantic) enum Owner {
+    /// A list or a stack.
+    Sequence(Sequence),
+    /// Text, or a value that holds text, whose bytes a view shows.
+    Text,
+}
+
+impl Owner {
+    /// What a `for` loop goes over, said of the owner.
+    const fn looped_over(self) -> &'static str {
+        match self {
+            Self::Sequence(_) => "it",
+            Self::Text => "its text",
+        }
+    }
+}
+
+/// `value`, kept as `owner` says, that frees elements as `how` says while a `for` loop goes over it, or over a view of it, named at `iterable`.
 pub(in crate::semantic) fn freed_while_iterated(
-    list: &str,
-    kind: Sequence,
+    value: &str,
+    owner: Owner,
     how: Freeing<'_>,
     iterable: Span,
 ) -> Diagnostic {
-    let noun = kind.name();
-    let (label, help) = match how {
-        Freeing::Assigned(_) => (
-            format!("this replaces the whole {noun}"),
+    let new_text_after = format!(
+        "build the new text in another binding inside the loop, and give it to `{value}` after the loop ends"
+    );
+    let (label, help) = match (owner, how) {
+        (Owner::Sequence(kind), Freeing::Assigned(_) | Freeing::NewTextInPart(_)) => (
+            format!("this replaces the whole {}", kind.name()),
             "change its elements or `push` to it inside the loop, and replace it after the loop ends"
                 .to_owned(),
         ),
-        Freeing::PassedToReplace(_, function) => (
-            format!("`{function}` can replace the whole {noun}"),
+        (Owner::Sequence(kind), Freeing::PassedToReplace(_, function)) => (
+            format!("`{function}` can replace the whole {}", kind.name()),
             format!(
                 "call `{function}` after the loop; `push` and changing elements are fine inside it"
             ),
         ),
-        Freeing::Popped(_) => (
-            format!("this takes the top element off `{list}`"),
+        (Owner::Text, Freeing::Assigned(_)) => {
+            ("this frees the text the loop goes over".to_owned(), new_text_after)
+        }
+        (Owner::Text, Freeing::NewTextInPart(_)) => (
+            format!("this rewrites all of `{value}`'s text, which the loop goes over"),
+            new_text_after,
+        ),
+        (Owner::Text, Freeing::PassedToReplace(_, function)) => (
+            format!("`{function}` can give `{value}` new text"),
+            format!("call `{function}` after the loop"),
+        ),
+        (Owner::Sequence(_) | Owner::Text, Freeing::Popped(_)) => (
+            format!("this takes the top element off `{value}`"),
             format!(
-                "to take each element off in turn, loop with `while length({list}) > 0` and `pop` inside it"
+                "to take each element off in turn, loop with `while length({value}) > 0` and `pop` inside it"
             ),
         ),
-        Freeing::PassedToPop(_, function) => (
-            format!("`{function}` can take elements off `{list}`"),
+        (Owner::Sequence(_) | Owner::Text, Freeing::PassedToPop(_, function)) => (
+            format!("`{function}` can take elements off `{value}`"),
             format!(
-                "call `{function}` after the loop, or loop with `while length({list}) > 0` instead of `for`"
+                "call `{function}` after the loop, or loop with `while length({value}) > 0` instead of `for`"
             ),
         ),
     };
     Diagnostic::new(
         how.code(),
         format!(
-            "`{list}` cannot be {} while a `for` loop goes over it",
-            how.verb()
+            "`{value}` cannot be {} while a `for` loop goes over {}",
+            how.verb(),
+            owner.looped_over()
         ),
         Label::new(how.span(), label),
         Help::text(help),
@@ -89,35 +128,53 @@ pub(in crate::semantic) fn freed_while_iterated(
     .with_secondary(Label::new(iterable, "the loop goes over it here"))
 }
 
-/// A list or a stack, as `kind` says, that frees elements as `how` says while `view`, declared at `declared`, still shows it.
+/// `value`, kept as `owner` says, that frees elements as `how` says while `view`, declared at `declared`, still shows it.
 pub(in crate::semantic) fn freed_while_viewed(
-    list: &str,
-    kind: Sequence,
+    value: &str,
+    owner: Owner,
     view: &str,
     how: Freeing<'_>,
     declared: Span,
 ) -> Diagnostic {
-    let noun = kind.name();
-    let label = match how {
-        Freeing::Assigned(_) => format!("this frees the elements `{view}` shows"),
-        Freeing::PassedToReplace(_, function) => {
-            format!("`{function}` can replace the whole {noun}")
+    let label = match (owner, how) {
+        (Owner::Sequence(_), Freeing::Assigned(_) | Freeing::NewTextInPart(_)) => {
+            format!("this frees the elements `{view}` shows")
         }
-        Freeing::Popped(_) => format!("this frees the top element, which `{view}` can show"),
-        Freeing::PassedToPop(_, function) => format!("`{function}` can take elements off `{list}`"),
+        (Owner::Sequence(kind), Freeing::PassedToReplace(_, function)) => {
+            format!("`{function}` can replace the whole {}", kind.name())
+        }
+        (Owner::Text, Freeing::Assigned(_)) => format!("this frees the text `{view}` shows"),
+        (Owner::Text, Freeing::NewTextInPart(_)) => {
+            format!("this rewrites all of `{value}`'s text, which `{view}` shows")
+        }
+        (Owner::Text, Freeing::PassedToReplace(_, function)) => {
+            format!("`{function}` can give `{value}` new text")
+        }
+        (Owner::Sequence(_) | Owner::Text, Freeing::Popped(_)) => {
+            format!("this frees the top element, which `{view}` can show")
+        }
+        (Owner::Sequence(_) | Owner::Text, Freeing::PassedToPop(_, function)) => {
+            format!("`{function}` can take elements off `{value}`")
+        }
+    };
+    let keep = match owner {
+        Owner::Sequence(_) => format!("copy what `{view}` shows into a list of its own"),
+        Owner::Text => {
+            format!("copy the text first with `constant kept = {value}`, and show `kept`")
+        }
     };
     Diagnostic::new(
         how.code(),
         format!(
-            "`{list}` cannot be {} while `{view}`, a view of it, is still used",
+            "`{value}` cannot be {} while `{view}`, a view of it, is still used",
             how.verb()
         ),
         Label::new(how.span(), label),
         Help::text(format!(
-            "finish with `{view}` before `{list}` changes, or copy what `{view}` shows into a list of its own"
+            "finish with `{view}` before `{value}` changes, or {keep}"
         )),
     )
-    .with_secondary(Label::new(declared, format!("`{view}` shows `{list}`")))
+    .with_secondary(Label::new(declared, format!("`{view}` shows `{value}`")))
 }
 
 /// What still uses the handles into a pool where it is replaced.
@@ -140,7 +197,7 @@ pub(in crate::semantic) fn pool_replaced_while_handled(
         Holder::Binding(name, _) => format!("`{name}`, which holds handles into it, is still used"),
     };
     let label = match how {
-        Freeing::Assigned(_) | Freeing::Popped(_) => {
+        Freeing::Assigned(_) | Freeing::NewTextInPart(_) | Freeing::Popped(_) => {
             "this frees every value in it, and its handles would name the slots of the new pool"
                 .to_owned()
         }

@@ -1,0 +1,23 @@
+exit status 0
+--- standard output
+1. line
+2. line
+3. line
+first: 1. line, count 3
+Ana: 31
+2. line scorer: 47
+Ana now 32
+popped static
+popped b2
+popped a1
+name x0
+name y1
+name x0y1
+word hi3
+me1?!
+wow!!
+word3 4
+extra 4 5
+word1 2
+0
+--- standard error

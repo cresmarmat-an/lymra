@@ -10,7 +10,6 @@ const FUTURE_FUNCTIONS: [(&str, u8); 2] = [("filter", 3), ("sort", 3)];
 pub(super) enum Feature {
     Packed,
     NamedArguments,
-    TextBuilding,
     /// A list inside another value: an array, a declared type, a choice or a list.
     NestedGrowable,
     /// A view inside another value, or a view of views.
@@ -39,9 +38,6 @@ impl Feature {
         let subject = match self {
             Self::Packed => "`packed` choices are",
             Self::NamedArguments => "named arguments are",
-            Self::TextBuilding => {
-                return "text with interpolation can only be given to `print` for now".to_owned();
-            }
             Self::NestedGrowable => "lists inside other values are",
             Self::NestedView => "views inside other values are",
             Self::ForEach => {
@@ -60,8 +56,7 @@ impl Feature {
     fn phase(self) -> u8 {
         match self {
             Self::NamedArguments => 2,
-            Self::TextBuilding
-            | Self::Packed
+            Self::Packed
             | Self::NestedGrowable
             | Self::NestedView
             | Self::ForEach
@@ -80,7 +75,6 @@ impl Feature {
             }
             Self::Packed
             | Self::NamedArguments
-            | Self::TextBuilding
             | Self::NestedGrowable
             | Self::NestedView
             | Self::RangeValues

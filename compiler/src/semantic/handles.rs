@@ -232,6 +232,7 @@ impl<'a, 'src> Analysis<'a, 'src> {
             | ExprKind::Wrapping { .. }
             | ExprKind::EmptyList
             | ExprKind::Bytes(_)
+            | ExprKind::Text(_)
             | ExprKind::Length(_) => Sources::new(),
         }
     }

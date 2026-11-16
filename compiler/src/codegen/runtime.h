@@ -316,7 +316,7 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
         "assertion failed",
         "conversion out of range",
         "data stack full",
-        "a list changed while a newer list sat above it on its data stack",
+        "a value changed while a newer value sat above it on its data stack",
         "out of memory",
         "the stack is empty",
         "the handle names a value that was removed",
@@ -327,11 +327,11 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_trap(lymra_trap_kind kind, const 
         NULL,
         NULL,
         NULL,
-        "help: a list outgrew the address space its data stack reserves, up to 64 GiB on a 64-bit system "
-        "and less on a 32-bit one; look for a loop that keeps adding to a list\n",
+        "help: a list or a text outgrew the address space its data stack reserves, up to 64 GiB on a 64-bit "
+        "system and less on a 32-bit one; look for a loop that keeps adding to a list or to a text\n",
         "help: this is a bug in the Lymra compiler, which should have rejected the program with error "
         "L0704; please report it with the source file\n",
-        "help: the system has no memory left for a list to grow into\n",
+        "help: the system has no memory left for a list or a text to grow into\n",
         "help: check that `length` is above 0 before `pop` or `top`\n",
         "help: once its value is removed, a handle names nothing; stop using it there, for example by "
         "taking it out of the list that keeps it\n",
@@ -858,25 +858,46 @@ LYMRA_UNUSED static inline void lymra_write_text(lymra_string text) {
     lymra_append(text.data, text.length);
 }
 
-/* Writes the decimal digits of `value`, after a minus sign when `negative`. */
-LYMRA_UNUSED static void lymra_write_digits(uint64_t value, bool negative) {
-    /* 20 digits hold the largest `unsigned64`; one more holds the sign. */
-    char digits[21];
-    size_t start = sizeof digits;
+/* The room the text of a number takes: 20 digits hold the largest `unsigned64`, and one more its sign. */
+#define LYMRA_NUMBER_TEXT_SIZE 21
+
+/*
+ * Writes the decimal digits of `value`, after a minus sign when `negative`,
+ * so that they end at `end`, and returns where they start.
+ */
+LYMRA_UNUSED static char *lymra_digits(uint64_t value, bool negative, char *end) {
+    char *start = end;
     do {
-        digits[--start] = (char)('0' + value % 10);
+        *--start = (char)('0' + value % 10);
         value /= 10;
     } while (value != 0);
     if (negative) {
-        digits[--start] = '-';
+        *--start = '-';
     }
-    lymra_append(digits + start, sizeof digits - start);
+    return start;
+}
+
+/* The magnitude of `value`. Unsigned arithmetic has room for that of the lowest value, which `int64_t` does not. */
+LYMRA_UNUSED static inline uint64_t lymra_magnitude(int64_t value) {
+    return value < 0 ? (uint64_t)0 - (uint64_t)value : (uint64_t)value;
+}
+
+/* The text of a `boolean`. */
+LYMRA_UNUSED static inline lymra_string lymra_boolean_text(bool value) {
+    lymra_string text;
+    text.data = value ? "true" : "false";
+    text.length = value ? 4 : 5;
+    return text;
+}
+
+LYMRA_UNUSED static void lymra_write_digits(uint64_t value, bool negative) {
+    char digits[LYMRA_NUMBER_TEXT_SIZE];
+    char *start = lymra_digits(value, negative, digits + sizeof digits);
+    lymra_append(start, (size_t)(digits + sizeof digits - start));
 }
 
 LYMRA_UNUSED static inline void lymra_write_signed(int64_t value) {
-    /* Unsigned arithmetic has room for the magnitude of the lowest value, which `int64_t` does not. */
-    uint64_t magnitude = value < 0 ? (uint64_t)0 - (uint64_t)value : (uint64_t)value;
-    lymra_write_digits(magnitude, value < 0);
+    lymra_write_digits(lymra_magnitude(value), value < 0);
 }
 
 LYMRA_UNUSED static inline void lymra_write_unsigned(uint64_t value) {
@@ -884,11 +905,7 @@ LYMRA_UNUSED static inline void lymra_write_unsigned(uint64_t value) {
 }
 
 LYMRA_UNUSED static inline void lymra_write_boolean(bool value) {
-    if (value) {
-        lymra_append("true", 4);
-    } else {
-        lymra_append("false", 5);
-    }
+    lymra_write_text(lymra_boolean_text(value));
 }
 
 /* Ends the line being printed, which makes it part of the output. */
@@ -1271,6 +1288,139 @@ LYMRA_UNUSED static inline void lymra_data_stack_shrink(lymra_data_stack *stack,
  */
 LYMRA_UNUSED static inline void lymra_data_stack_drop(lymra_data_stack *stack, char *start) {
     stack->top = start;
+}
+
+/*
+ * Moves everything on `stack` from `from` up down to `to`, which lies
+ * below, frees what is left above, and returns how far it moved.
+ */
+LYMRA_UNUSED static size_t lymra_data_stack_lower(lymra_data_stack *stack, char *to, char *from) {
+    size_t bytes = (size_t)(stack->top - from);
+    if (bytes != 0) {
+        memmove(to, from, bytes);
+    }
+    stack->top = to + bytes;
+    lymra_data_stack_settle(stack);
+    return (size_t)(from - to);
+}
+
+/*
+ * Text that a program builds lives on data stacks: a binding that holds text
+ * owns a data stack for it, and so does a list of values that hold text.
+ * Text in the program itself lasts as long as the program, so it is never
+ * copied.
+ */
+
+/* Whether `data` lies outside every data stack, in the program itself. */
+LYMRA_UNUSED static inline bool lymra_text_is_static(const char *data) {
+    uintptr_t address = (uintptr_t)data;
+    return address < (uintptr_t)lymra_data_stacks[0].base ||
+           address >= (uintptr_t)lymra_data_stacks[LYMRA_DATA_STACKS - 1].limit;
+}
+
+/*
+ * Copies the bytes of `text` to the top of `stack` and points `text` at the
+ * copy, unless the program itself keeps them. The bytes may lie on `stack`,
+ * below the copy or overlapping it, as when a returning function moves its
+ * result down over what it freed.
+ */
+LYMRA_UNUSED static void lymra_text_own(lymra_string *text, lymra_data_stack *stack, const char *site) {
+    if (text->length == 0) {
+        text->data = "";
+        return;
+    }
+    if (lymra_text_is_static(text->data)) {
+        return;
+    }
+    char *copy = lymra_data_stack_extend(stack, stack->top, text->length, site);
+    memmove(copy, text->data, text->length);
+    text->data = copy;
+}
+
+/* Points `text` `distance` bytes lower if its bytes lie from `from` up to `to`, which moved down that far. */
+LYMRA_UNUSED static inline void lymra_text_rebase(lymra_string *text, const char *from, const char *to,
+                                                  size_t distance) {
+    uintptr_t address = (uintptr_t)text->data;
+    if (text->length != 0 && address >= (uintptr_t)from && address < (uintptr_t)to) {
+        text->data -= distance;
+    }
+}
+
+/* The lower of `lowest` and where the bytes of `text` start, if they lie on `stack`; `lowest` may be NULL. */
+LYMRA_UNUSED static inline char *lymra_text_lowest(const lymra_string *text, const lymra_data_stack *stack,
+                                                   char *lowest) {
+    uintptr_t address = (uintptr_t)text->data;
+    if (text->length == 0 || address < (uintptr_t)stack->base || address >= (uintptr_t)stack->top) {
+        return lowest;
+    }
+    char *start = stack->base + (address - (uintptr_t)stack->base);
+    return lowest == NULL || start < lowest ? start : lowest;
+}
+
+/* The higher of `highest` and where the bytes of `text` end, if they lie on `stack`. */
+LYMRA_UNUSED static inline char *lymra_text_highest(const lymra_string *text, const lymra_data_stack *stack,
+                                                    char *highest) {
+    uintptr_t address = (uintptr_t)text->data;
+    if (text->length == 0 || address < (uintptr_t)stack->base || address >= (uintptr_t)stack->top) {
+        return highest;
+    }
+    char *end = stack->base + (address - (uintptr_t)stack->base) + text->length;
+    return end > highest ? end : highest;
+}
+
+/* Text built from parts at the top of a data stack, which nothing else may grow over until it is done. */
+typedef struct {
+    lymra_data_stack *stack;
+    char *start;
+    size_t length;
+    const char *site;
+} lymra_text_builder;
+
+LYMRA_UNUSED static lymra_text_builder lymra_text_begin(lymra_data_stack *stack, const char *site) {
+    lymra_text_builder builder;
+    builder.stack = stack;
+    builder.start = stack->top;
+    builder.length = 0;
+    builder.site = site;
+    return builder;
+}
+
+LYMRA_UNUSED static void lymra_text_add(lymra_text_builder *builder, const char *data, size_t length) {
+    if (length == 0) {
+        return;
+    }
+    char *slot = lymra_data_stack_extend(builder->stack, builder->start + builder->length, length, builder->site);
+    memcpy(slot, data, length);
+    builder->length += length;
+}
+
+LYMRA_UNUSED static inline void lymra_text_add_text(lymra_text_builder *builder, lymra_string text) {
+    lymra_text_add(builder, text.data, text.length);
+}
+
+LYMRA_UNUSED static void lymra_text_add_digits(lymra_text_builder *builder, uint64_t value, bool negative) {
+    char digits[LYMRA_NUMBER_TEXT_SIZE];
+    char *start = lymra_digits(value, negative, digits + sizeof digits);
+    lymra_text_add(builder, start, (size_t)(digits + sizeof digits - start));
+}
+
+LYMRA_UNUSED static inline void lymra_text_add_signed(lymra_text_builder *builder, int64_t value) {
+    lymra_text_add_digits(builder, lymra_magnitude(value), value < 0);
+}
+
+LYMRA_UNUSED static inline void lymra_text_add_unsigned(lymra_text_builder *builder, uint64_t value) {
+    lymra_text_add_digits(builder, value, false);
+}
+
+LYMRA_UNUSED static inline void lymra_text_add_boolean(lymra_text_builder *builder, bool value) {
+    lymra_text_add_text(builder, lymra_boolean_text(value));
+}
+
+LYMRA_UNUSED static lymra_string lymra_text_end(const lymra_text_builder *builder) {
+    lymra_string text;
+    text.data = builder->length == 0 ? "" : builder->start;
+    text.length = builder->length;
+    return text;
 }
 #endif
 

@@ -1,0 +1,57 @@
+#[
+    Every way a function hands back text: text built in the `return`
+    itself, text that nothing frees, text a binding of the function keeps,
+    and text that recursion builds on the same data stack where the caller
+    keeps the result.
+]#
+
+type Pair
+    string left
+    string right
+
+function same(string text) returns string
+    return text
+
+function first_three(string text) returns string
+    return slice(text, 0, 3)
+
+function shouted(string text) returns string
+    variable result = "{text}!"
+    result = "{result}!"
+    return result
+
+function nested(integer64 depth) returns string
+    if depth == 0
+        return "core"
+    constant inner = nested(depth - 1)
+    if depth % 2 == 0
+        return inner
+    return "({inner})"
+
+function pair(integer64 depth) returns Pair
+    if depth == 0
+        return Pair(left = "L", right = "R")
+    variable Pair inner = pair(depth - 1)
+    inner.right = "{inner.right}{depth}"
+    return Pair(left = "{inner.left}<", right = inner.right)
+
+function find(list[string] names, string wanted) returns string
+    for name in names
+        if name == wanted
+            return "found {name}"
+    return "missing {wanted}"
+
+function main()
+    constant built = "{1 + 2} ways"
+    print(same(built))
+    print(same("static"))
+    print(first_three(built))
+    print(shouted("hey"))
+    print(nested(5))
+    constant deep = pair(4)
+    print("{deep.left} {deep.right}")
+    variable list[string] names = list()
+    push(variable names, "Ana")
+    push(variable names, "{built}!")
+    print(find(names, "3 ways!"))
+    print(find(names, "Bo"))

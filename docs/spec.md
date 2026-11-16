@@ -2,7 +2,7 @@
 
 Status: draft. Every rule here can change until a compiler implements it and a test proves it.
 
-The compiler in `compiler/` implements the syntax of this whole document. Its test suite parses every code sample here, so the spec and the parser cannot drift apart. It also checks and compiles the core of the language: integers, floats, booleans, text values, functions, arrays, custom types, choices and `match`, lists of fixed-size values, views, `if`, `while`, `for`, and `print`. The rest arrives in the phases of the roadmap in the README, and until then the compiler rejects it with `L0309`, naming the phase.
+The compiler in `compiler/` implements the syntax of this whole document. Its test suite parses every code sample here, so the spec and the parser cannot drift apart. It also checks and compiles the core of the language: integers, floats, booleans, text built from values, functions, arrays, custom types, choices and `match`, lists and stacks of values that do not grow, views, pools and handles, `if`, `while`, `for`, and `print`. The rest arrives in the phases of the roadmap in the README, and until then the compiler rejects it with `L0309`, naming the phase.
 
 ## 1. Goals
 
@@ -196,7 +196,7 @@ Type rules:
 
 - **No conversions behind your back.** A value never changes type by itself. Mixing `integer64` and `unsigned8` in one operation, passing one where the other is expected, or using a number as a condition is error `L0402`. Convert explicitly by calling the type, as in `unsigned8(count)` (Section 5.1). Unlike a cast in C or a conversion in Go, a conversion never cuts a value down to fit: if the value does not fit, the program stops with a runtime error. A conversion that cannot fail, such as `unsigned8` to `integer64`, costs nothing.
 - **Literals take the type of their place.** An integer literal has no type of its own. It takes the type its context asks for, such as a declared type or the other side of an operator, and `integer64` when nothing asks. It has to fit (`L0404`). Arithmetic on integer literals is exact and happens while compiling, so `constant unsigned8 small = 300 - 100` is fine. A float literal takes `float32` or `float64` the same way, `float64` when nothing asks, and is rounded once from its digits to the nearest float of that type. One beyond the largest float of its type, or one that is not zero but would round to zero, is `L0404`. An integer literal never becomes a float: write `2.0`.
-- **Text is printed through interpolation.** `print` takes a `string`. Other values are turned into text by interpolating them: `print("{count}")`.
+- **Values become text through interpolation.** `print` takes a `string`. A number, a `boolean` or another text becomes part of a text when it is interpolated: `"{count} left"` is a `string` like any other, which a binding keeps, a function returns and a type holds (Section 4.5).
 
 | Operators | Work on | Result |
 |---|---|---|
@@ -254,7 +254,7 @@ A custom type's class is the largest class of its fields.
 
 `list[T]` never moves its elements, because it always sits on top of its data stack (Section 7.2) and grows in place. A reference to an element stays valid for as long as the list exists, no matter how many pushes come after it. C++ `std::vector` and Rust `Vec` reallocate when they grow, which is why they can't make this promise.
 
-A list is a value too. `list()` starts an empty one, its type taken from where it goes (`L0412`), and `push(variable items, value)` adds an element at the end. A copy is independent, a `variable` parameter changes the caller's list, and a function can return one. `items = new_value` replaces the whole list (Section 7.9). An index works as it does for an array, but a list's length is only known when the program runs, so an index past the end always stops the program then. In 0.1 a list holds fixed-size values: numbers, booleans, text, arrays, and custom types and choices made of them. A list inside another value comes with nested data (Section 4.5), later in phase 3.
+A list is a value too. `list()` starts an empty one, its type taken from where it goes (`L0412`), and `push(variable items, value)` adds an element at the end. A copy is independent, a `variable` parameter changes the caller's list, and a function can return one. `items = new_value` replaces the whole list (Section 7.9). An index works as it does for an array, but a list's length is only known when the program runs, so an index past the end always stops the program then. In 0.1 a list holds values that do not grow: numbers, booleans, text, arrays, handles, and custom types and choices made of them. It keeps the text of its elements beside them (Section 4.5). A list inside another value comes later in phase 3.
 
 ```lymra
 function squares(integer64 count) returns list[integer64]
@@ -311,24 +311,29 @@ function main()
 
 ### 4.5 Nested data stays inline
 
-A value is stored as one contiguous block of bytes with no pointers inside it, however deeply it nests. A frozen field is stored in place, prefixed with its length.
+A value is stored as one block of bytes, its fields in place, however deeply it nests. Text is the one part kept beside it: a field that holds text holds where the text starts and how many bytes it has, 16 bytes on a 64-bit system, and the bytes lie on a data stack that whatever holds the value keeps (Section 7.2), or in the program itself for text written in it. Every value of a type therefore has the same size, so `people[index]` costs one read, as it does for numbers.
 
 ```lymra
-type Item
-    string sku
-    unsigned32 quantity
+type Person
+    string name
+    integer32 age
 
-type Order
-    unsigned64 id
-    string customer
-    list[Item] items
+function main()
+    variable list[Person] people = list()
+    push(variable people, Person(name = "Ana", age = 42))
+    push(variable people, Person(name = "{people[0].name} junior", age = 7))
+    people[1].age = 8
+    for person in people
+        print("{person.name} is {person.age}")
 ```
 
-One `Order` with two items is a single block on a data stack. Reading a `list[Order]` streams through memory in order, which is what CPU caches are built for.
+- **The text a value holds is its own.** Storing text that something else keeps, such as another binding's text, a field of another value or a slice, copies its bytes to where the new owner keeps its text, so changing one never changes the other. Text built where it is stored, by interpolation or by a call that returns it, goes straight there, and text written in the program is never copied: it lasts as long as the program.
+- **A list keeps its elements' text beside them, in order.** A list or a stack whose elements hold text keeps that text on a second data stack, one element's text after another, in the order of the elements. Iterating streams through both in order, which is what CPU caches are built for. `push` copies the new element's text after the text of the element before it, and `pop` frees the text of the top element.
+- **An element of a list keeps the text it was given.** Its numbers and booleans can change, but new text in it is error `L0407`: the text would have to go after the text of the last element, out of order. Build the list again with the element changed and replace the old one, which frees all of its text in one step.
+- **Parameters read text in place.** A parameter reads the text it is given without copying it. A `variable` parameter that holds text also gets the data stack its caller keeps that text on, so new text it gets replaces the caller's in place.
+- **A returned text goes where the caller keeps it.** A function that returns text builds it on a data stack of its own, frees everything else it built, and copies the text where its caller keeps the result. When the function has nothing to free at that point, the text goes there straight away, and text written in the program is never copied.
 
-A list whose elements differ in size also keeps the position of each element in a second list beside it, so `orders[index]` costs one more read. Its elements can't be replaced, because a replacement could have another size (`L0407`). Iterating reads the elements in order and never uses the positions.
-
-A value held directly by a binding keeps each of its growable fields on a data stack of its own, so each can grow (Section 7.2). Putting the value inside another one, such as a list, lays it out as one block, which copies it once. Inside a list, its growable fields no longer grow.
+Lists inside other values come later in phase 3. A value held directly by a binding will keep each of its lists on a data stack of its own, so each can grow (Section 7.2); inside another value, such as a list, a value's lists will no longer grow.
 
 Indexing starts at 0, and an index can have any integer type. Every index is bounds-checked. One known while compiling that falls outside its array is error `L0411`; any other stops the program when it falls outside, with an error that gives the index and the length. The compiler removes a check when it can prove the index is in range, for example `for index in range(0, length(items))`.
 
@@ -354,7 +359,7 @@ function main()
 - A construction gives every field once, by name, in any order: `Frog(name = "Kero", age = 3)`. A field left out, given twice or given without its name is error `L0414`. Lymra never fills in a field by itself, so no field can be read before something was put there. The values run in the order they are written (Section 4.1).
 - `frog.age` reads a field, and `frog.age = 4` changes one when the binding is a `variable`; fields and elements chain, as in `pond.frogs[1].age`. A field the type does not have is error `L0413`, and the message suggests the closest one.
 - A value of a declared type is a value like a number (Section 3.1). Assigning or passing it gives an independent copy, and a `variable` parameter changes the caller's. Like an array, it lives on the call stack and takes at most 1 MiB (`L0410`).
-- Fields are stored inline, in the order they are declared (Section 4.5). A type that holds itself, directly or through other types, is error `L0415`: a value of it would have no end. A field that refers to another value of the same type holds that value's index in an array instead.
+- Fields are stored inline, in the order they are declared, and a `string` field holds where its text lies (Section 4.5). A type that holds itself, directly or through other types, is error `L0415`: a value of it would have no end. A field that refers to another value of the same type holds that value's index in an array instead.
 - Values of a declared type cannot be compared with `==` or put into text yet; compare or print their fields.
 
 ### 4.7 Choices (sum types)
@@ -487,29 +492,29 @@ This section is the core of the language. Everything else depends on it. [The me
 
 A Lymra program has exactly four places memory can live:
 
-1. **Static data.** Top-level constants. Lives for the whole program.
-2. **The call stack.** Fixed-size values: primitives, `array`, and types whose fields are all fixed-size.
-3. **Data stacks.** Frozen and growable values (`string`, `list`, `stack`, `pool`, and types that contain them). Each data stack is a large reserved range of virtual address space with a bump pointer. The compiler decides how many data stacks a program needs.
+1. **Static data.** Top-level constants and the text written in the program. Lives for the whole program.
+2. **The call stack.** Values whose size is fixed: numbers, booleans, arrays, handles, and types and choices made of them. A text, a list or a stack keeps where its bytes lie here, and the bytes on a data stack.
+3. **Data stacks.** The bytes of text the program builds while it runs, and the elements of lists, stacks and pools. Each data stack is a large reserved range of virtual address space with a bump pointer. The compiler decides how many data stacks a program needs.
 4. **Pools.** Slots for data whose lifetime isn't tied to a scope (Section 7.6).
 
 There is no `malloc`, no `new`, and no `free`.
 
 ### 7.2 Data stacks
 
-- The compiler assigns every growable value to a data stack. Only one growable value is live at the top of a given stack at a time.
+- The compiler assigns every growable value, and the text of every binding that holds text, to a data stack. Only one of them is live at the top of a given stack at a time.
 - Because the growable value is always on top, growing it means moving the bump pointer forward. Its data never gets moved, and there's no capacity check against the other values on that stack.
 - When a scope ends, all of its growable values are freed by resetting the bump pointer. That costs one store instruction, whether the scope held one integer list or a million nested orders. There are no destructors and nothing walks the data to free it.
 - Each data stack is reserved as address space up front, and the operating system commits pages only when they are first touched. Unused reservation costs no physical memory.
 - A value that would grow past the end of its reservation stops the program with a clear error before it touches anything beyond it. It never overwrites other memory.
-- A growable value grows only while it is on top of its data stack. A `push` or a `pop` on a value that another value may sit above at that point is error `L0704`, and the message names the value above it. Within one call, a function's lists never share a stack, so this comes up in recursion: a call that holds its own copy of a binding cannot change the copy of an earlier call that reached it through a `variable` parameter, since its own copy sits above it. The compiler follows where each list can travel through calls, so it reports only a list that really can be under a newer one. The runtime checks it again before every `push` and `pop`, as a second line of defense.
-- The compiler assigns stacks statically: two growable values that are live at the same time never share a stack, and values with separate lifetimes reuse one. The copies of one binding at different depths of a recursion share a data stack, each above the copy of the call before it; a call frees its own before it returns, so the one below is on top again when it grows. A list whose elements differ in size keeps their positions on a data stack of its own (Section 4.5). The runtime only tracks the bump pointers.
+- A growable value grows only while it is on top of its data stack. A `push` or a `pop` on a value that another value may sit above at that point is error `L0704`, and the message names the value above it. New text for a binding is the same: it goes where the binding's text lies, so the binding has to be on top. Within one call, a function's lists never share a stack, so this comes up in recursion: a call that holds its own copy of a binding cannot change the copy of an earlier call that reached it through a `variable` parameter, since its own copy sits above it. The compiler follows where each list and text can travel through calls, so it reports only one that really can be under a newer one. The runtime checks it again before every `push`, every `pop` and all new text, as a second line of defense.
+- The compiler assigns stacks statically: two growable values that are live at the same time never share a stack, and values with separate lifetimes reuse one. The copies of one binding at different depths of a recursion share a data stack, each above the copy of the call before it; a call frees its own before it returns, so the one below is on top again when it grows. A list or a stack whose elements hold text keeps that text on a data stack of its own (Section 4.5). The runtime only tracks the bump pointers.
 - A data stack reserves address space, not memory. On a 64-bit system each reserves up to 64 GiB. On a 32-bit system, where a process has 2 to 3 GiB in all, a program's data stacks share 1 GiB. The runtime reserves one region for all of them, halving its request until the system grants it, and splits it evenly. A value that outgrows its data stack stops the program with `error: data stack full`.
 
 ### 7.3 When memory is freed
 
 Memory is freed when its scope ends. That timing is deterministic, and you can see it in the source code.
 
-The compiler can also free a value **earlier**, at its last use, when that value is on the top of its data stack. When it isn't on top, the value is freed at scope end. The 0.1 compiler frees every value at the end of its scope, and a list a statement computes without a binding, such as the argument in `total(squares(4))`, at the end of that statement.
+The compiler can also free a value **earlier**, at its last use, when that value is on the top of its data stack. When it isn't on top, the value is freed at scope end. The 0.1 compiler frees every value at the end of its scope, and a list or a text a statement computes without a binding, such as the argument in `total(squares(4))` or the text in `print(shouted(name))`, at the end of that statement.
 
 Why there's no "free every value right after its last use": data stacks free in last-in, first-out order. If `a` dies but `b` sits above it, the memory under `b` can't be reclaimed without a general purpose allocator, and Lymra doesn't have one. Freeing at the last use whenever possible is exactly what's achievable without a heap.
 
@@ -520,7 +525,7 @@ Values on the call stack (integers, floats, fixed arrays) aren't "freed" at all.
 - A `view[T]`, or any other reference, has a **root**: what keeps the data it points to. That is a binding of the function, a parameter, whose root the caller keeps alive through the call, text in the program itself, or a value a statement computes without a binding, which it frees when it ends. The compiler infers the roots of every reference, from everything it is given anywhere in its function. You never write them.
 - A reference can't outlive its root, and the program is rejected with error `L0701` where it would: a binding that holds a reference to a value its statement frees, or to a binding of a block that ends before the reference's; a function that returns a reference to one of its own bindings; or a `variable` reference parameter given a reference to a binding of the function, which the caller would keep. The message names the root.
 - A function that returns a reference returns one rooted in some of its parameters, and the compiler works out which ones across the whole program. A call's result then has the roots of the arguments it passed there. That is why no lifetime annotations are needed.
-- A value can't be replaced while a reference into it is still used, when the replacement could change what its bytes mean: assigning a choice, which can change its variant, assigning a growable value, whose storage is released (Section 7.9), or removing a pool slot. Each is error `L0703`, and so is passing the value with `variable` to a function that can replace it. A reference is still used when a later statement can read it, or a `for` loop around the replacement goes over it. The message names the reference and where it was made. A `pop` frees the top element of a stack, so popping a stack while a reference into it is still used, or a `for` loop goes over it, is the same mistake: error `L0702`, and so is passing the stack with `variable` to a function that can pop it.
+- A value can't be replaced while a reference into it is still used, when the replacement could change what its bytes mean: assigning a choice, which can change its variant, assigning a growable value or a text, whose storage is released (Section 7.9), giving new text to a part of a value, which rewrites all of its text, or removing a pool slot. Each is error `L0703`, and so is passing the value with `variable` to a function that can replace it. A reference is still used when a later statement can read it, or a `for` loop around the replacement goes over it. The message names the reference and where it was made. A `pop` frees the top element of a stack, so popping a stack while a reference into it is still used, or a `for` loop goes over it, is the same mistake: error `L0702`, and so is passing the stack with `variable` to a function that can pop it.
 - These are the only reference rules. There are no exclusivity rules: two mutable references to the same data may exist at once. That is safe because memory never moves while a reference to it lives (Section 4.4), nothing is freed while its root is in scope, and no value changes layout under a reference. Threads share nothing (Section 9), so two references never race.
 
 ### 7.5 Known limitations of this model
@@ -528,7 +533,7 @@ Values on the call stack (integers, floats, fixed arrays) aren't "freed" at all.
 These are the costs of having no heap. They are intentional.
 
 - A value can't grow while another value sits above it on its data stack (`L0704`). Nested lists are built in order: an earlier element's list can't take an item that arrives later. Group the input first, or keep the items in one flat list, as `docs/memory/routes.lym` does. A recursive function adds to the one list it was given, or returns a new list, rather than filling a list of an earlier call while holding one of its own.
-- The elements of a list whose elements differ in size can't be replaced (`L0407`), and a `packed` list can't be indexed (`L0408`).
+- An element of a list or a stack can't get new text (`L0407`); the list is built again instead. A `packed` list can't be indexed (`L0408`).
 - No closures that escape their defining scope. No function pointers.
 - In 0.1, a view can't be stored inside another value: an array, a list, or a declared type. Values keep positions into a list instead, as `docs/memory/tokens.lym` does.
 - Whole-program compilation only. No separately compiled libraries in 0.1.
@@ -589,11 +594,11 @@ A normal reference is a full 8-byte address. A `link[T, unsigned32]` stores the 
 - Offsets don't depend on where the list sits in memory, so the whole structure can be written to a file in one write and read back in one read.
 - Loading bytes from outside goes through `from_bytes`, which checks every length, variant tag, and link before the data becomes a value. Corrupt or hostile input produces an error, never a wild reference.
 
-### 7.9 Replacing a growable value
+### 7.9 Replacing a growable value or text
 
-`items = new_value` frees the old value and puts the new one in its place.
+`items = new_value` frees the old value and puts the new one in its place. Text works the same way, and so does new text for a part of a value, which gathers all of the value's text again where it started.
 
-- When the new value is built from the old one, as in `slots = grown(slots)`, both are alive while it is built. The new value goes on a second data stack and is then moved into place with one copy.
+- When the new value reads the old one, itself or through a view, as in `slots = grown(slots)` or `name = "{name}!"`, both are alive while it is built. The new value is built right above the old one and then moved down into its place with one copy.
 - When it isn't, as in `pending = list()`, the old value is freed first and the new one is built where it was, with no copy.
 - No reference into the old value can still be used at that point (`L0703`).
 
@@ -661,7 +666,7 @@ error: integer overflow
   |                 ^^^^^^^^^
 ```
 
-The checks are integer overflow, division by zero, a conversion whose value does not fit, an index outside its array or list, a list that outgrows its data stack, and `assert`. Calls that nest too deeply, as in recursion that never reaches its end, stop the program the same way with `error: stack overflow`, without a location: on POSIX systems and on Windows a handler catches the overflow when the stack runs out, so calls cost nothing extra for the check. Every program gets a stack of 8 MiB on Windows as well, the default of Linux and macOS, and the arrays of every call in progress share it. Where the C compiler can, a function with a large frame touches its stack a page at a time, so it cannot step over the guard page that ends the stack. Before the error, the program writes every line it printed. A line appears whole or not at all, so a program that stops in the middle of a `print` leaves no half line behind. Output is UTF-8 text with `\n` line breaks on every system; a Windows console, and a terminal that runs programs in a pseudo console, such as Windows Terminal, show it as the same characters. Output that cannot be written, for example to a full disk, ends the program with exit status 74.
+The checks are integer overflow, division by zero, a conversion whose value does not fit, an index outside its array or list, a list or a text that outgrows its data stack, and `assert`. Calls that nest too deeply, as in recursion that never reaches its end, stop the program the same way with `error: stack overflow`, without a location: on POSIX systems and on Windows a handler catches the overflow when the stack runs out, so calls cost nothing extra for the check. Every program gets a stack of 8 MiB on Windows as well, the default of Linux and macOS, and the arrays of every call in progress share it. Where the C compiler can, a function with a large frame touches its stack a page at a time, so it cannot step over the guard page that ends the stack. Before the error, the program writes every line it printed. A line appears whole or not at all, so a program that stops in the middle of a `print` leaves no half line behind. Output is UTF-8 text with `\n` line breaks on every system; a Windows console, and a terminal that runs programs in a pseudo console, such as Windows Terminal, show it as the same characters. Output that cannot be written, for example to a full disk, ends the program with exit status 74.
 
 ## 12. Open questions
 

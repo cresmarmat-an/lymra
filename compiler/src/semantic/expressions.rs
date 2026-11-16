@@ -231,23 +231,27 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         }
     }
 
-    /// Text without interpolation is a value. Text with interpolation can only be printed for now.
+    /// Text without interpolation is a literal; with interpolation, it is built from its parts when the program runs.
     fn check_text(&mut self, parts: &[ast::TextPart<'src>], span: Span) -> CheckResult<ir::Expr> {
-        let mut text = String::new();
-        let mut interpolated = false;
-        for part in parts {
-            match part {
-                ast::TextPart::Literal(literal) => text.push_str(literal),
-                ast::TextPart::Interpolation(expr) => {
-                    self.mark_reads(expr);
-                    interpolated = true;
-                }
-            }
+        let interpolated = parts
+            .iter()
+            .any(|part| matches!(part, ast::TextPart::Interpolation(_)));
+        if !interpolated {
+            let text = parts
+                .iter()
+                .filter_map(|part| match part {
+                    ast::TextPart::Literal(literal) => Some(literal.as_str()),
+                    ast::TextPart::Interpolation(_) => None,
+                })
+                .collect();
+            return Ok(literal(Value::Text(text), span));
         }
-        if interpolated {
-            return Err(self.report(Feature::TextBuilding.diagnostic(span)));
-        }
-        Ok(literal(Value::Text(text), span))
+        let parts = self.check_print_parts(parts)?;
+        Ok(ir::Expr {
+            kind: ir::ExprKind::Text(parts),
+            ty: Type::String,
+            span,
+        })
     }
 
     pub(super) fn check_name(&mut self, name: &'src str, span: Span) -> CheckResult<ir::Expr> {

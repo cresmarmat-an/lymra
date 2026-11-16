@@ -1,0 +1,63 @@
+#[
+    The variable of a `for` loop and the bindings of a case read text in
+    place where nothing in the block can free or move it, and keep a copy
+    of their own where the block can: here every block changes what its
+    bindings were read from, and each binding still holds its old text.
+]#
+
+choice Note
+    Empty
+    Said(string words)
+
+function describe(Note note) returns string
+    match note
+        case Empty
+            return "nothing"
+        case Said(words)
+            return "said {words}"
+
+function main()
+    variable stack[Note] pending = stack()
+    push(variable pending, Said(words = "first{1}"))
+    match top(pending)
+        case Empty
+            print("empty")
+        case Said(words)
+            constant taken = pop(variable pending)
+            push(variable pending, Said(words = "second{2}"))
+            print("{words} {describe(taken)} {length(pending)}")
+
+    variable name = "ana{3}"
+    match Said(words = name)
+        case Empty
+            print("empty")
+        case Said(words)
+            name = "bo{4}"
+            print("{words} {name}")
+
+    variable list[string] names = list()
+    push(variable names, "cy{5}")
+    push(variable names, "di{6}")
+    for each in names
+        for index in range(0, 100)
+            push(variable names, "n{index}")
+        print("{each} {length(names)}")
+
+    variable array[string, 2] slots = array("e{7}")
+    slots[1] = "f{8}"
+    for each in slots
+        print("{each} {slots[0]}")
+    slots[0] = "g{9}"
+    print("{slots[0]} {slots[1]}")
+
+    constant array[string, 2] fixed = array("h{10}")
+    for each in fixed
+        print(each)
+
+    variable Note note = Said(words = "i{11}")
+    match note
+        case Empty
+            print("empty")
+        case Said(words)
+            note = Empty
+            print("{words} {describe(note)}")

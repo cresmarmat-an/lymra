@@ -243,6 +243,15 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         match place {
             Ok((steps, ty)) => {
                 let value = self.check_expr(value, Some(&ty))?;
+                // The text of a list's elements lies in their order, so an element can't get new text in place.
+                let in_list_of_text = steps.iter().any(|step| {
+                    matches!(step, ir::PlaceStep::Index(index)
+                        if index.indexed.as_list().is_some_and(|list| list.element.holds_text()))
+                });
+                if in_list_of_text && value.ty.holds_text() {
+                    let list = self.text(root.span);
+                    return Err(self.report(errors::list_text_replaced(list, target.span)));
+                }
                 Ok(ir::Statement::Assign {
                     target: ir::Place {
                         local: id,

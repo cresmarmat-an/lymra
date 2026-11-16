@@ -523,6 +523,7 @@ impl<'function> Analyzer<'function> {
             | ExprKind::Top(_)
             | ExprKind::Insert { .. }
             | ExprKind::Slot { .. }
+            | ExprKind::Text(_)
             | ExprKind::EmptyList
             | ExprKind::Construct(_)
             | ExprKind::Variant { .. }
@@ -638,6 +639,13 @@ impl<'function> Analyzer<'function> {
                 self.remove_checks(right, bounds);
             }
             ExprKind::Call(call) => self.remove_argument_checks(call, bounds),
+            ExprKind::Text(parts) => {
+                for part in parts {
+                    if let PrintPart::Value { value, .. } = part {
+                        self.remove_checks(value, bounds);
+                    }
+                }
+            }
         }
         if let ExprKind::Index {
             array,

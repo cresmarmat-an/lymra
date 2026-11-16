@@ -1,0 +1,81 @@
+error[L0704]: `text` cannot be replaced here, where a newer text may sit above it
+  --> tests/check/text_roots.lym:18:5
+   |
+15 |     variable string mine = "{depth}"
+   |                     ---- `text` can be an earlier call's `mine`, and this `mine` sits above it
+...
+18 |     text = "{text}x"
+   |     ^^^^ replaces `text`
+   |
+help: only the newest text on a data stack can change; change `text` before `mine` is declared, or after the block that declares it ends
+
+error[L0703]: `text` cannot be replaced while `shown`, a view of it, is still used
+  --> tests/check/text_roots.lym:27:5
+   |
+26 |     constant shown = bytes(text)
+   |              ----- `shown` shows `text`
+27 |     text = "zz{2}"
+   |     ^^^^ this frees the text `shown` shows
+   |
+help: finish with `shown` before `text` changes, or copy the text first with `constant kept = text`, and show `kept`
+
+error[L0703]: `score` cannot be given new text while `letters`, a view of it, is still used
+  --> tests/check/text_roots.lym:32:5
+   |
+31 |     constant letters = bytes(score.name)
+   |              ------- `letters` shows `score`
+32 |     score.name = "Fay"
+   |     ^^^^^^^^^^ this rewrites all of `score`'s text, which `letters` shows
+   |
+help: finish with `letters` before `score` changes, or copy the text first with `constant kept = score`, and show `kept`
+
+error[L0701]: `gone` would show a value that is freed at the end of this statement
+  --> tests/check/text_roots.lym:35:21
+   |
+35 |     constant gone = bytes("built{4}")
+   |                     ^^^^^^^^^^^^^^^^^ this value has no binding, so it lasts only as long as its statement
+   |
+help: keep the value in a binding first, then give `gone` a view of that binding
+
+error[L0703]: `word` cannot be replaced while a `for` loop goes over its text
+  --> tests/check/text_roots.lym:43:9
+   |
+42 |     for byte in bytes(word)
+   |                 ----------- the loop goes over it here
+43 |         word = "{byte}"
+   |         ^^^^ this frees the text the loop goes over
+   |
+help: build the new text in another binding inside the loop, and give it to `word` after the loop ends
+
+error[L0703]: `named` cannot be given new text while a `for` loop goes over its text
+  --> tests/check/text_roots.lym:48:9
+   |
+47 |     for byte in bytes(named.name)
+   |                 ----------------- the loop goes over it here
+48 |         named.name = "{byte}"
+   |         ^^^^^^^^^^ this rewrites all of `named`'s text, which the loop goes over
+   |
+help: build the new text in another binding inside the loop, and give it to `named` after the loop ends
+
+error[L0703]: `loud` cannot be passed with `variable` while `first`, a view of it, is still used
+  --> tests/check/text_roots.lym:52:13
+   |
+51 |     constant first = bytes(loud)
+   |              ----- `first` shows `loud`
+52 |     exclaim(variable loud)
+   |             ^^^^^^^^^^^^^ `exclaim` can give `loud` new text
+   |
+help: finish with `first` before `loud` changes, or copy the text first with `constant kept = loud`, and show `kept`
+
+error[L0703]: `slots` cannot be given new text while a `for` loop goes over its text
+  --> tests/check/text_roots.lym:57:9
+   |
+56 |     for each in slots
+   |                 ----- the loop goes over it here
+57 |         slots[0] = "{each}!"
+   |         ^^^^^^^^ this rewrites all of `slots`'s text, which the loop goes over
+   |
+help: build the new text in another binding inside the loop, and give it to `slots` after the loop ends
+
+found 8 errors in tests/check/text_roots.lym
+run `lymra explain L0704` to read why a rule exists and how to fix it

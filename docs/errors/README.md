@@ -49,6 +49,7 @@ From 04 on, they are the chapter of the [specification](../spec.md) the rule com
 | [L0404](L0404.md) | number does not fit its type |
 | [L0405](L0405.md) | operator used on the wrong type |
 | [L0406](L0406.md) | division by zero |
+| [L0407](L0407.md) | new text in an element of a list |
 | [L0409](L0409.md) | array or list type written wrong |
 | [L0410](L0410.md) | value too large for the call stack |
 | [L0411](L0411.md) | index out of range |
@@ -69,6 +70,6 @@ From 04 on, they are the chapter of the [specification](../spec.md) the rule com
 | [L0701](L0701.md) | view outlives what it shows |
 | [L0702](L0702.md) | stack popped while something still uses it |
 | [L0703](L0703.md) | value replaced while something still uses it |
-| [L0704](L0704.md) | list changed while a newer list sits above it |
+| [L0704](L0704.md) | value changed while a newer value sits above it |
 | [L0705](L0705.md) | handle used with another pool |
 | [L0706](L0706.md) | pool of values without one fixed size |

@@ -571,7 +571,12 @@ impl Type {
             Self::Boolean => Some(Layout { size: 1, align: 1 }),
             // A text value is a pointer and a length.
             Self::String => Some(Layout { size: 16, align: 8 }),
-            // Where its elements start, how many there are, and the data stack they grow on.
+            /*
+             * Where its elements start, how many there are, and the data
+             * stack they grow on; with elements that hold text, also where
+             * their text starts and the data stack it grows on.
+             */
+            Self::List(list) if list.element.holds_text() => Some(Layout { size: 40, align: 8 }),
             Self::List(_) => Some(Layout { size: 24, align: 8 }),
             // Where its elements start, and how many there are.
             Self::View(_) => Some(Layout { size: 16, align: 8 }),

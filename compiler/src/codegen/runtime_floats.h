@@ -857,46 +857,75 @@ LYMRA_UNUSED static size_t lymra_format_decimal(lymra_decimal decimal, bool nega
 }
 
 /*
- * Writes a float that is not finite or is zero, and returns whether it was
- * one: `NaN`, `infinity`, `-infinity`, `0.0` or `-0.0`.
+ * Copies the text of a float that is not finite or is zero into `text` and
+ * returns its length, or returns 0 for any other float: `NaN`, `infinity`,
+ * `-infinity`, `0.0` or `-0.0`.
  */
-LYMRA_UNUSED static bool lymra_write_special_float(bool negative, bool zero, bool infinite, bool not_a_number) {
+LYMRA_UNUSED static size_t lymra_special_float_text(bool negative, bool zero, bool infinite, bool not_a_number,
+                                                    char *text) {
+    const char *special = NULL;
     if (not_a_number) {
-        lymra_append("NaN", 3);
+        special = "NaN";
     } else if (infinite) {
-        lymra_append(negative ? "-infinity" : "infinity", negative ? 9u : 8u);
+        special = negative ? "-infinity" : "infinity";
     } else if (zero) {
-        lymra_append(negative ? "-0.0" : "0.0", negative ? 4u : 3u);
+        special = negative ? "-0.0" : "0.0";
     } else {
-        return false;
+        return 0;
     }
-    return true;
+    size_t length = strlen(special);
+    memcpy(text, special, length);
+    return length;
 }
 
-/* Writes a `float64` into the line being printed. */
-LYMRA_UNUSED static void lymra_write_float64(double value) {
+/* Writes the text of a `float64` into `text`, which has room for `LYMRA_FLOAT_TEXT_SIZE` bytes, and returns its length. */
+LYMRA_UNUSED static size_t lymra_float64_text(double value, char *text) {
     uint64_t bits;
     memcpy(&bits, &value, sizeof bits);
     bool negative = (bits >> 63) != 0;
     uint64_t magnitude = bits & UINT64_C(0x7FFFFFFFFFFFFFFF);
     uint64_t infinity = UINT64_C(0x7FF0000000000000);
-    if (lymra_write_special_float(negative, magnitude == 0, magnitude == infinity, magnitude > infinity)) {
-        return;
+    size_t special = lymra_special_float_text(negative, magnitude == 0, magnitude == infinity, magnitude > infinity, text);
+    if (special != 0) {
+        return special;
     }
-    char text[LYMRA_FLOAT_TEXT_SIZE];
-    lymra_append(text, lymra_format_decimal(lymra_decimal_of_float64(magnitude), negative, text));
+    return lymra_format_decimal(lymra_decimal_of_float64(magnitude), negative, text);
 }
 
-/* Writes a `float32` into the line being printed. */
-LYMRA_UNUSED static void lymra_write_float32(float value) {
+/* Writes the text of a `float32` into `text`, as `lymra_float64_text` does. */
+LYMRA_UNUSED static size_t lymra_float32_text(float value, char *text) {
     uint32_t bits;
     memcpy(&bits, &value, sizeof bits);
     bool negative = (bits >> 31) != 0;
     uint32_t magnitude = bits & UINT32_C(0x7FFFFFFF);
     uint32_t infinity = UINT32_C(0x7F800000);
-    if (lymra_write_special_float(negative, magnitude == 0, magnitude == infinity, magnitude > infinity)) {
-        return;
+    size_t special = lymra_special_float_text(negative, magnitude == 0, magnitude == infinity, magnitude > infinity, text);
+    if (special != 0) {
+        return special;
     }
-    char text[LYMRA_FLOAT_TEXT_SIZE];
-    lymra_append(text, lymra_format_decimal(lymra_decimal_of_float32(magnitude), negative, text));
+    return lymra_format_decimal(lymra_decimal_of_float32(magnitude), negative, text);
 }
+
+/* Writes a `float64` into the line being printed. */
+LYMRA_UNUSED static void lymra_write_float64(double value) {
+    char text[LYMRA_FLOAT_TEXT_SIZE];
+    lymra_append(text, lymra_float64_text(value, text));
+}
+
+/* Writes a `float32` into the line being printed. */
+LYMRA_UNUSED static void lymra_write_float32(float value) {
+    char text[LYMRA_FLOAT_TEXT_SIZE];
+    lymra_append(text, lymra_float32_text(value, text));
+}
+
+#if defined(LYMRA_DATA_STACKS) && LYMRA_DATA_STACKS > 0
+LYMRA_UNUSED static void lymra_text_add_float64(lymra_text_builder *builder, double value) {
+    char text[LYMRA_FLOAT_TEXT_SIZE];
+    lymra_text_add(builder, text, lymra_float64_text(value, text));
+}
+
+LYMRA_UNUSED static void lymra_text_add_float32(lymra_text_builder *builder, float value) {
+    char text[LYMRA_FLOAT_TEXT_SIZE];
+    lymra_text_add(builder, text, lymra_float32_text(value, text));
+}
+#endif

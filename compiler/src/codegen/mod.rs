@@ -21,7 +21,10 @@
 mod c_syntax;
 mod expressions;
 mod statements;
+mod text_types;
 mod types;
+
+use std::collections::HashMap;
 
 use crate::diagnostics::render_location;
 use crate::ir::{Function, LocalId, Program, Statement, Type};
@@ -50,6 +53,8 @@ pub fn generate(program: &Program<'_>, source: &SourceFile) -> String {
         data_stacks: 0,
         scopes: Vec::new(),
         pending: Vec::new(),
+        text_regions: HashMap::new(),
+        return_stack: None,
     };
     let functions: Vec<String> = program
         .functions
@@ -76,7 +81,7 @@ pub fn generate(program: &Program<'_>, source: &SourceFile) -> String {
         output.push_str("#define LYMRA_USES_FLOATS 1\n\n");
     }
     // The runtime declares the data stacks along with the type a list's struct names, so a program that names a list type has one at least.
-    let data_stacks = if generator.types.uses_lists {
+    let data_stacks = if generator.types.uses_data_stacks {
         generator.data_stacks.max(1)
     } else {
         generator.data_stacks
@@ -171,27 +176,70 @@ struct Generator<'program, 'src> {
     data_stacks: usize,
     /// The C blocks open in the function being generated, innermost last.
     scopes: Vec<Scope>,
-    /// The lists the statement being generated computed without a binding, which it frees once it is done.
+    /// The lists and text the statement being generated computed without a binding, which it frees once it is done.
     pending: Vec<Release>,
+    /// The data stack and the start of the text of each local that holds text, in the function being generated.
+    text_regions: HashMap<LocalId, Region>,
+    /// The data stack the function's `return` copies its text onto before it frees its own, once it needs one.
+    return_stack: Option<usize>,
+}
+
+/// Where a value keeps its text: a data stack, and where the value's text starts on it, both as C.
+#[derive(Clone, Debug)]
+struct Region {
+    stack: String,
+    start: String,
+}
+
+/// What a value keeps on data stacks, beyond its C struct.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Storage {
+    /// Nothing: all of it is in its C struct.
+    None,
+    /// Its elements: a list, a stack or a pool whose values hold no text.
+    Elements,
+    /// The bytes of the text it holds: a `string`, or a type, an array or a choice that holds one.
+    Text,
+    /// Its elements and the text they hold, each on a data stack of its own.
+    ElementsAndText,
+}
+
+impl Storage {
+    fn of(ty: &Type) -> Storage {
+        // A view keeps nothing: it shows what something else keeps.
+        if ty.as_view().is_some() {
+            return Storage::None;
+        }
+        match (ty.is_growable(), ty.holds_text()) {
+            (false, false) => Storage::None,
+            (true, false) => Storage::Elements,
+            (false, true) => Storage::Text,
+            (true, true) => Storage::ElementsAndText,
+        }
+    }
 }
 
 /**
- * A list to free, and its data stack. Freeing it moves the top of the stack
- * down to where the list starts. Nothing of the same call lies above it
- * then, and a list from an earlier call that grew while this one was being
- * built lies below it, so that one keeps its elements.
+ * Something to free: the elements of a list, or text, and its data stack.
+ * Freeing it moves the top of the stack down to where it starts. Nothing of
+ * the same call lies above it then, and a list from an earlier call that
+ * grew while this one was being built lies below it, so that one keeps its
+ * elements.
  */
 #[derive(Clone, Debug)]
 struct Release {
     stack: usize,
-    /// The C name of the list.
-    list: String,
+    /// Where it starts, which becomes the top of its stack, as C.
+    start: String,
 }
 
 impl Release {
-    /// Where the list starts, which becomes the top of its stack.
-    fn start(&self) -> String {
-        format!("(char *){}.elements", self.list)
+    /// The elements of the list `list`.
+    fn elements(stack: usize, list: &str) -> Self {
+        Self {
+            stack,
+            start: format!("(char *){list}.elements"),
+        }
     }
 }
 
@@ -207,6 +255,33 @@ impl Generator<'_, '_> {
     fn function(&mut self, function: &Function<'_>) -> String {
         self.scopes.clear();
         self.pending.clear();
+        self.text_regions.clear();
+        self.return_stack = None;
+        /*
+         * A function that returns only text the program keeps leaves where
+         * its result goes unused, and one that gives a `variable` parameter
+         * no new text leaves where that text goes unused.
+         */
+        let mut maybe_unused: Vec<String> = function
+            .return_type
+            .as_ref()
+            .map_or(Vec::new(), |ty| destination_names(Storage::of(ty)))
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        for &parameter in &function.parameters {
+            let local = &function.locals[parameter];
+            if local.by_reference && Storage::of(&local.ty) == Storage::Text {
+                let name = c_syntax::local_name(local.name);
+                let region = Region {
+                    stack: c_syntax::text_stack_name(&name),
+                    start: c_syntax::text_start_name(&name),
+                };
+                maybe_unused.push(region.stack.clone());
+                maybe_unused.push(region.start.clone());
+                self.text_regions.insert(parameter, region);
+            }
+        }
         self.frame = (0..function.locals.len())
             .filter(|&id| !is_pointer(function, id))
             .map(|id| compound_bytes(&function.locals[id].ty))
@@ -215,6 +290,9 @@ impl Generator<'_, '_> {
             text: format!("{} {{\n", self.signature(function)),
             depth: 1,
         };
+        for name in &maybe_unused {
+            writer.line(&format!("(void){name};"));
+        }
         self.block_contents(function, &function.body, &mut writer);
         self.largest_frame = self.largest_frame.max(self.frame.saturating_mul(2));
         let ends_with_return =
@@ -231,44 +309,46 @@ impl Generator<'_, '_> {
      * The C declaration of a function, without a body or a semicolon. A
      * `variable` parameter is a pointer to the caller's binding, and an array
      * parameter a pointer to a value the call cannot change, so no call
-     * copies an array. A function that returns a list first takes the data
-     * stack where its caller wants the list.
+     * copies an array. A function that returns a list or text first takes
+     * the data stacks where its caller wants it. A `variable` parameter that
+     * holds text comes with the data stack of that text and where it starts,
+     * so the function can give the caller's binding new text.
      */
     fn signature(&mut self, function: &Function<'_>) -> String {
         let return_type = match &function.return_type {
             Some(ty) => self.types.name(ty),
             None => "void".to_owned(),
         };
-        let destination = function
+        let destinations = function
             .return_type
             .as_ref()
-            .filter(|ty| ty.is_growable())
-            .map(|_| format!("lymra_data_stack *{DESTINATION}"));
-        let parameters: Vec<String> = destination
+            .map_or(Vec::new(), |ty| destination_names(Storage::of(ty)))
             .into_iter()
-            .chain(
-                function
-                    .parameters
-                    .iter()
-                    .enumerate()
-                    .map(|(position, &id)| {
-                        let local = &function.locals[id];
-                        let name = if local.name == "_" {
-                            format!("unused_parameter_{position}")
-                        } else {
-                            c_syntax::local_name(local.name)
-                        };
-                        let ty = self.types.name(&local.ty);
-                        if local.by_reference {
-                            format!("{ty} *{name}")
-                        } else if is_pointer(function, id) {
-                            format!("const {ty} *{name}")
-                        } else {
-                            format!("const {ty} {name}")
-                        }
-                    }),
-            )
-            .collect();
+            .map(|name| format!("lymra_data_stack *{name}"));
+        let mut parameters: Vec<String> = destinations.collect();
+        for (position, &id) in function.parameters.iter().enumerate() {
+            let local = &function.locals[id];
+            let name = if local.name == "_" {
+                format!("unused_parameter_{position}")
+            } else {
+                c_syntax::local_name(local.name)
+            };
+            let ty = self.types.name(&local.ty);
+            if local.by_reference {
+                parameters.push(format!("{ty} *{name}"));
+                if Storage::of(&local.ty) == Storage::Text {
+                    parameters.push(format!(
+                        "lymra_data_stack *{}",
+                        c_syntax::text_stack_name(&name)
+                    ));
+                    parameters.push(format!("char *{}", c_syntax::text_start_name(&name)));
+                }
+            } else if is_pointer(function, id) {
+                parameters.push(format!("const {ty} *{name}"));
+            } else {
+                parameters.push(format!("const {ty} {name}"));
+            }
+        }
         let parameters = if parameters.is_empty() {
             "void".to_owned()
         } else {
@@ -280,20 +360,44 @@ impl Generator<'_, '_> {
         )
     }
 
-    /// Hands out a data stack of its own to a list.
+    /// Hands out a data stack of its own to a list or to text.
     fn new_data_stack(&mut self) -> usize {
         let stack = self.data_stacks;
         self.data_stacks += 1;
         stack
     }
 
-    /// Frees the lists of `releases`, which come oldest first, the newest first.
+    /**
+     * Hands out the data stacks a value that keeps `storage` builds on, in
+     * the order a function that returns it takes them. For text, it also
+     * notes where the text will start, which freeing it moves the top back
+     * to, and returns that note's name.
+     */
+    fn new_stacks(
+        &mut self,
+        storage: Storage,
+        writer: &mut Writer,
+    ) -> (Vec<usize>, Option<String>) {
+        let count = destination_names(storage).len();
+        let stacks: Vec<usize> = (0..count).map(|_| self.new_data_stack()).collect();
+        if storage != Storage::Text {
+            return (stacks, None);
+        }
+        let start = self.helper("text_start");
+        writer.line(&format!(
+            "char *const {start} = ({})->top;",
+            data_stack(stacks[0])
+        ));
+        (stacks, Some(start))
+    }
+
+    /// Frees what `releases` hold, which come oldest first, the newest first.
     fn release(writer: &mut Writer, releases: &[Release]) {
         for release in releases.iter().rev() {
             writer.line(&format!(
                 "lymra_data_stack_release({}, {});",
                 data_stack(release.stack),
-                release.start()
+                release.start
             ));
         }
     }
@@ -358,8 +462,47 @@ impl Generator<'_, '_> {
     }
 }
 
-/// The name of the parameter that says on which data stack a function builds the list it returns.
+/// The name of the parameter that says on which data stack a function builds the list or the text it returns.
 const DESTINATION: &str = "lymra_destination";
+
+/// The name of the parameter that says on which data stack a function builds the text of the list it returns.
+const DESTINATION_TEXT: &str = "lymra_destination_text";
+
+/**
+ * What freeing a value that keeps `storage` on `stacks` frees: the elements
+ * of the list called `name`, its text, or text that starts at `text_start`.
+ */
+fn releases_of(
+    storage: Storage,
+    stacks: &[usize],
+    name: &str,
+    text_start: Option<String>,
+) -> Vec<Release> {
+    match (storage, stacks) {
+        (Storage::Elements, &[elements]) => vec![Release::elements(elements, name)],
+        (Storage::Text, &[text]) => text_start
+            .map(|start| Release { stack: text, start })
+            .into_iter()
+            .collect(),
+        (Storage::ElementsAndText, &[elements, text]) => vec![
+            Release::elements(elements, name),
+            Release {
+                stack: text,
+                start: format!("{name}.text"),
+            },
+        ],
+        _ => Vec::new(),
+    }
+}
+
+/// The parameters a function takes first, which say where to build a value it returns that keeps `storage` on data stacks.
+fn destination_names(storage: Storage) -> Vec<&'static str> {
+    match storage {
+        Storage::None => Vec::new(),
+        Storage::Elements | Storage::Text => vec![DESTINATION],
+        Storage::ElementsAndText => vec![DESTINATION, DESTINATION_TEXT],
+    }
+}
 
 /// The C for the address of data stack number `stack`.
 fn data_stack(stack: usize) -> String {

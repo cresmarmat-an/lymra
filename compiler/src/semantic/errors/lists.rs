@@ -234,17 +234,16 @@ pub(in crate::semantic) enum Change<'a> {
  * function is alive whose copy from an earlier call of the function the
  * parameter can hold. This call's copy sits above that one on their data
  * stack, and only the newest value on a data stack can change. `binding` is
- * the binding's name and where it is declared; `kind` is what both are.
+ * the binding's name and where it is declared; `noun` says what both are.
  */
 pub(in crate::semantic) fn changed_below_newer(
     parameter: &str,
     change: Change<'_>,
     span: Span,
     binding: (&str, Span),
-    kind: Collection,
+    noun: &str,
 ) -> Diagnostic {
     let (name, declared) = binding;
-    let noun = kind.name();
     let (action, label) = match change {
         Change::Push => ("grow".to_owned(), format!("adds to `{parameter}`")),
         Change::Pop => (
@@ -281,5 +280,17 @@ pub(in crate::semantic) fn negative_index(index: i128, span: Span) -> Diagnostic
             "the program would stop here every time it ran this line",
         ),
         Help::text("the first element is at index 0"),
+    )
+}
+
+/// L0407: new text for a part of an element of `list`, a list whose elements hold text, at `span`.
+pub(in crate::semantic) fn list_text_replaced(list: &str, span: Span) -> Diagnostic {
+    Diagnostic::new(
+        ErrorCode::L0407,
+        format!("an element of `{list}` can't get new text in place"),
+        Label::new(span, "this would give an element new text"),
+        Help::text(format!(
+            "build the list again with the element changed: push each element to a new list, the new one in its place, then replace `{list}` with it"
+        )),
     )
 }

@@ -33,6 +33,16 @@ pub(super) fn local_name(name: &str) -> String {
     format!("local_{name}")
 }
 
+/// The data stack that holds the text of the local `name`.
+pub(super) fn text_stack_name(name: &str) -> String {
+    format!("text_stack_of_{name}")
+}
+
+/// Where the text of the local `name` starts on its data stack.
+pub(super) fn text_start_name(name: &str) -> String {
+    format!("text_start_of_{name}")
+}
+
 /// The struct of a declared type. Lymra type names are PascalCase, so the prefix keeps them apart from every other C name.
 pub(super) fn custom_type_name(name: &str) -> String {
     format!("type_{name}")

@@ -4,17 +4,16 @@
     Groups order lines into orders and reports the order with the most
     items.
 
-    Memory: an `Order` holds its customer's name and its items inline, so
-    `orders` is one block of bytes that streams through the cache. Each
-    order's items are gathered in `pending` and copied into the order once
-    it is complete: only the newest value on a data stack can grow, so an
-    earlier order's items can't take a late arrival. The lines therefore
-    come sorted by order number. Lines in any order would need the flat
-    layout of `routes.lym`.
+    Memory: `orders` keeps its orders one after another, and their
+    customers' names beside them in the same order (section 4.5), so
+    reading it streams through the cache. Each order's items are gathered
+    in `pending` and copied into the order once it is complete: only the
+    newest value on a data stack can grow, so an earlier order's items
+    can't take a late arrival. The lines therefore come sorted by order
+    number. Lines in any order would need the flat layout of `routes.lym`.
 
-    `orders[index]` indexes a list whose elements differ in size. Today's
-    spec forbids it (section 4.5). Rule M1 of the study allows it through
-    a table of element positions kept beside the list.
+    An `Order` holds a list, and lists inside values come later in phase
+    3, so the compiler rejects this program until then.
 ]#
 
 type Item

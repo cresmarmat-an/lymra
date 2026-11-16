@@ -10,11 +10,14 @@
  * of the others never shows.
  */
 
+use super::text_types::{TextWalk, text_function};
 use super::types::{fill_function, list_function};
-use super::{Generator, INDENT, Release, Writer, c_syntax, data_stack, local_access};
+use super::{
+    Generator, INDENT, Release, Storage, Writer, c_syntax, data_stack, local_access, releases_of,
+};
 use crate::ir::{
     Argument, ArithmeticOperator, Call, ComparisonOperator, Expr, ExprKind, Extent, FieldValue,
-    FloatType, Function, IntegerType, LogicOperator, Sequence, Type, Value,
+    FloatType, Function, IntegerType, LogicOperator, PrintPart, Sequence, TextForm, Type, Value,
 };
 use crate::source::Span;
 
@@ -150,11 +153,13 @@ impl Generator<'_, '_> {
                 left,
                 right,
             } => self.logic(function, *operator, left, right, writer),
-            ExprKind::EmptyList => self.list_temporary(function, expr, writer),
-            ExprKind::Call(_) if expr.ty.is_growable() => {
-                self.list_temporary(function, expr, writer)
+            ExprKind::EmptyList | ExprKind::Text(_) => {
+                self.stored_temporary(function, expr, writer)
             }
-            ExprKind::Call(call) => self.call(function, call, None, writer),
+            ExprKind::Call(_) if Storage::of(&expr.ty) != Storage::None => {
+                self.stored_temporary(function, expr, writer)
+            }
+            ExprKind::Call(call) => self.call(function, call, &[], writer),
             ExprKind::Convert { operand, checked } => {
                 self.convert(function, operand, expr, *checked, writer)
             }
@@ -198,8 +203,18 @@ impl Generator<'_, '_> {
             ExprKind::Pop(stack) => {
                 let site = self.site(expr.span);
                 let stack_type = self.types.name(&function.locals[*stack].ty);
+                // The text of the element popped is copied onto a data stack of the statement's own first.
+                let keep = if expr.ty.holds_text() {
+                    let (stacks, start) = self.new_stacks(Storage::Text, writer);
+                    let keep = data_stack(stacks[0]);
+                    self.pending
+                        .extend(releases_of(Storage::Text, &stacks, "", start));
+                    format!(", {keep}")
+                } else {
+                    String::new()
+                };
                 format!(
-                    "{}({}, {site})",
+                    "{}({}{keep}, {site})",
                     list_function(&stack_type, "pop"),
                     super::local_address(function, *stack)
                 )
@@ -391,52 +406,109 @@ impl Generator<'_, '_> {
     }
 
     /**
-     * A list that an expression computes without a binding, built on a data
-     * stack of its own. The statement that uses it frees it once it is done.
+     * A value that keeps something on data stacks, which a statement computes
+     * without a binding: a list, or text. It is built on data stacks of its
+     * own, which the statement that uses it frees once it is done.
      */
-    fn list_temporary(
+    pub(super) fn stored_temporary(
         &mut self,
         function: &Function<'_>,
         expr: &Expr,
         writer: &mut Writer,
     ) -> String {
-        let stack = self.new_data_stack();
-        let code = self.build_list(function, expr, &data_stack(stack), writer);
+        let storage = Storage::of(&expr.ty);
+        let (stacks, text_start) = self.new_stacks(storage, writer);
+        let names: Vec<String> = stacks.iter().map(|&stack| data_stack(stack)).collect();
+        let code = self.build_value(function, expr, &names, writer);
         let name = self.helper("value");
         let ty = self.types.name(&expr.ty);
         writer.line(&format!("const {ty} {name} = {code};"));
-        self.pending.push(Release {
-            stack,
-            list: name.clone(),
-        });
+        self.pending
+            .extend(releases_of(storage, &stacks, &name, text_start));
         name
     }
 
     /**
-     * The C that builds the list `value` at the top of the data stack
-     * `stack`: empty, by a call that returns it there, or as a copy of a list
-     * kept elsewhere.
+     * The C that builds `value`, which keeps something on data stacks, on top
+     * of `stacks`, in the order a function that returns it takes them. A list
+     * starts empty, a call builds what it returns there, and text is built
+     * from its parts; any other value is copied there from where it is kept,
+     * except text the program itself keeps.
      */
-    pub(super) fn build_list(
+    pub(super) fn build_value(
         &mut self,
         function: &Function<'_>,
         value: &Expr,
-        stack: &str,
+        stacks: &[String],
         writer: &mut Writer,
     ) -> String {
-        let list = self.types.name(&value.ty);
+        let ty = self.types.name(&value.ty);
+        let joined = stacks.join(", ");
         match &value.kind {
-            ExprKind::EmptyList => format!("{}({stack})", list_function(&list, "start")),
-            ExprKind::Call(call) => self.call(function, call, Some(stack), writer),
+            ExprKind::EmptyList => format!("{}({joined})", list_function(&ty, "start")),
+            ExprKind::Call(call) => self.call(function, call, stacks, writer),
+            ExprKind::Text(parts) => self.build_text(function, parts, &joined, value.span, writer),
             _ => {
                 let source = self.expr(function, value, writer);
                 let site = self.site(value.span);
-                format!(
-                    "{}({stack}, {source}, {site})",
-                    list_function(&list, "place")
-                )
+                if Storage::of(&value.ty) == Storage::Text {
+                    let owned = self.helper("owned");
+                    writer.line(&format!("{ty} {owned} = {source};"));
+                    let own = text_function(&mut self.types, &value.ty, TextWalk::Own);
+                    writer.line(&format!("{own}(&{owned}, {joined}, {site});"));
+                    owned
+                } else {
+                    format!(
+                        "{}({joined}, {source}, {site})",
+                        list_function(&ty, "place")
+                    )
+                }
             }
         }
+    }
+
+    /**
+     * The C for text built from `parts` at the top of the data stack
+     * `stack`. Every value is computed first, so text that a value builds
+     * goes on other stacks, and nothing comes between the parts.
+     */
+    pub(super) fn build_text(
+        &mut self,
+        function: &Function<'_>,
+        parts: &[PrintPart],
+        stack: &str,
+        span: Span,
+        writer: &mut Writer,
+    ) -> String {
+        let builder = self.helper("text");
+        let mut additions = Vec::new();
+        for part in parts {
+            match part {
+                PrintPart::Text(text) if text.is_empty() => {}
+                PrintPart::Text(text) => additions.push(format!(
+                    "lymra_text_add_text(&{builder}, {});",
+                    c_syntax::text_value(text)
+                )),
+                PrintPart::Value { value, form } => {
+                    self.writes_floats |= matches!(form, TextForm::Float(_));
+                    let code = self.expr(function, value, writer);
+                    let code = if value.has_effects() {
+                        self.temporary(&value.ty, &code, writer)
+                    } else {
+                        code
+                    };
+                    additions.push(add_value(*form, &builder, &code));
+                }
+            }
+        }
+        let site = self.site(span);
+        writer.line(&format!(
+            "lymra_text_builder {builder} = lymra_text_begin({stack}, {site});"
+        ));
+        for addition in additions {
+            writer.line(&addition);
+        }
+        format!("lymra_text_end(&{builder})")
     }
 
     /// Works out the address of `code`, stored data of type `ty`, into a new constant and returns its name.
@@ -728,48 +800,52 @@ impl Generator<'_, '_> {
         &mut self,
         function: &Function<'_>,
         call: &Call,
-        destination: Option<&str>,
+        destinations: &[String],
         writer: &mut Writer,
     ) -> String {
         let last_effect = call.arguments.iter().rposition(
             |argument| matches!(argument, Argument::Value(value) if value.has_effects()),
         );
-        let arguments: Vec<String> = call
-            .arguments
-            .iter()
-            .enumerate()
-            .map(|(position, argument)| match argument {
+        let program = self.program;
+        let callee = &program.functions[call.function];
+        let mut arguments: Vec<String> = destinations.to_vec();
+        for (position, argument) in call.arguments.iter().enumerate() {
+            match argument {
                 Argument::Value(value) => {
                     let hoist =
                         last_effect.is_some_and(|last| position < last) && value.has_effects();
-                    if value.ty.is_compound() {
-                        return self.compound_address(function, value, hoist, writer);
-                    }
-                    let code = self.expr(function, value, writer);
-                    if hoist {
-                        self.temporary(&value.ty, &code, writer)
+                    let code = if value.ty.is_compound() {
+                        self.compound_address(function, value, hoist, writer)
                     } else {
-                        code
-                    }
+                        let code = self.expr(function, value, writer);
+                        if hoist {
+                            self.temporary(&value.ty, &code, writer)
+                        } else {
+                            code
+                        }
+                    };
+                    arguments.push(code);
                 }
                 Argument::Reference { local: id, .. } => {
                     let local = &function.locals[*id];
                     let name = c_syntax::local_name(local.name);
                     // A `variable` parameter is already a pointer to the caller's binding.
-                    if local.by_reference {
+                    arguments.push(if local.by_reference {
                         name
                     } else {
                         format!("&{name}")
+                    });
+                    // Text the callee gives the binding goes where the binding keeps its text.
+                    let takes_text = callee.parameters.get(position).is_some_and(|&parameter| {
+                        Storage::of(&callee.locals[parameter].ty) == Storage::Text
+                    });
+                    if let (true, Some(region)) = (takes_text, self.text_regions.get(id)) {
+                        arguments.push(region.stack.clone());
+                        arguments.push(region.start.clone());
                     }
                 }
-            })
-            .collect();
-        let callee = &self.program.functions[call.function];
-        let arguments: Vec<String> = destination
-            .map(str::to_owned)
-            .into_iter()
-            .chain(arguments)
-            .collect();
+            }
+        }
         format!(
             "{}({})",
             c_syntax::function_name(callee.name),
@@ -881,4 +957,20 @@ fn is_constant(operand: &Expr) -> bool {
         operand.kind,
         ExprKind::Literal(Value::Integer { .. }) | ExprKind::Constant(_)
     )
+}
+
+/// The C statement that adds `value`, written as `form` says, to the text `builder` builds.
+fn add_value(form: TextForm, builder: &str, value: &str) -> String {
+    match form {
+        TextForm::Text => format!("lymra_text_add_text(&{builder}, {value});"),
+        TextForm::Boolean => format!("lymra_text_add_boolean(&{builder}, {value});"),
+        TextForm::Signed => format!("lymra_text_add_signed(&{builder}, (int64_t)({value}));"),
+        TextForm::Unsigned => format!("lymra_text_add_unsigned(&{builder}, (uint64_t)({value}));"),
+        TextForm::Float(FloatType::Float32) => {
+            format!("lymra_text_add_float32(&{builder}, {value});")
+        }
+        TextForm::Float(FloatType::Float64) => {
+            format!("lymra_text_add_float64(&{builder}, {value});")
+        }
+    }
 }

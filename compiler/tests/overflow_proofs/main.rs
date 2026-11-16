@@ -185,6 +185,13 @@ impl CheckCount {
                 self.expr(right);
             }
             ExprKind::Call(call) => self.arguments(call),
+            ExprKind::Text(parts) => {
+                for part in parts {
+                    if let PrintPart::Value { value, .. } = part {
+                        self.expr(value);
+                    }
+                }
+            }
             ExprKind::Literal(_)
             | ExprKind::Local(_)
             | ExprKind::Constant(_)

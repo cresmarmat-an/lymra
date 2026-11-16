@@ -1,0 +1,47 @@
+#[
+    Text built from values is a value like any other: a binding keeps it,
+    a function takes it and returns it, recursion builds it up, and a type
+    holds it in a field that can get new text. New text can be built from
+    a view of the old text it replaces.
+]#
+
+type Person
+    string name
+    integer32 age
+
+function greeting(string name, integer64 times) returns string
+    return "hello {name} x{times}"
+
+function countdown(integer64 from) returns string
+    if from == 0
+        return "liftoff"
+    return "{from} {countdown(from - 1)}"
+
+function older(Person person) returns Person
+    return Person(name = "{person.name} senior", age = person.age + 30)
+
+function main()
+    constant name = "Ana"
+    constant built = "{name} is {7 * 6} and {true} at {1.5}"
+    print(built)
+    variable line = ""
+    for index in range(0, 5)
+        line = "{line}{index},"
+    print("line: {line} ({length(line)} bytes)")
+    print(greeting("Bo", 3))
+    print(countdown(4))
+    constant person = Person(name = "{name}!", age = 7)
+    constant elder = older(person)
+    print("{elder.name} is {elder.age}")
+    variable Person mutable = Person(name = "x", age = 1)
+    mutable.name = "{mutable.name}y"
+    mutable.name = "{mutable.name}z"
+    print("{mutable.name} {mutable.age}")
+    constant shown = bytes(line)
+    line = "{shown[0]} {shown[1]}"
+    print(line)
+    constant letters = bytes(mutable.name)
+    mutable = Person(name = "{letters[2]}", age = 2)
+    constant again = bytes(mutable.name)
+    mutable.name = "{again[0]}{again[1]}"
+    print("{mutable.name} {mutable.age}")

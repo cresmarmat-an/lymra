@@ -1,0 +1,26 @@
+error[L0407]: an element of `names` can't get new text in place
+  --> tests/check/text_values.lym:14:5
+   |
+14 |     names[0] = "Cy"
+   |     ^^^^^^^^ this would give an element new text
+   |
+help: build the list again with the element changed: push each element to a new list, the new one in its place, then replace `names` with it
+
+error[L0407]: an element of `scores` can't get new text in place
+  --> tests/check/text_values.lym:17:5
+   |
+17 |     scores[0].name = "Di"
+   |     ^^^^^^^^^^^^^^ this would give an element new text
+   |
+help: build the list again with the element changed: push each element to a new list, the new one in its place, then replace `scores` with it
+
+error[L0407]: an element of `scores` can't get new text in place
+  --> tests/check/text_values.lym:18:5
+   |
+18 |     scores[0] = Score(name = "Ed", points = 2)
+   |     ^^^^^^^^^ this would give an element new text
+   |
+help: build the list again with the element changed: push each element to a new list, the new one in its place, then replace `scores` with it
+
+found 3 errors in tests/check/text_values.lym
+run `lymra explain L0407` to read why a rule exists and how to fix it
