@@ -25,6 +25,16 @@ mod while_loops;
 
 pub use proof::UnprovenIndex;
 
+/**
+ * The most elements a list, a stack, a view or a text can hold. No data
+ * stack reserves more than 2^36 bytes (`lymra_reserve_data_stacks` in the
+ * runtime asks for that much and takes less where the system refuses),
+ * growing past the end of one stops the program, and every element takes at
+ * least a byte. Text the program keeps in itself, and its arguments, are far
+ * shorter. So a loop over a sequence takes at most this many turns.
+ */
+const LONGEST_SEQUENCE: i128 = 1 << 36;
+
 use crate::diagnostics::Diagnostic;
 use crate::ir::{Program, Value};
 use crate::source::SourceFile;
@@ -56,4 +66,22 @@ pub fn unproven_bounds(program: &Program<'_>, source: &SourceFile) -> Vec<Diagno
         .iter()
         .map(|unproven| unproven.diagnostic(source))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LONGEST_SEQUENCE;
+
+    /// The bound has to follow the runtime: a data stack that reserved more would let a sequence pass it.
+    #[test]
+    fn the_longest_sequence_is_what_a_data_stack_reserves() {
+        let runtime = include_str!("../codegen/runtime.h");
+        let reservation = "size_t each = (size_t)1 << ";
+        let shift: u32 = runtime
+            .split_once(reservation)
+            .and_then(|(_, after)| after.split_once(';'))
+            .and_then(|(shift, _)| shift.parse().ok())
+            .expect("the runtime reserves `(size_t)1 << N` bytes for each data stack");
+        assert_eq!(LONGEST_SEQUENCE, 1 << shift);
+    }
 }

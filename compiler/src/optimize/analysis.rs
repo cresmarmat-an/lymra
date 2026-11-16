@@ -30,6 +30,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use super::LONGEST_SEQUENCE;
 use super::facts::Facts;
 use super::interval::Interval;
 use super::loops::{self, Change, Changes, Followed};
@@ -514,7 +515,7 @@ impl<'function> Analyzer<'function> {
                 | Type::Pool(_)
                 | Type::Handle(_) => Interval {
                     low: 0,
-                    high: whole_type.high,
+                    high: LONGEST_SEQUENCE.min(whole_type.high),
                 },
             },
             // A call returns what its function's `return` statements give.
@@ -879,8 +880,7 @@ impl<'function> Analyzer<'function> {
                 // The loop runs once for each element, and its variable can be any value of their type.
                 let trips = match length {
                     Extent::Fixed(length) => i128::from(*length),
-                    // A list holds fewer elements than an `integer64` can count.
-                    Extent::Dynamic => i128::from(i64::MAX),
+                    Extent::Dynamic => LONGEST_SEQUENCE,
                 };
                 let changed = loops::changed_outside(body);
                 let element = variable.map(|local| Counter {
