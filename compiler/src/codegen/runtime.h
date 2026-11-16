@@ -39,6 +39,20 @@
 #include <string.h>
 
 /*
+ * GCC warns that an iteration "invokes undefined behavior" when it bounds a
+ * loop by a signed operation that would overflow, and GCC 12 does so for
+ * loops it has worked out never run, such as the last block of a loop run
+ * in blocks of turns when the number of turns is a multiple of the block
+ * size. The generated code computes signed arithmetic in plain C only where
+ * the optimizer proved it can never overflow, so no such bound cuts a run
+ * short, and the warning is off for GCC. A build that makes every warning
+ * an error would otherwise stop on correct code, depending on GCC's version.
+ */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic ignored "-Waggressive-loop-optimizations"
+#endif
+
+/*
  * Floats give the same results on every system only when each operation is
  * rounded to its own type: not kept wider, as the x87 unit of 32-bit x86
  * does, and not fused with the next one, as a multiply and an add can be on
