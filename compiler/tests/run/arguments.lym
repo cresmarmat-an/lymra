@@ -1,0 +1,12 @@
+#[
+    `main` takes the command-line arguments as text and returns the exit
+    status. The arguments, in `arguments.arguments`, hold spaces, quotes,
+    backslashes and characters beyond ASCII, which reach the program
+    exactly as given on every system.
+]#
+
+function main(view[string] arguments) returns unsigned8
+    print("{length(arguments)} arguments")
+    for argument in arguments
+        print("[{argument}] {length(argument)} bytes")
+    return unsigned8(length(arguments))

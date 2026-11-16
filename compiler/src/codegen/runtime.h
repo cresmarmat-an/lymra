@@ -108,6 +108,9 @@
 /* The exit status of a program whose `main` failed (spec 8). */
 #define LYMRA_FAILURE_STATUS 1
 
+/* The exit status of a program started with an argument that is not text. 64 is EX_USAGE in sysexits.h. */
+#define LYMRA_USAGE_ERROR_STATUS 64
+
 /* Immutable text: a pointer into static data and a length in bytes. */
 typedef struct {
     const char *data;
@@ -1431,6 +1434,215 @@ LYMRA_UNUSED static lymra_string lymra_text_end(const lymra_text_builder *builde
 }
 #endif
 
+/*
+ * Whether the `length` bytes at `data` are UTF-8 text: no byte that starts
+ * no character, no character cut short, written longer than it has to be,
+ * or a UTF-16 surrogate, and none past U+10FFFF.
+ */
+LYMRA_UNUSED static bool lymra_is_utf8(const unsigned char *data, size_t length) {
+    size_t at = 0;
+    while (at < length) {
+        unsigned char lead = data[at];
+        size_t size = 1;
+        uint32_t code = lead;
+        uint32_t lowest = 0;
+        if (lead >= 0xC2 && lead <= 0xDF) {
+            size = 2;
+            code = lead & 0x1Fu;
+            lowest = 0x80;
+        } else if (lead >= 0xE0 && lead <= 0xEF) {
+            size = 3;
+            code = lead & 0x0Fu;
+            lowest = 0x800;
+        } else if (lead >= 0xF0 && lead <= 0xF4) {
+            size = 4;
+            code = lead & 0x07u;
+            lowest = 0x10000;
+        } else if (lead >= 0x80) {
+            return false;
+        }
+        if (length - at < size) {
+            return false;
+        }
+        for (size_t index = 1; index < size; index++) {
+            unsigned char next = data[at + index];
+            if ((next & 0xC0) != 0x80) {
+                return false;
+            }
+            code = (code << 6) | (next & 0x3Fu);
+        }
+        if (code < lowest || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) {
+            return false;
+        }
+        at += size;
+    }
+    return true;
+}
+
+/* Stops the program before `main` runs: the argument at `position`, counted from 1, is not UTF-8 text. */
+LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_argument_not_text(size_t position) {
+    char digits[LYMRA_NUMBER_TEXT_SIZE];
+    char *start = lymra_digits((uint64_t)position, false, digits + sizeof digits);
+    lymra_write_error("error: command-line argument ");
+    lymra_write_error_bytes(start, (size_t)(digits + sizeof digits - start));
+    lymra_write_error(" is not UTF-8 text\n");
+    lymra_write_error("help: a Lymra program takes its arguments as UTF-8 text; pass this one in that encoding\n");
+    exit(LYMRA_USAGE_ERROR_STATUS);
+}
+
+#if defined(LYMRA_DATA_STACKS) && LYMRA_DATA_STACKS > 0
+/* Where an error while the arguments are taken in points. */
+#define LYMRA_ARGUMENTS_SITE " --> the command line\n"
+
+#if defined(LYMRA_WINDOWS)
+/* Headers that target a Windows before Vista leave out the flag that rejects unpaired surrogates, which every Windows Lymra runs on has. */
+#if !defined(WC_ERR_INVALID_CHARS)
+#define WC_ERR_INVALID_CHARS 0x00000080
+#endif
+
+/* One argument, its escapes undone, on its way to UTF-8. No argument is longer than a command line can be. */
+LYMRA_UNUSED static wchar_t lymra_argument_units[32768];
+
+/* Where the command line `line` goes on after the program's name, which ends at its closing quote or at a space. */
+LYMRA_UNUSED static const wchar_t *lymra_after_program_name(const wchar_t *line) {
+    if (*line == L'"') {
+        line++;
+        while (*line != 0 && *line != L'"') {
+            line++;
+        }
+        return *line == L'"' ? line + 1 : line;
+    }
+    while (*line != 0 && *line != L' ' && *line != L'\t') {
+        line++;
+    }
+    return line;
+}
+
+/*
+ * Reads the argument that starts at `at`, after any spaces, the way the C
+ * runtime of MSVC splits a command line for `main`: quotes group spaces
+ * into an argument and two quotes inside them make one, 2n backslashes
+ * before a quote make n and leave the quote to group, 2n + 1 make n and a
+ * quote, and other backslashes stay as they are. Writes the argument to
+ * `out`, when given, with its length in `length`, and returns where the
+ * next one starts, or NULL when no argument is left.
+ */
+LYMRA_UNUSED static const wchar_t *lymra_next_argument(const wchar_t *at, wchar_t *out, size_t *length) {
+    while (*at == L' ' || *at == L'\t') {
+        at++;
+    }
+    if (*at == 0) {
+        return NULL;
+    }
+    size_t written = 0;
+    bool quoted = false;
+    while (*at != 0 && (quoted || (*at != L' ' && *at != L'\t'))) {
+        if (*at == L'\\') {
+            size_t backslashes = 0;
+            while (*at == L'\\') {
+                backslashes++;
+                at++;
+            }
+            size_t kept = *at == L'"' ? backslashes / 2 : backslashes;
+            for (size_t index = 0; index < kept; index++) {
+                if (out != NULL) {
+                    out[written] = L'\\';
+                }
+                written++;
+            }
+            if (*at == L'"' && backslashes % 2 == 1) {
+                if (out != NULL) {
+                    out[written] = L'"';
+                }
+                written++;
+                at++;
+            }
+        } else if (*at == L'"') {
+            if (quoted && at[1] == L'"') {
+                if (out != NULL) {
+                    out[written] = L'"';
+                }
+                written++;
+                at += 2;
+            } else {
+                quoted = !quoted;
+                at++;
+            }
+        } else {
+            if (out != NULL) {
+                out[written] = *at;
+            }
+            written++;
+            at++;
+        }
+    }
+    *length = written;
+    return at;
+}
+#endif
+
+/*
+ * The arguments the program was started with, without its own name, in an
+ * array on `stack`, with their number in `count`. Each has to be UTF-8 text.
+ * On POSIX the text stays where the system put it, which lasts as long as
+ * the program. Windows gives the command line as UTF-16, which is split
+ * and turned into UTF-8 on `stack`.
+ */
+LYMRA_UNUSED static const lymra_string *lymra_arguments(int argument_count, char **argument_values,
+                                                        lymra_data_stack *stack, int64_t *count) {
+#if defined(LYMRA_POSIX)
+    size_t total = argument_count > 1 ? (size_t)argument_count - 1 : 0;
+    char *start = lymra_data_stack_align(stack, _Alignof(lymra_string));
+    lymra_string *arguments =
+        (lymra_string *)(void *)lymra_data_stack_extend(stack, start, total * sizeof *arguments, LYMRA_ARGUMENTS_SITE);
+    for (size_t index = 0; index < total; index++) {
+        const char *value = argument_values[index + 1];
+        size_t length = strlen(value);
+        if (!lymra_is_utf8((const unsigned char *)value, length)) {
+            lymra_argument_not_text(index + 1);
+        }
+        arguments[index].data = value;
+        arguments[index].length = length;
+    }
+    *count = (int64_t)total;
+    return arguments;
+#elif defined(LYMRA_WINDOWS)
+    (void)argument_count;
+    (void)argument_values;
+    const wchar_t *first = lymra_after_program_name(GetCommandLineW());
+    size_t total = 0;
+    size_t length = 0;
+    for (const wchar_t *at = lymra_next_argument(first, NULL, &length); at != NULL;
+         at = lymra_next_argument(at, NULL, &length)) {
+        total++;
+    }
+    char *start = lymra_data_stack_align(stack, _Alignof(lymra_string));
+    lymra_string *arguments =
+        (lymra_string *)(void *)lymra_data_stack_extend(stack, start, total * sizeof *arguments, LYMRA_ARGUMENTS_SITE);
+    const wchar_t *at = first;
+    for (size_t index = 0; index < total; index++) {
+        at = lymra_next_argument(at, lymra_argument_units, &length);
+        arguments[index].data = "";
+        arguments[index].length = 0;
+        if (length == 0) {
+            continue;
+        }
+        int bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, lymra_argument_units, (int)length, NULL, 0,
+                                        NULL, NULL);
+        if (bytes <= 0) {
+            lymra_argument_not_text(index + 1);
+        }
+        char *text = lymra_data_stack_extend(stack, stack->top, (size_t)bytes, LYMRA_ARGUMENTS_SITE);
+        WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, lymra_argument_units, (int)length, text, bytes, NULL, NULL);
+        arguments[index].data = text;
+        arguments[index].length = (size_t)bytes;
+    }
+    *count = (int64_t)total;
+    return arguments;
+#endif
+}
+#endif
+
 /* Prepares the program to run. The C `main` calls it before anything else. */
 LYMRA_UNUSED LYMRA_NO_INLINE static void lymra_start(void) {
 #if defined(LYMRA_POSIX)
@@ -1446,7 +1658,6 @@ LYMRA_UNUSED LYMRA_NO_INLINE static void lymra_start(void) {
 #endif
 }
 
-/* Writes the waiting output when `main` returns, and reports if any of it could not be written. */
 /*
  * Ends the program after its `main` failed with `message`: every line it
  * printed goes out first, then the message after `error: `, with exit status
@@ -1464,7 +1675,12 @@ LYMRA_UNUSED LYMRA_NO_RETURN static void lymra_main_failed(lymra_string message)
     exit(LYMRA_FAILURE_STATUS);
 }
 
-LYMRA_UNUSED static inline int lymra_finish(void) {
+/*
+ * Writes the waiting output when `main` returns, and reports if any of it
+ * could not be written. Returns the exit status: `status`, which `main`
+ * chose, or the one for output that could not be written.
+ */
+LYMRA_UNUSED static inline int lymra_finish(int status) {
     lymra_flush();
     if (lymra_output_failed) {
         lymra_write_error("error: the output could not be written\n");
@@ -1479,5 +1695,5 @@ LYMRA_UNUSED static inline int lymra_finish(void) {
         }
     }
 #endif
-    return 0;
+    return status;
 }

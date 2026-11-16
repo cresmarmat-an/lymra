@@ -712,9 +712,11 @@ pub(super) fn unused_value(statement: Span, help: Help) -> Diagnostic {
 pub(super) fn main_form(name: Span) -> Diagnostic {
     Diagnostic::new(
         ErrorCode::L0506,
-        "`main` has to take no parameters and return nothing",
+        "`main` takes nothing or the command-line arguments, and returns nothing or an exit status",
         Label::new(name, "the program starts here"),
-        Help::text("declare it as `function main()`"),
+        Help::text(
+            "declare it as `function main()`, or as `function main(view[string] arguments) returns unsigned8`",
+        ),
     )
 }
 

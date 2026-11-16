@@ -1,5 +1,6 @@
 //! The `lymra` executable. All behavior lives in the library; this only connects it to the process.
 
+use std::ffi::OsString;
 use std::io;
 use std::process::ExitCode;
 use std::thread;
@@ -23,11 +24,7 @@ fn main() -> ExitCode {
 }
 
 fn compile() -> ExitCode {
-    // Arguments that are not valid Unicode are kept readable instead of aborting the program.
-    let arguments: Vec<String> = std::env::args_os()
-        .skip(1)
-        .map(|argument| argument.to_string_lossy().into_owned())
-        .collect();
+    let arguments: Vec<OsString> = std::env::args_os().skip(1).collect();
     lymra::cli::run(
         &arguments,
         &mut io::stdout().lock(),

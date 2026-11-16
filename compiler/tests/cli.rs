@@ -203,3 +203,38 @@ fn a_meaning_error_rejects_the_program() {
         text(&output.stderr).starts_with("error[L0201]: assignment to undeclared name `total`")
     );
 }
+
+/// A program that prints how many arguments it got and each one, then returns their number as its exit status.
+const ECHO: &[u8] = b"function main(view[string] arguments) returns unsigned8\n    for argument in arguments\n        print(\"[{argument}]\")\n    return unsigned8(length(arguments))\n";
+
+#[test]
+fn run_passes_the_arguments_after_the_file_to_the_program() {
+    let path = scratch_file("echo.lym", ECHO);
+    let output = lymra(&["run", &path.to_string_lossy(), "one", "two words", ""]);
+    assert_eq!(output.status.code(), Some(3), "{}", text(&output.stderr));
+    assert_eq!(text(&output.stdout), "[one]\n[two words]\n[]\n");
+}
+
+/// The exit status of a Lymra program started with an argument that is not UTF-8 text.
+#[cfg(unix)]
+const USAGE_ERROR: i32 = 64;
+
+#[cfg(unix)]
+#[test]
+fn an_argument_that_is_not_text_stops_the_program_before_main() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let path = scratch_file("echo_bytes.lym", ECHO);
+    let output = lymra_command(&["run", &path.to_string_lossy(), "fine"])
+        .arg(OsStr::from_bytes(b"caf\xe9"))
+        .output()
+        .expect("the lymra executable runs");
+    assert_eq!(output.status.code(), Some(USAGE_ERROR));
+    assert_eq!(text(&output.stdout), "");
+    assert!(
+        text(&output.stderr).starts_with("error: command-line argument 2 is not UTF-8 text\n"),
+        "{}",
+        text(&output.stderr)
+    );
+}

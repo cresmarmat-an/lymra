@@ -1,0 +1,14 @@
+exit status 10
+--- standard output
+10 arguments
+[plain] 5 bytes
+[two words] 9 bytes
+["quoted"] 8 bytes
+[back\slash] 10 bytes
+[ends in a backslash\] 20 bytes
+[a\\"b] 5 bytes
+[  spaced  ] 10 bytes
+[] 0 bytes
+[Ação ✓] 10 bytes
+[tab	inside] 10 bytes
+--- standard error

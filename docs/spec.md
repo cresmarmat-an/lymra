@@ -419,7 +419,19 @@ function main()
 
 - Return values are built directly in the caller's storage. Returning a `list` never copies it. When the call still reads that storage through an argument, as in `board = step(board)`, the value is built in a temporary first and then copied, so the call never reads its own half-built result.
 - `main` is the entry point. Top-level code can only contain declarations, so the order of program startup is never ambiguous.
-- In edition 0.1, `main` takes no parameters and returns nothing (`L0506`). A program exits with status 0, or 70 when it stops on a runtime error.
+- `main` takes nothing, or the command-line arguments as a `view[string]`, and returns nothing or an `unsigned8` exit status (`L0506`). It can also fail with text (Section 8). The arguments leave out the program's own name and reach the program as UTF-8 text on every system, Windows included; an argument that is not UTF-8 stops the program before `main` runs, with exit status 64.
+
+```lymra
+function main(view[string] arguments) returns unsigned8
+    if length(arguments) == 0
+        print("usage: greet <name>")
+        return 64
+    for name in arguments
+        print("hello {name}")
+    return 0
+```
+
+- A program exits with the status `main` returns, 0 when it returns none, 1 when `main` fails, 70 when it stops on a runtime error, and 74 when its output cannot be written.
 
 ### 5.1 Built-in functions
 
@@ -724,7 +736,6 @@ The checks are integer overflow, division by zero, a conversion whose value does
 | O6 | Literal syntax for `array` and `list` values | `[1, 2, 3]` |
 | O7 | Bitwise operations | Functions with whole-word names such as `bit_and` and `shift_left`, not symbols |
 | O8 | Calling C: the syntax and rules of `external` declarations | `external function hypot(float64 x, float64 y) returns float64` |
-| O10 | Reading the command line and choosing an exit status | Parameters of `main` and a `returns` type, once the needed types exist |
 | O12 | Reading files and standard input. Every program in the memory model study had to take its input from constants. | Built-in functions that fail with a built-in choice (Section 8) |
 | O11 | Removing the overflow checks that stay. The compiler removes every check its interval analysis proves can never fail, with `while` loops worked out to a fixed point and what parameters receive and calls return carried across the program. Measured in `bench/results.md`: four of the six benchmarks keep no check and, built with GCC, run within 1% of C's time. The checks that stay guard values no interval bounds, such as a Collatz chain or a sum of recursive results; a check against a constant compares the other operand with a limit, so the C compiler keeps the arithmetic plain, and `collatz` built with GCC takes 1.12 times C's time. | Relations between variables, such as a result that grows with an argument, would bound some of the rest. Worth it once a real program needs one |
 

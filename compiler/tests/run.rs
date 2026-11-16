@@ -4,8 +4,9 @@
  * Every `.lym` file under `tests/run` and in `examples`, and the programs of
  * the memory model study that the compiler can build so far, is checked,
  * turned into C, compiled with each C compiler on this machine with all
- * warnings as errors, and run. Its exit status, output and error output have
- * to match the `.run` file recorded for it.
+ * warnings as errors, and run, with the arguments in a `.arguments` file
+ * beside it, one on each line, if it has one. Its exit status, output and
+ * error output have to match the `.run` file recorded for it.
  *
  * Each program is built twice: with every runtime check, and with the checks
  * the optimizer proves unnecessary removed. Every build, with every compiler,
@@ -40,11 +41,21 @@ const STUDY_PROGRAMS: [&str; 10] = [
     "word_count",
 ];
 
-/// A program to run, the name it is reported under, and where its recorded result lives.
+/// A program to run, the name it is reported under, where its recorded result lives, and what it is run with.
 struct Case {
     source: PathBuf,
     name: String,
     golden: PathBuf,
+    arguments: Vec<String>,
+}
+
+/// The arguments in the `.arguments` file beside `source`, one on each line, or none without one.
+fn arguments_for(source: &Path) -> Vec<String> {
+    let path = source.with_extension("arguments");
+    if !path.exists() {
+        return Vec::new();
+    }
+    common::read(&path).lines().map(str::to_owned).collect()
 }
 
 fn cases() -> Vec<Case> {
@@ -56,6 +67,7 @@ fn cases() -> Vec<Case> {
         .map(|source| Case {
             name: format!("tests/run/{}", file_name(&source)),
             golden: source.with_extension("run"),
+            arguments: arguments_for(&source),
             source,
         });
     let examples = common::files_with_extension(&common::repository_root().join("examples"), "lym")
@@ -66,6 +78,7 @@ fn cases() -> Vec<Case> {
                 .join("examples")
                 .join(file_name(&source))
                 .with_extension("run"),
+            arguments: Vec::new(),
             source,
         });
     let study = STUDY_PROGRAMS.iter().map(|name| Case {
@@ -78,6 +91,7 @@ fn cases() -> Vec<Case> {
             .join("memory")
             .join(name)
             .with_extension("run"),
+        arguments: Vec::new(),
     });
     tests.chain(examples).chain(study).collect()
 }
@@ -128,6 +142,7 @@ fn run_case(case: &Case, compilers: &[Compiler]) -> Result<String, String> {
             .compile(c_source, &executable, optimized.optimize, Warnings::Strict)
             .map_err(|error| format!("{} with {label}:\n{error}", case.name))?;
         let output = Command::new(&executable)
+            .args(&case.arguments)
             .output()
             .map_err(|error| format!("{}: cannot run the program: {error}", case.name))?;
         let result = describe_run(output.status.code(), &output.stdout, &output.stderr);

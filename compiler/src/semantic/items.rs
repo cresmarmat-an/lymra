@@ -109,7 +109,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         };
         let declaration = entry.declaration;
 
-        let parameters = declaration
+        let parameters: Vec<Parameter<'src>> = declaration
             .parameters
             .iter()
             .map(|parameter| {
@@ -132,9 +132,7 @@ impl<'src, 'ast> Checker<'src, 'ast> {
         let fails = self.resolve_failure(declaration, &return_type);
 
         let is_entry_point = declaration.name.text == ENTRY_POINT;
-        if is_entry_point
-            && (!declaration.parameters.is_empty() || declaration.return_type.is_some())
-        {
+        if is_entry_point && !is_entry_point_form(&parameters, &return_type) {
             self.report(errors::main_form(declaration.name.span));
         }
         if let (true, Ok(Some(error)), Some(written)) = (is_entry_point, &fails, &declaration.fails)
@@ -305,6 +303,31 @@ impl<'src, 'ast> Checker<'src, 'ast> {
             None => Err(self.report(errors::not_computable(runtime_part(&value)))),
         }
     }
+}
+
+/**
+ * Whether `main` takes and returns what the system can give it and take
+ * back (spec 5): nothing, or the command-line arguments as one
+ * `view[string]`, and nothing, or an `unsigned8` exit status. A type that
+ * failed to resolve was reported where it is written.
+ */
+fn is_entry_point_form(parameters: &[Parameter<'_>], returns: &CheckResult<Option<Type>>) -> bool {
+    let takes = match parameters {
+        [] => true,
+        [arguments] => {
+            !arguments.mutable
+                && arguments
+                    .ty
+                    .as_ref()
+                    .map_or(true, |ty| *ty == Type::view(Type::String))
+        }
+        _ => false,
+    };
+    let gives = match returns {
+        Ok(None) | Err(ErrorReported) => true,
+        Ok(Some(ty)) => *ty == Type::Integer(IntegerType::Unsigned8),
+    };
+    takes && gives
 }
 
 /// True for a name such as `integer128` or `unsigned7`: an integer type with a size Lymra lacks.

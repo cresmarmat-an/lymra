@@ -75,7 +75,7 @@ int main(void) {
         line_64(next_random());
         line_32((uint32_t)next_random());
     }
-    return lymra_finish();
+    return lymra_finish(0);
 }
 "#;
 

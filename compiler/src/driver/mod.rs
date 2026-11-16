@@ -308,8 +308,12 @@ pub fn executable_path(source: &Path) -> PathBuf {
 }
 
 /// Runs an executable with this process's input and output, and waits for it.
-pub fn run_executable(executable: &Path) -> Result<ExitStatus, DriverError> {
+pub fn run_executable(
+    executable: &Path,
+    arguments: &[OsString],
+) -> Result<ExitStatus, DriverError> {
     Command::new(executable)
+        .args(arguments)
         .status()
         .map_err(io_error(format!("run {}", executable.display())))
 }

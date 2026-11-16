@@ -27,7 +27,7 @@ mod types;
 use std::collections::HashMap;
 
 use crate::diagnostics::render_location;
-use crate::ir::{FAILURE_VARIANT, Function, LocalId, Program, Statement, Type};
+use crate::ir::{FAILURE_VARIANT, Function, LocalId, Program, SUCCESS_VARIANT, Statement, Type};
 use crate::source::{SourceFile, Span};
 use types::CTypes;
 
@@ -253,37 +253,85 @@ struct Scope {
 
 impl Generator<'_, '_> {
     /**
-     * The C `main`: it starts the runtime, runs the program's `main` and
-     * ends with the exit status the runtime chose. A `main` that can fail
-     * gives a result; on a `Failure` the runtime writes its text and ends
-     * with status 1 (spec 8).
+     * The C `main`. It starts the runtime, gives the program's `main` the
+     * command-line arguments if it takes them, and ends with the exit status
+     * `main` returns, 0 when it returns none. A `main` that can fail gives a
+     * result, and on a `Failure` the runtime writes its text and ends with
+     * status 1 (spec 8). The arguments lie on a data stack of their own,
+     * freed once `main` is done.
      */
     fn entry_point(&mut self, main: &Function<'_>) -> String {
-        let name = c_syntax::function_name(main.name);
-        let run = match &main.return_type {
-            None => format!("{INDENT}{name}();"),
-            Some(result) => {
-                let c_type = self.types.name(result);
-                let destinations: Vec<String> = destination_names(Storage::of(result))
-                    .iter()
-                    .map(|_| data_stack(self.new_data_stack()))
-                    .collect();
-                format!(
-                    "{INDENT}const {c_type} result = {name}({});\n\
-                     {INDENT}if (result.{tag} == {FAILURE_VARIANT}) {{\n\
-                     {INDENT}{INDENT}lymra_main_failed(result.{variants}.{failure}.{error});\n\
-                     {INDENT}}}",
-                    destinations.join(", "),
-                    tag = c_syntax::TAG,
-                    variants = c_syntax::VARIANTS,
-                    failure = c_syntax::variant_name(FAILURE_VARIANT),
-                    error = c_syntax::field_name(0),
-                )
+        let mut lines = vec!["lymra_start();".to_owned()];
+        let mut call_arguments: Vec<String> = match &main.return_type {
+            Some(returned) => destination_names(Storage::of(returned))
+                .iter()
+                .map(|_| data_stack(self.new_data_stack()))
+                .collect(),
+            None => Vec::new(),
+        };
+        let mut header = "int main(void)";
+        let mut free_arguments = None;
+        if let Some(&parameter) = main.parameters.first() {
+            header = "int main(int argc, char **argv)";
+            let stack = data_stack(self.new_data_stack());
+            let view = self.types.name(&main.locals[parameter].ty);
+            lines.push(format!("char *const arguments_start = ({stack})->top;"));
+            lines.push("int64_t argument_count = 0;".to_owned());
+            lines.push(format!(
+                "const lymra_string *const argument_list = lymra_arguments(argc, argv, {stack}, &argument_count);"
+            ));
+            lines.push(format!(
+                "const {view} arguments = {{ argument_list, argument_count }};"
+            ));
+            call_arguments.push("arguments".to_owned());
+            free_arguments = Some(format!(
+                "lymra_data_stack_release({stack}, arguments_start);"
+            ));
+        }
+        let call = format!(
+            "{}({})",
+            c_syntax::function_name(main.name),
+            call_arguments.join(", ")
+        );
+        let status = match &main.return_type {
+            None => {
+                lines.push(format!("{call};"));
+                "0".to_owned()
+            }
+            Some(returned) => {
+                let c_type = self.types.name(returned);
+                lines.push(format!("const {c_type} result = {call};"));
+                match returned.as_result() {
+                    Some(result) => {
+                        lines.push(format!(
+                            "if (result.{} == {FAILURE_VARIANT}) {{",
+                            c_syntax::TAG
+                        ));
+                        lines.push(format!(
+                            "{INDENT}lymra_main_failed(result.{}.{}.{});",
+                            c_syntax::VARIANTS,
+                            c_syntax::variant_name(FAILURE_VARIANT),
+                            c_syntax::field_name(0)
+                        ));
+                        lines.push("}".to_owned());
+                        match result.success_type() {
+                            Some(_) => format!(
+                                "result.{}.{}.{}",
+                                c_syntax::VARIANTS,
+                                c_syntax::variant_name(SUCCESS_VARIANT),
+                                c_syntax::field_name(0)
+                            ),
+                            None => "0".to_owned(),
+                        }
+                    }
+                    None => "result".to_owned(),
+                }
             }
         };
-        format!(
-            "int main(void) {{\n{INDENT}lymra_start();\n{run}\n{INDENT}return lymra_finish();\n}}"
-        )
+        lines.extend(free_arguments);
+        lines.push(format!("return lymra_finish({status});"));
+        let body: Vec<String> = lines.iter().map(|line| format!("{INDENT}{line}")).collect();
+        format!("{header} {{\n{}\n}}", body.join("\n"))
     }
 
     fn function(&mut self, function: &Function<'_>) -> String {

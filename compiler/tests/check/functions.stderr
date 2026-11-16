@@ -24,13 +24,13 @@ error[L0503]: `needs_value` returns an `integer64`, so `return` needs a value
    |
 help: write `return` followed by an `integer64`
 
-error[L0506]: `main` has to take no parameters and return nothing
+error[L0506]: `main` takes nothing or the command-line arguments, and returns nothing or an exit status
   --> tests/check/functions.lym:26:10
    |
 26 | function main(integer64 argument) returns integer64
    |          ^^^^ the program starts here
    |
-help: declare it as `function main()`
+help: declare it as `function main()`, or as `function main(view[string] arguments) returns unsigned8`
 
 error[L0501]: `add` takes 2 arguments, but 1 was given
   --> tests/check/functions.lym:27:16

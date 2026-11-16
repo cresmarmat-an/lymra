@@ -1,5 +1,6 @@
 //! The `lymra` command line: argument handling and the commands themselves.
 
+use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -20,7 +21,8 @@ const USAGE: &str = "\
 Usage: lymra <command>
 
 Commands:
-  run <file.lym>       Build a program and run it
+  run <file.lym> [arguments]
+                       Build a program and run it with the arguments
   build <file.lym>     Build a program into an executable next to its source
   check <file.lym>     Check a file and report every error in it
   emit <file.lym>      Print the C code the compiler generates for a program
@@ -58,11 +60,20 @@ impl From<Outcome> for ExitCode {
     }
 }
 
-/// Runs the command line. Results go to `stdout`; errors and diagnostics go to `stderr`.
-pub fn run(arguments: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> Outcome {
-    let words: Vec<&str> = arguments.iter().map(String::as_str).collect();
+/**
+ * Runs the command line. Results go to `stdout`; errors and diagnostics go
+ * to `stderr`. Words that are not valid Unicode are read with replacement
+ * characters, except the arguments `lymra run` passes on to the program,
+ * which get there exactly as they were given.
+ */
+pub fn run(arguments: &[OsString], stdout: &mut dyn Write, stderr: &mut dyn Write) -> Outcome {
+    let readable: Vec<String> = arguments
+        .iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect();
+    let words: Vec<&str> = readable.iter().map(String::as_str).collect();
     match words.as_slice() {
-        ["run", path] => run_program(path, stdout, stderr),
+        ["run", path, ..] => run_program(path, &arguments[2..], stdout, stderr),
         ["build", path] => build(path, stdout, stderr),
         ["check", path] => check(path, stdout, stderr),
         ["emit", path] => emit(path, stdout, stderr),
@@ -146,7 +157,12 @@ fn build(path: &str, stdout: &mut dyn Write, stderr: &mut dyn Write) -> Outcome 
 }
 
 /// Builds the program in a temporary directory, runs it, and passes its exit code on.
-fn run_program(path: &str, stdout: &mut dyn Write, stderr: &mut dyn Write) -> Outcome {
+fn run_program(
+    path: &str,
+    arguments: &[OsString],
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Outcome {
     let source = match load_or_report(path, stderr) {
         Ok(source) => source,
         Err(outcome) => return outcome,
@@ -167,7 +183,7 @@ fn run_program(path: &str, stdout: &mut dyn Write, stderr: &mut dyn Write) -> Ou
     }
     // Anything this process still holds must be written before the program writes its own output.
     let _ = stdout.flush();
-    match driver::run_executable(&executable) {
+    match driver::run_executable(&executable, arguments) {
         Ok(status) => Outcome::Exited(driver::exit_code(status)),
         Err(error) => print(stderr, &error.to_string(), Outcome::Failed),
     }
@@ -274,10 +290,7 @@ mod tests {
 
     /// Runs the command line and returns the outcome with what was written to each stream.
     fn run_with(arguments: &[&str]) -> (Outcome, String, String) {
-        let arguments: Vec<String> = arguments
-            .iter()
-            .map(|argument| (*argument).to_owned())
-            .collect();
+        let arguments: Vec<OsString> = arguments.iter().map(OsString::from).collect();
         let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
         let outcome = run(&arguments, &mut stdout, &mut stderr);
         let text = |bytes: Vec<u8>| String::from_utf8(bytes).expect("output is UTF-8");
